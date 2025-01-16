@@ -1,0 +1,19 @@
+[project]
+name = "bicam-collection"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "duckdb",
+    "pandas",
+    "psycopg2-binary",
+    "pyyaml",
+    "python-dotenv",
+    "tqdm",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

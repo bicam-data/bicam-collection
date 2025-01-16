@@ -1,0 +1,347 @@
+# # GovInfo API Configuration
+
+# bill_collections:
+#   main: true
+#   fields:
+#     - package_id
+#     - date_issued
+#     - last_modified
+#     - collection_code
+#     - collection_name
+#     - category
+#     - doc_class
+#     - bill_version
+#     - origin_chamber
+#     - current_chamber
+#     - is_private
+#     - is_appropriation
+#     - government_author1
+#     - government_author2
+#     - publisher
+#     - su_doc_class_number
+#     - pages
+#     - bill_id
+#     - migrated_doc_id
+#     - parent_ils_system_id
+#     - child_ils_title
+#     - parent_ils_title
+#     - child_ils_system_id
+#     - stock_number
+#     - package_url
+#     - details_url
+#     - premis_url
+#     - xml_url
+#     - pdf_url
+#     - mods_url
+#     - txt_url
+#     - zip_url
+#   id_fields:
+#     - package_id
+#   nested_fields:
+#     - reference_bills
+#     - reference_laws
+#     - reference_codes
+#     - reference_statutes
+#     - short_titles
+#   related_fields:
+#     - []
+
+congressional_directories:
+  main: true
+  fields:
+    - package_id
+    - date_issued
+    - document_type
+    - congress
+    - collection_code
+    - title
+    - branch
+    - collection_name
+    - government_author1
+    - government_author2
+    - publisher
+    - su_doc_class_number
+    - doc_class
+    - last_modified
+    - category
+    - migrated_doc_id
+    - ils_system_id
+    - txt_url
+    - pdf_url
+  id_fields:
+    - package_id
+  nested_fields:
+    - isbn
+  related_fields:
+    - member_granules
+
+congressional_directories_granules:
+  fields:
+    - date_issued
+    - title
+    - package_id
+    - biography
+    - population
+    - granule_class
+    - granule_id
+    - sub_granule_class
+    - gpo_id
+    - authority_id
+    - official_url
+    - facebook_url
+    - twitter_url
+    - youtube_url
+    - instagram_url
+    - other_url
+    - bioguide_id
+  id_fields:
+    - granule_id
+
+# congressional_reports:
+#   main: true
+#   fields:
+#     - package_id
+#     - date_issued
+#     - document_type
+#     - document_number
+#     - congress
+#     - session
+#     - collection_code
+#     - title
+#     - branch
+#     - collection_name
+#     - pages
+#     - government_author1
+#     - government_author2
+#     - chamber
+#     - subtitle
+#     - publisher
+#     - su_doc_class_number
+#     - doc_class
+#     - last_modified
+#     - category
+#     - migrated_doc_id
+#     - report_id
+#     - granules_url
+#   id_fields:
+#     - package_id
+#   nested_fields:
+#     - subjects
+#     - serial_details
+#   related_fields:
+#     - congressional_reports_granules
+
+# congressional_reports_granules:
+#   fields:
+#     - date_issued
+#     - package_id
+#     - collection_code
+#     - title
+#     - collection_name
+#     - granule_class
+#     - granule_id
+#     - doc_class
+#     - last_modified
+#     - category
+#   id_fields:
+#     - granule_id
+#   nested_fields:
+#     - reference_bills
+#     - reference_laws
+#     - reference_codes
+#     - reference_statutes
+#     - members
+#     - committees
+
+# treaties:
+#   main: true
+#   fields:
+#     - package_id
+#     - date_issued
+#     - document_type
+#     - congress
+#     - session
+#     - document_number
+#     - treaty_id
+#     - collection_code
+#     - title
+#     - branch
+#     - collection_name
+#     - pages
+#     - government_author1
+#     - government_author2
+#     - chamber
+#     - publisher
+#     - su_doc_class_number
+#     - doc_class
+#     - last_modified
+#     - category
+#     - migrated_doc_id
+#     - ils_system_id
+#     - details_url
+#     - granules_url
+#     - premis_url
+#     - pdf_url
+#     - zip_url
+#     - mods_url
+#     - txt_url
+#   id_fields:
+#     - package_id
+#   nested_fields: []
+#   related_fields:
+#     - treaties_granules
+
+# treaties_granules:
+#   fields:
+#     - summary
+#     - date_issued
+#     - is_graphics_in_pdf
+#     - package_id
+#     - collection_code
+#     - details_url
+#     - premis_url
+#     - pdf_url
+#     - zip_url
+#     - mods_url
+#     - txt_url
+#     - title
+#     - collection_name
+#     - granule_class
+#     - granule_id
+#     - doc_class
+#     - last_modified
+#     - category
+#   id_fields:
+#     - granule_id
+#   nested_fields:
+#     - committees
+
+# committee_prints:
+#   main: true
+#   fields:
+#     - package_id
+#     - print_id
+#     - date_issued
+#     - document_type
+#     - congress
+#     - session
+#     - document_number
+#     - collection_code
+#     - title
+#     - branch
+#     - collection_name
+#     - pages
+#     - government_author1
+#     - government_author2
+#     - chamber
+#     - publisher
+#     - su_doc_class_number
+#     - doc_class
+#     - last_modified
+#     - category
+#     - migrated_doc_id
+#   id_fields:
+#     - package_id
+#   nested_fields: []
+#   related_fields:
+#     - committee_prints_granules
+
+# committee_prints_granules:
+#   fields:
+#     - date_issued
+#     - is_graphics_in_pdf
+#     - package_id
+#     - collection_code
+#     - title
+#     - collection_name
+#     - granule_class
+#     - granule_id
+#     - doc_class
+#     - last_modified
+#     - category
+#     - details_url
+#     - premis_url
+#     - pdf_url
+#     - zip_url
+#     - mods_url
+#     - txt_url
+#     - related_url
+#     - granules_url
+#   id_fields:
+#     - granule_id
+#   nested_fields:
+#     - reference_bills
+#     - reference_laws
+#     - reference_codes
+#     - reference_statutes
+#     - committees
+
+# hearings:
+#   main: true
+#   fields:
+#     - package_id
+#     - date_issued
+#     - document_type
+#     - congress
+#     - session
+#     - collection_code
+#     - title
+#     - held_dates
+#     - branch
+#     - collection_name
+#     - pages
+#     - government_author1
+#     - government_author2
+#     - chamber
+#     - publisher
+#     - su_doc_class_number
+#     - doc_class
+#     - last_modified
+#     - category
+#     - migrated_doc_id
+#     - package_url
+#     - details_url
+#     - premis_url
+#     - pdf_url
+#     - zip_url
+#     - mods_url
+#     - txt_url
+#   id_fields:
+#     - package_id
+#   nested_fields: []
+#   related_fields:
+#     - hearings_granules
+
+# hearings_granules:
+#   fields:
+#     - date_issued
+#     - graphics_in_pdf
+#     - package_id
+#     - collection_code
+#     - title
+#     - is_appropriation
+#     - collection_name
+#     - granule_class
+#     - granule_id
+#     - jacketnumber
+#     - doc_class
+#     - last_modified
+#     - category
+#     - related_url
+#     - granules_url
+#     - details_url
+#     - premis_url
+#     - pdf_url
+#     - zip_url
+#     - mods_url
+#     - txt_url
+#   id_fields:
+#     - granule_id
+#   nested_fields:
+#     - reference_bills
+#     - reference_laws
+#     - reference_codes
+#     - reference_statutes
+#     - members
+#     - committees
+#     - witnesses

@@ -1,0 +1,3418 @@
+data_types:
+  bills:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      bills:
+        old_name: _bills
+        new_name: bills
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_type
+            new_name: bill_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: bill_number
+            new_name: bill_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: origin_chamber
+            new_name: origin_chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: origin_chamber_code
+            new_name: origin_chamber_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: introduced_at
+            new_name: introduced_at
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: constitutional_authority_statement_text
+            new_name: constitutional_authority_statement
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: is_law
+            new_name: is_law
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: notes
+            new_name: notes
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: policy_area
+            new_name: policy_area
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: actions_count
+            new_name: actions_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: amendments_count
+            new_name: amendments_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: committees_count
+            new_name: committees_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: cosponsors_count
+            new_name: cosponsors_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: bill_relations_count
+            new_name: related_bills_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: summaries_count
+            new_name: summaries_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: subjects_count
+            new_name: subjects_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: titles_count
+            new_name: titles_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: texts_count
+            new_name: texts_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+
+      actions:
+        old_name: _bills_actions
+        new_name: bills_actions
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_id
+            new_name: action_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: action_code
+            new_name: action_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_date
+            new_name: action_date
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: text
+            new_name: text
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_type
+            new_name: action_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: source_system
+            new_name: source_system
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: source_system_code
+            new_name: source_system_code
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: calendar
+            new_name: calendar
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: calendar_number
+            new_name: calendar_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+
+      actions_committees:
+        old_name: _bills_actions_committee_codes
+        new_name: bills_actions_committees
+        columns:
+          - old_name: action_id
+            new_name: action_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_codes
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+
+      actions_recorded_votes:
+        old_name: _bills_actions_recorded_votes
+        new_name: bills_actions_recorded_votes
+        columns:
+          - old_name: action_id
+            new_name: action_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: chamber
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: date
+            new_name: date
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: roll_number
+            new_name: roll_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: session_number
+            new_name: session
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: url
+            new_name: url
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+
+      related_bills:
+        old_name: _bills_billrelations
+        new_name: bills_related_bills
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: relatedbill_id
+            new_name: related_bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: relationship_identified_by_1
+            new_name: identification_entity
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+      cbo_cost_estimates:
+        old_name: _bills_cbocostestimates
+        new_name: bills_cbocostestimates
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: description
+            new_name: description
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: pub_date
+            new_name: pub_date
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: true
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: url
+            new_name: url
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+
+      cosponsors:
+        old_name: _bills_cosponsors
+        new_name: bills_cosponsors
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+
+      laws:
+        old_name: _bills_laws
+        new_name: bills_laws
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: law_number
+            new_name: law_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: law_type
+            new_name: law_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: law_id
+            new_name: law_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+
+      sponsors:
+        old_name: _bills_sponsors
+        new_name: bills_sponsors
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: sponsors
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+
+      subjects:
+        old_name: _bills_subjects
+        new_name: bills_subjects
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: subject
+            new_name: subject
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      summaries:
+        old_name: _bills_summaries
+        new_name: bills_summaries
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: action_date
+            new_name: action_date
+            old_type: TEXT
+            new_type: DATE
+            key: true
+          - old_name: action_desc
+            new_name: action_desc
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: text
+            new_name: text
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: version_code
+            new_name: version_code
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+      texts:
+        old_name: _bills_texts
+        new_name: bills_texts
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: date
+            new_name: date
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: true
+          - old_name: type
+            new_name: type
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: NONE
+            new_name: raw_text
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: formatted_text
+            new_name: formatted_text
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: pdf
+            new_name: pdf
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: xml
+            new_name: xml
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+      titles:
+        old_name: _bills_titles
+        new_name: bills_titles
+        columns:
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: title_type
+            new_name: title_type
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_text_version_code
+            new_name: bill_text_version_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: bill_text_version_name
+            new_name: bill_text_version_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: chamber_code
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: title_type_code
+            new_name: title_type_code
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+  members:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      members:
+        old_name: _members
+        new_name: members
+        columns:
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: NONE
+            new_name: normalized_name
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: direct_order_name
+            new_name: direct_order_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: inverted_order_name
+            new_name: inverted_order_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: honorific_name
+            new_name: honorific_prefix
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: first_name
+            new_name: first_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: middle_name
+            new_name: middle_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: last_name
+            new_name: last_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: suffix_name
+            new_name: suffix
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: nickname
+            new_name: nickname
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: party
+            new_name: party
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: state
+            new_name: state
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: district
+            new_name: district
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: birth_year
+            new_name: birth_year
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: death_year
+            new_name: death_year
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: official_url
+            new_name: official_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: office_address
+            new_name: office_address
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: office_city
+            new_name: office_city
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: office_district
+            new_name: office_district
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: office_zip
+            new_name: office_zip
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: office_phone_number
+            new_name: office_phone
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: sponsored_legislation_count
+            new_name: sponsored_legislation_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: cosponsored_legislation_count
+            new_name: cosponsored_legislation_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: depiction_image_url
+            new_name: depiction_image_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: depiction_attribution
+            new_name: depiction_attribution
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: is_current_member
+            new_name: is_current_member
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      members_leadership_roles:
+        old_name: _members_leadership_roles
+        new_name: members_leadership_roles
+        columns:
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: chamber # fix 
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: is_current
+            new_name: is_current
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: type
+            new_name: role
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      members_party_history:
+        old_name: _members_party_history
+        new_name: members_party_history
+        columns:
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: party_code
+            new_name: party_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: party_name
+            new_name: party_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: start_year
+            new_name: start_year
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: end_year
+            new_name: end_year
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+      members_terms:
+        old_name: _members_terms
+        new_name: members_terms
+        columns:
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: member_type
+            new_name: member_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: chamber # fix 
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: start_year
+            new_name: start_year
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: end_year
+            new_name: end_year
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: state_name
+            new_name: state_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: state_code
+            new_name: state_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: district
+            new_name: district
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+  amendments:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      amendments:
+        old_name: _amendments
+        new_name: amendments
+        columns:
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: amendment_type
+            new_name: amendment_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: amendment_number
+            new_name: amendment_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: chamber
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: amended_bill_id
+            new_name: amended_bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: amended_treaty_id
+            new_name: amended_treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: amended_amendment_id
+            new_name: amended_amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: purpose
+            new_name: purpose
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: description
+            new_name: description
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: proposed_at
+            new_name: proposed_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: submitted_at
+            new_name: submitted_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: NONE
+            new_name: is_bill_amendment
+            old_type: NONE
+            new_type: BOOLEAN
+            key: false
+          - old_name: NONE
+            new_name: is_treaty_amendment
+            old_type: NONE
+            new_type: BOOLEAN
+            key: false
+          - old_name: NONE
+            new_name: is_amendment_amendment
+            old_type: NONE
+            new_type: BOOLEAN
+            key: false
+          - old_name: notes
+            new_name: notes
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: actions_count
+            new_name: actions_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: cosponsors_count
+            new_name: cosponsors_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: amendments_to_amendment_count
+            new_name: amendments_to_amendment_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      amendments_actions:
+        old_name: _amendments_actions
+        new_name: amendments_actions
+        columns:
+          - old_name: action_id
+            new_name: action_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: action_code
+            new_name: action_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_date
+            new_name: action_date
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: text
+            new_name: text
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_type
+            new_name: action_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: source_system
+            new_name: source_system
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: source_system_code
+            new_name: source_system_code
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+      amendments_actions_recorded_votes:
+        old_name: _amendments_actions_recorded_votes
+        new_name: amendments_actions_recorded_votes
+        columns:
+          - old_name: action_id
+            new_name: action_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: chamber
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: date
+            new_name: date
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: roll_number
+            new_name: roll_number 
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: session_number
+            new_name: session
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: url
+            new_name: url
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      amendments_sponsors:
+        old_name: _amendments_sponsors
+        new_name: amendments_sponsors
+        columns:
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: sponsors
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      amendments_cosponsors:
+        old_name: _amendments_cosponsors
+        new_name: amendments_cosponsors
+        columns:
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      amendments_texts:
+        old_name: _amendments_texts
+        new_name: amendments_texts
+        columns:
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: date
+            new_name: date
+            old_type: TEXT
+            new_type: DATE
+            key: true
+          - old_name: type
+            new_name: type
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: NONE
+            new_name: raw_text
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: pdf
+            new_name: pdf
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: html
+            new_name: html
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+      amendments_amended_bills:
+        old_name: NONE
+        new_name: amendments_amended_bills
+        columns:
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      amendments_amended_treaties:
+        old_name: NONE
+        new_name: amendments_amended_treaties
+        columns:
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: treaty_id
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      amendments_amended_amendments:
+        old_name: NONE
+        new_name: amendments_amended_amendments
+        columns:
+          - old_name: amendment_id
+            new_name: amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: amended_amendment_id
+            new_name: amended_amendment_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  committeereports:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      committeereports:
+        old_name: _committeereports
+        new_name: committeereports
+        columns:
+          - old_name: report_id
+            new_name: report_id # REMOVE REPT AND CREATE CITATION
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: report_type
+            new_name: report_type # remove periods and lowercase
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: report_number # default zero
+            new_name: report_number 
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: report_part
+            new_name: report_part
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: session_number
+            new_name: session
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: chamber
+            new_name: chamber # fix
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: citation
+            new_name: citation
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: is_conference_report
+            new_name: is_conference_report
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: issued_at
+            new_name: issued_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: texts_count
+            new_name: texts_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      committeereports_associated_bills:
+        old_name: _committeereports_associated_bills_ids
+        new_name: committeereports_associated_bills
+        columns:
+          - old_name: report_id
+            new_name: report_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: associated_bills_ids
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeereports_associated_treaties:
+        old_name: _committeereports_associated_treaties_ids
+        new_name: committeereports_associated_treaties
+        columns:
+          - old_name: report_id
+            new_name: report_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: associated_treaties_ids
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeereports_texts:
+        old_name: _committeereports_texts
+        new_name: committeereports_texts
+        columns:
+          - old_name: report_id
+            new_name: report_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: formatted_text
+            new_name: formatted_text
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: NONE
+            new_name: raw_text
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: pdf
+            new_name: pdf
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: formatted_text_is_errata
+            new_name: formatted_text_is_errata
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: pdf_is_errata
+            new_name: pdf_is_errata
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+  committeeprints:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      committeeprints:
+        old_name: _committeeprints
+        new_name: committeeprints
+        columns:
+          - old_name: print_id
+            new_name: print_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: print_jacketnumber
+            new_name: print_jacketnumber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: chamber # standardize
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: print_number
+            new_name: print_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: citation
+            new_name: citation
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP
+            key: false
+      committeeprints_associated_bills:
+        old_name: _committeeprints_associated_bill_ids
+        new_name: committeeprints_associated_bills
+        columns:
+          - old_name: print_id
+            new_name: print_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: associated_bill_ids
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeeprints_committees:
+        old_name: _committeeprints_committee_codes
+        new_name: committeeprints_committees
+        columns:
+          - old_name: print_id
+            new_name: print_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_codes
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeeprints_texts:
+        old_name: _committeeprints_texts
+        new_name: committeeprints_texts
+        columns:
+          - old_name: print_id
+            new_name: print_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: type
+            new_name: type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: NONE
+            new_name: raw_text
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: formatted_text
+            new_name: formatted_text
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: pdf
+            new_name: pdf
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: html
+            new_name: html
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: xml
+            new_name: xml
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: NONE
+            new_name: png
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: url
+            new_name: url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+  committeemeetings:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      committeemeetings:
+        old_name: _committeemeetings
+        new_name: committeemeetings
+        columns:
+          - old_name: meeting_id 
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: meeting_type
+            new_name: meeting_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: chamber # standardize
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: date
+            new_name: date
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: room
+            new_name: room
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: NONE # from address
+            new_name: street_address
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: building
+            new_name: building
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: address
+            new_name: address
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: NONE # from address
+            new_name: city
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: NONE
+            new_name: state # from address
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: NONE
+            new_name: zip_code # from address
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: meeting_status
+            new_name: meeting_status
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      committeemeetings_associated_bills:
+        old_name: _committeemeetings_associated_bill_ids
+        new_name: committeemeetings_associated_bills
+        columns:
+          - old_name: meeting_id 
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: associated_bill_ids
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeemeetings_associated_nominations:
+        old_name: _committeemeetings_associated_nomination_ids
+        new_name: committeemeetings_associated_nominations
+        columns:
+          - old_name: meeting_id
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: associated_nomination_ids
+            new_name: nomination_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeemeetings_associated_treaties:
+        old_name: _committeemeetings_associated_treaty_ids
+        new_name: committeemeetings_associated_treaties
+        columns:
+          - old_name: meeting_id
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: associated_treaty_ids
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeemeetings_committees:
+        old_name: _committeemeetings_committee_codes
+        new_name: committeemeetings_committees
+        columns:
+          - old_name: meeting_id
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_codes
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeemeetings_hearingjacketnumbers:
+        old_name: _committeemeetings_hearingjacketnumbers
+        new_name: committeemeetings_associated_hearings
+        columns:
+          - old_name: meeting_id
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: hearing_jacketnumber
+            new_name: hearing_jacketnumber
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeemeetings_meeting_documents:
+        old_name: _committeemeetings_meeting_documents
+        new_name: committeemeetings_meeting_documents
+        columns:
+          - old_name: meeting_id
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: name
+            new_name: name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: document_type
+            new_name: document_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: description
+            new_name: description
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: url
+            new_name: url
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeemeetings_witness_documents:
+        old_name: _committeemeetings_witness_documents
+        new_name: committeemeetings_witness_documents
+        columns:
+          - old_name: meeting_id
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: document_type
+            new_name: document_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: url
+            new_name: url
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeemeetings_witnesses:
+        old_name: _committeemeetings_witnesses
+        new_name: committeemeetings_witnesses
+        columns:
+          - old_name: meeting_id
+            new_name: meeting_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: name
+            new_name: name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: organization
+            new_name: organization
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: position
+            new_name: position
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  hearings:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      hearings:
+        old_name: _hearings
+        new_name: hearings
+        columns:
+          - old_name: hearing_jacketnumber
+            new_name: hearing_jacketnumber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: hearing_id  # Generated from hearing_jacketnumber
+            new_name: hearing_id
+            old_type: text
+            new_type: TEXT
+            key: true
+          - old_name: loc_id
+            new_name: loc_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: chamber # lowercase
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: hearing_number
+            new_name: hearing_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: part_number
+            new_name: part_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: citation
+            new_name: citation
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      hearings_texts:
+        old_name: _hearings_formats
+        new_name: hearings_texts
+        columns:
+          - old_name: hearing_jacketnumber  # Keep for joining
+            new_name: hearing_jacketnumber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: hearing_id  # Will be populated from hearing_jacketnumber
+            new_name: hearing_id
+            old_type: text
+            new_type: TEXT
+            key: true
+          - old_name: type
+            new_name: type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: NONE
+            new_name: raw_text
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: url
+            new_name: url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: formatted_text
+            new_name: formatted_text
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: pdf
+            new_name: pdf
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      hearings_dates:
+        old_name: _hearings_dates
+        new_name: hearings_dates
+        columns:
+          - old_name: hearing_jacketnumber  # Keep for joining
+            new_name: hearing_jacketnumber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: hearing_id  # Will be populated from hearing_jacketnumber
+            new_name: hearing_id
+            old_type: text
+            new_type: TEXT
+            key: true
+          - old_name: dates
+            new_name: hearing_date
+            old_type: TEXT
+            new_type: DATE
+            key: true
+      hearings_committees:
+        old_name: _hearings_committee_codes
+        new_name: hearings_committees
+        columns:
+          - old_name: hearing_id
+            new_name: hearing_id
+            old_type: text
+            new_type: TEXT
+            key: true
+          - old_name: hearing_jacketnumber
+            new_name: hearing_jacketnumber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: committee_codes
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  treaties:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      treaties:
+        old_name: _treaties
+        new_name: treaties
+        columns:
+          - old_name: treaty_id
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: number
+            new_name: treaty_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: suffix
+            new_name: suffix
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress_received
+            new_name: congress_received
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: congress_considered
+            new_name: congress_considered
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: topic
+            new_name: topic
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: in_force_at
+            new_name: in_force_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: transmitted_at
+            new_name: transmitted_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+          - old_name: resolution_text
+            new_name: resolution_text # todo: remove tags
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: parts_count
+            new_name: parts_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: actions_count
+            new_name: actions_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: old_number
+            new_name: old_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: old_number_display_name
+            new_name: old_number_display_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      treaties_actions:
+        old_name: _treaties_actions
+        new_name: treaties_actions
+        columns:
+          - old_name: treaty_id
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: action_id
+            new_name: action_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: action_code
+            new_name: action_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_date
+            new_name: action_date
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: text
+            new_name: text
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_type
+            new_name: action_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+      treaties_countries_parties:
+        old_name: _treaties_country_parties
+        new_name: treaties_country_parties
+        columns:
+          - old_name: treaty_id
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: country_parties
+            new_name: country
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      treaties_index_terms:
+        old_name: _treaties_index_terms
+        new_name: treaties_index_terms
+        columns:
+          - old_name: treaty_id
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: index_terms
+            new_name: index_term
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      treaties_titles:
+        old_name: _treaties_titles
+        new_name: treaties_titles
+        columns:
+          - old_name: treaty_id
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: title_type # popular, formal, short if contained
+            new_name: title_type
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  nominations:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      nominations:
+        old_name: _nominations
+        new_name: nominations
+        columns:
+          - old_name: nomination_id
+            new_name: nomination_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: nomination_number
+            new_name: nomination_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: part_number
+            new_name: part_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: description
+            new_name: description
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: is_privileged
+            new_name: is_privileged
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: is_civilian
+            new_name: is_civilian
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: received_at
+            new_name: received_at
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: authority_date
+            new_name: authority_date
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: executive_calendar_number
+            new_name: executive_calendar_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: citation
+            new_name: citation
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: committees_count
+            new_name: committees_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: actions_count
+            new_name: actions_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      nominations_actions:
+        old_name: _nominations_actions
+        new_name: nominations_actions
+        columns:
+          - old_name: action_id
+            new_name: action_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: nomination_id
+            new_name: nomination_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: action_code
+            new_name: action_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_type
+            new_name: action_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: action_date
+            new_name: action_date
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: text
+            new_name: text
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+      nominations_actions_committees:
+        old_name: _nominations_actions_committee_codes
+        new_name: nominations_actions_committees
+        columns:
+          - old_name: action_id
+            new_name: action_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: nomination_id
+            new_name: nomination_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_codes
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      nominations_committeeactivities:
+        old_name: _nominations_committeeactivities
+        new_name: nominations_committeeactivities
+        columns:
+          - old_name: nomination_id
+            new_name: nomination_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: activity_name
+            new_name: activity_name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: activity_date
+            new_name: activity_date
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: true
+      nominations_hearings:
+        old_name: _nominations_hearings
+        new_name: nominations_associated_hearings
+        columns:
+          - old_name: nomination_id
+            new_name: nomination_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: hearing_jacketnumber
+            new_name: hearing_jacketnumber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: hearing_id
+            new_name: hearing_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      nominations_nominees:
+        old_name: _nominations_nominees
+        new_name: nominations_nominees
+        columns:
+          - old_name: nomination_id
+            new_name: nomination_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: ordinal
+            new_name: ordinal
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: first_name
+            new_name: first_name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: middle_name
+            new_name: middle_name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: last_name
+            new_name: last_name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: suffix
+            new_name: suffix
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: prefix
+            new_name: prefix
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: state
+            new_name: state
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: effective_date
+            new_name: effective_date
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: predecessor_name
+            new_name: predecessor_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: corps_code
+            new_name: corps_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+      nominations_positions:
+        old_name: _nominations_nomineepositions
+        new_name: nominations_positions
+        columns:
+          - old_name: nomination_id
+            new_name: nomination_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: ordinal
+            new_name: ordinal
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: position_title
+            new_name: position_title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: organization
+            new_name: organization
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: intro_text
+            new_name: intro_text
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: nominee_count
+            new_name: nominee_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+  committees:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      committees:
+        old_name: _committees
+        new_name: committees
+        columns:
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: name
+            new_name: name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: chamber # lower case
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: is_subcommittee
+            new_name: is_subcommittee
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: is_current
+            new_name: is_current
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: bills_count
+            new_name: bills_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: reports_count
+            new_name: reports_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: nominations_count
+            new_name: nominations_count
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      committees_bills:
+        old_name: _committees_bills
+        new_name: committees_bills
+        columns:
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: relationship_type
+            new_name: relationship_type
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_action_date
+            new_name: committee_action_date
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: true
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      committees_history:
+        old_name: _committees_history
+        new_name: committees_history
+        columns:
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: official_name
+            new_name: name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: loc_name
+            new_name: loc_name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: start_date
+            new_name: started_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: true
+          - old_name: end_date
+            new_name: ended_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: true
+          - old_name: committee_type_code # lower case
+            new_name: committee_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: establishing_authority # extract bill?
+            new_name: establishing_authority
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: superintendent_document_number
+            new_name: su_doc_class_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: nara_id
+            new_name: nara_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: loc_linked_data_id
+            new_name: loc_linked_data_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: updated_at
+            new_name: updated_at  
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      committees_subcommittees:
+        old_name: _committees_subcommittees_codes
+        new_name: committees_subcommittees
+        columns:
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: subcommittees_codes
+            new_name: subcommittee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committees_committeereports:
+        old_name: _committees_associated_reports
+        new_name: committees_committeereports
+        columns:
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: report_id # if no space, add rpt. otherwise join with committeereports on citation
+            new_name: report_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  congresses:
+    old_schema: _staging_congressional
+    new_schema: congressional
+    tables:
+      congresses:
+        old_name: _congresses
+        new_name: congresses
+        columns:
+          - old_name: number
+            new_name: congress_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: name
+            new_name: name
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: start_year
+            new_name: start_year
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: end_year
+            new_name: end_year
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: updated_at
+            new_name: updated_at
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      congresses_sessions:
+        old_name: _congresses_sessions
+        new_name: congresses_sessions
+        columns:
+          - old_name: congress_no
+            new_name: congress_number
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: session_number
+            new_name: session
+            old_type: TEXT
+            new_type: INTEGER
+            key: true
+          - old_name: chamber # lowercase, senate or house instead of Senate or House of Representatives
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: type 
+            new_name: type
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: start_date
+            new_name: start_date
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: end_date
+            new_name: end_date
+            old_type: TEXT
+            new_type: DATE
+            key: false
+  bill_collections:
+    old_schema: _staging_govinfo
+    new_schema: govinfo
+    tables:
+      bill_collections:
+        old_name: _bill_collections
+        new_name: bills
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: bill_version
+            new_name: bill_version # uppercase
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: origin_chamber
+            new_name: origin_chamber # lowercase
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: current_chamber
+            new_name: current_chamber # lowercase
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: is_appropriation
+            new_name: is_appropriation
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: is_private
+            new_name: is_private
+            old_type: TEXT
+            new_type: BOOLEAN
+            key: false
+          - old_name: pages
+            new_name: pages
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: date_issued
+            new_name: issued_at
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: government_author1
+            new_name: government_author1
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author2
+            new_name: government_author2
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: publisher
+            new_name: publisher
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: collection_code
+            new_name: collection_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: stock_number
+            new_name: stock_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: su_doc_class_number
+            new_name: su_doc_class_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: migrated_doc_id
+            new_name: migrated_doc_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: child_ils_system_id
+            new_name: child_ils_system_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: parent_ils_system_id
+            new_name: parent_ils_system_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: mods_url
+            new_name: mods_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: pdf_url
+            new_name: pdf_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: premis_url
+            new_name: premis_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: txt_url
+            new_name: txt_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: xml_url
+            new_name: xml_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: zip_url
+            new_name: zip_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: last_modified
+            new_name: last_modified
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      bills_reference_codes:
+          old_name: _bill_collections_reference_codes
+          new_name: bills_reference_codes
+          columns:
+            - old_name: NONE
+              new_name: bill_code_id
+              old_type: NONE
+              new_type: TEXT
+              key: true
+            - old_name: package_id
+              new_name: package_id
+              old_type: TEXT
+              new_type: TEXT
+              key: false
+            - old_name: reference_codes_label
+              new_name: reference_codes_label
+              old_type: TEXT
+              new_type: TEXT
+              key: false
+            - old_name: reference_codes_title
+              new_name: reference_codes_title
+              old_type: TEXT
+              new_type: TEXT
+              key: false
+            - old_name: reference_codes_sections
+              new_name: reference_codes_sections
+              old_type: TEXT
+              new_type: TEXT
+              key: false
+            - old_name: NONE
+              new_name: reference_code
+              old_type: NONE
+              new_type: TEXT
+              key: false
+      bills_reference_codes_sections:
+        old_name: _bill_collections_reference_codes
+        new_name: bills_reference_codes_sections
+        columns:
+          - old_name: NONE #
+            new_name: bill_code_id
+            old_type: NONE
+            new_type: TEXT
+            key: true
+          - old_name: reference_codes_sections # unpack comma separated values
+            new_name: code_section
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      bills_reference_laws:
+        old_name: _bill_collections_reference_laws
+        new_name: bills_reference_laws
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: reference_laws_law_id # fix this instead of "Public Law118-105" to make it "PL118-105"
+            new_name: law_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: reference_laws_label
+            new_name: law_type # fix with current type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+      bills_reference_statutes:
+          old_name: _bill_collections_reference_statutes
+          new_name: bills_reference_statutes
+          columns:
+            - old_name: NONE
+              new_name: bill_statute_id
+              old_type: NONE
+              new_type: TEXT
+              key: true
+            - old_name: package_id
+              new_name: package_id
+              old_type: TEXT
+              new_type: TEXT
+              key: false
+            - old_name: reference_statutes_label
+              new_name: reference_statutes_label
+              old_type: TEXT
+              new_type: TEXT
+              key: false
+            - old_name: reference_statutes_title
+              new_name: reference_statutes_title
+              old_type: TEXT
+              new_type: TEXT
+              key: false
+            - old_name: reference_statutes_pages
+              new_name: reference_statutes_pages
+              old_type: TEXT
+              new_type: TEXT
+              key: false
+            - old_name: NONE
+              new_name: reference_statute
+              old_type: NONE
+              new_type: TEXT
+              key: false
+      bills_reference_statutes_pages:
+        old_name: _bill_collections_reference_statutes
+        new_name: bills_reference_statutes_pages
+        columns:
+          - old_name: NONE
+            new_name: bill_statute_id
+            old_type: NONE
+            new_type: TEXT
+            key: true
+          - old_name: reference_statutes_pages # unpack comma separated values
+            new_name: page
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      bills_short_titles:
+        old_name: _bill_collections_short_titles
+        new_name: bills_short_titles
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: short_titles_title
+            new_name: short_title
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: short_titles_level
+            new_name: level
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: short_titles_type
+            new_name: type
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  committee_prints:
+    old_schema: _staging_govinfo
+    new_schema: govinfo
+    tables:
+      committee_prints:
+        old_name: _committee_prints
+        new_name: committeeprints
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: print_id # fix from package_id
+            new_name: print_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: chamber # lowercase
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: session
+            new_name: session
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: pages
+            new_name: pages
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: document_number
+            new_name: document_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: date_issued
+            new_name: issued_at
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: branch
+            new_name: branch
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author1
+            new_name: government_author1
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author2
+            new_name: government_author2
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: publisher
+            new_name: publisher
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: collection_code
+            new_name: collection_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: migrated_doc_id
+            new_name: migrated_doc_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: su_doc_class_number
+            new_name: su_doc_class_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: last_modified
+            new_name: last_modified
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      committee_prints_granules:
+        old_name: _committee_prints_granules
+        new_name: committeeprints_granules
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committee_prints_committees:
+        old_name: _committee_prints_granules_committees
+        new_name: committeeprints_committees
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_code
+            new_name: committee_code # from committee_prints_granules_committees_1
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_name
+            new_name: committee_name # from committee_prints_granules_committees_2
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: chamber
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committee_prints_reference_bills:
+        old_name: _committee_prints_granules_reference_bills
+        new_name: committeeprints_reference_bills
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  congressional_reports:
+    old_schema: _staging_govinfo
+    new_schema: govinfo
+    tables:
+      committeereports:
+        old_name: _congressional_reports
+        new_name: committeereports
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: report_id # fix
+            new_name: report_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: subtitle
+            new_name: subtitle
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: chamber
+            new_name: chamber # lowercase
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: session
+            new_name: session
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: pages
+            new_name: pages
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: date_issued
+            new_name: issued_at
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: branch
+            new_name: branch
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author1
+            new_name: government_author1
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author2
+            new_name: government_author2
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: publisher
+            new_name: publisher
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: collection_code
+            new_name: collection_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: migrated_doc_id
+            new_name: migrated_doc_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: su_doc_class_number
+            new_name: su_doc_class_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: last_modified
+            new_name: last_modified
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      committeereports_granules:
+        old_name: _congressional_reports_granules
+        new_name: committeereports_granules
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeereports_committees:
+        old_name: _congressional_reports_granules_committees
+        new_name: committeereports_committees
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_name
+            new_name: committee_name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: chamber
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeereports_members:
+        old_name: _congressional_reports_granules_members
+        new_name: committeereports_members
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      committeereports_reference_bills:
+        old_name: _congressional_reports_granules_reference_bills
+        new_name: committeereports_reference_bills
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  congressional_hearings:
+    old_schema: _staging_govinfo
+    new_schema: govinfo
+    tables:
+      hearings:
+        old_name: _congressional_hearings
+        new_name: hearings
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: NONE
+            new_name: hearing_id
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: chamber
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: session
+            new_name: session
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: pages
+            new_name: pages
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: NONE
+            new_name: is_appropriation # take from granules
+            old_type: NONE
+            new_type: BOOLEAN
+            key: false
+          - old_name: date_issued
+            new_name: issued_at
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: branch
+            new_name: branch
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author1
+            new_name: government_author1
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author2
+            new_name: government_author2
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: publisher
+            new_name: publisher
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: collection_code
+            new_name: collection_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: migrated_doc_id
+            new_name: migrated_doc_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: su_doc_class_number
+            new_name: su_doc_class_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: last_modified
+            new_name: last_modified
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      hearings_granules:
+        old_name: _congressional_hearings_granules
+        new_name: hearings_granules
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      hearings_committees:
+        old_name: _congressional_hearings_granules_committees
+        new_name: hearings_committees
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_name
+            new_name: committee_name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      hearings_members:
+        old_name: _congressional_hearings_granules_members
+        new_name: hearings_members
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: name
+            new_name: name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      hearings_reference_bills:
+        old_name: _congressional_hearings_granules_reference_bills
+        new_name: hearings_reference_bills
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bill_id
+            new_name: bill_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      hearings_witnesses:
+        old_name: _congressional_hearings_granules_witnesses
+        new_name: hearings_witnesses
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: value
+            new_name: witness
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  treaty_docs:
+    old_schema: _staging_govinfo
+    new_schema: govinfo
+    tables:
+      treaty_docs:
+        old_name: _treaty_docs
+        new_name: treaties
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: treaty_id # fix
+            new_name: treaty_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: session
+            new_name: session
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: chamber # lowercase
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: summary
+            new_name: summary
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: pages
+            new_name: pages
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: date_issued
+            new_name: issued_at
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: branch
+            new_name: branch
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author1
+            new_name: government_author1
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author2
+            new_name: government_author2
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: publisher
+            new_name: publisher
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: collection_code
+            new_name: collection_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: migrated_doc_id
+            new_name: migrated_doc_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: su_doc_class_number
+            new_name: su_doc_class_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: last_modified
+            new_name: last_modified
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      treaty_docs_granules:
+        old_name: _treaty_docs_granules
+        new_name: treaties_granules
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      treaty_docs_committees:
+        old_name: _treaty_docs_committees
+        new_name: treaties_committees
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_code
+            new_name: committee_code
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: committee_name
+            new_name: committee_name
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: chamber
+            new_name: chamber
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+  congressional_directories:
+    old_schema: _staging_govinfo
+    new_schema: govinfo
+    tables:
+      congressional_directories:
+        old_name: _congressional_directories
+        new_name: congressional_directories
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: congress
+            new_name: congress
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: date_issued
+            new_name: issued_at
+            old_type: TEXT
+            new_type: DATE
+            key: false
+          - old_name: branch
+            new_name: branch
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author1
+            new_name: government_author1
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: government_author2
+            new_name: government_author2
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: publisher
+            new_name: publisher
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: collection_code
+            new_name: collection_code
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: isbn
+            new_name: isbn # from separate table
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: ils_system_id
+            new_name: ils_system_id
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: migrated_doc_id
+            new_name: migrated_doc_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: su_doc_class_number
+            new_name: su_doc_class_number
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: NONE
+            new_name: text_url
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: NONE
+            new_name: pdf_url
+            old_type: NONE
+            new_type: TEXT
+            key: false
+          - old_name: last_modified
+            new_name: last_modified
+            old_type: TEXT
+            new_type: TIMESTAMP WITH TIME ZONE
+            key: false
+      congressional_directories_isbn:
+        old_name: _congressional_directories_isbn
+        new_name: congressional_directories_isbn
+        columns:
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: isbn
+            new_name: isbn
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+      members:
+        old_name: _congressional_directories_granules
+        new_name: members
+        columns:
+          - old_name: granule_id
+            new_name: granule_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: package_id
+            new_name: package_id
+            old_type: TEXT
+            new_type: TEXT
+            key: true
+          - old_name: bioguide_id
+            new_name: bioguide_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: title
+            new_name: title
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: biography
+            new_name: biography
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: sub_granule_class
+            new_name: member_type
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: population
+            new_name: population
+            old_type: TEXT
+            new_type: INTEGER
+            key: false
+          - old_name: gpo_id
+            new_name: gpo_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: authority_id
+            new_name: authority_id
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: official_url
+            new_name: official_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: twitter_url
+            new_name: twitter_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: instagram_url
+            new_name: instagram_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: facebook_url
+            new_name: facebook_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: youtube_url
+            new_name: youtube_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
+          - old_name: other_url
+            new_name: other_url
+            old_type: TEXT
+            new_type: TEXT
+            key: false
