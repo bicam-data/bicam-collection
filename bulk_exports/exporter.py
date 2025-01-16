@@ -151,5 +151,5 @@ if __name__ == "__main__":
     export_schema_tables(
         db_config=db_config,
         schema="bicam",
-        output_dir="/home/rdelano/bicam_exports"
+        output_dir="/mnt/big_data/database-congress/bicam-exports"
     )
