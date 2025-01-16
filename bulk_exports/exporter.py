@@ -99,7 +99,9 @@ def export_schema_tables(
                     
                     # Use smaller chunk size for tables with text fields
                     chunk_size = 10000  # Reduced chunk size for better memory management
-                    temp_csv = f"{table}.csv"
+                    
+                    temp_csv = os.path.join(output_dir, f"{table}.csv")
+
                     
                     print(f"\nExporting {table} ({row_count:,} rows)")
                     chunks = []
