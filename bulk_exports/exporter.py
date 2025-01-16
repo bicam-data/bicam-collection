@@ -4,17 +4,26 @@ import os
 import zipfile
 from collections import defaultdict
 from tqdm import tqdm
-
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Additional reference tables to include with bills
 BILLS_EXTRA_TABLES = [
     "ref_bill_summary_version_codes",
     "ref_bill_version_codes",
     "ref_title_type_codes",
     "crosswalk_bills_voteview"
 ]
+
+def get_prefix(table_name):
+    """
+    Determine the correct prefix for a table, skipping ref_ and crosswalk_ prefixes
+    """
+    # Skip ref_ and crosswalk_ prefixes
+    if table_name.startswith(('ref_', 'crosswalk_')):
+        return None
+    return table_name.split('_')[0]
 
 def export_schema_tables(
     db_config,
@@ -45,8 +54,9 @@ def export_schema_tables(
         # Group tables by prefix
         prefix_groups = defaultdict(list)
         for table in tables['table_name']:
-            prefix = table.split('_')[0]
-            prefix_groups[prefix].append(table)
+            prefix = get_prefix(table)
+            if prefix:  # Only add tables with valid prefixes
+                prefix_groups[prefix].append(table)
             
         # Add special reference tables to bills group if it exists
         if 'bills' in prefix_groups:
@@ -96,17 +106,16 @@ def export_schema_tables(
         conn.close()
 
 if __name__ == "__main__":
-
     db_config = {
-        "host": os.getenv("DB_HOST"),
-        "database": os.getenv("DB_NAME"),
-        "user": os.getenv("DB_USER"),
-        "password": os.getenv("DB_PASSWORD"),
-        "port": os.getenv("DB_PORT")
+        "host": os.getenv("POSTGRESQL_HOST"),
+        "database": os.getenv("POSTGRESQL_DB"),
+        "user": os.getenv("POSTGRESQL_USER"),
+        "password": os.getenv("POSTGRESQL_PASSWORD"),
+        "port": os.getenv("POSTGRESQL_PORT")
     }
-
+    
     export_schema_tables(
-        db_config,
+        db_config=db_config,
         schema="bicam",
         output_dir="/home/rdelano/bicam_exports"
     )
