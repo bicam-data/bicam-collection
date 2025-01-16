@@ -108,5 +108,5 @@ if __name__ == "__main__":
     export_schema_tables(
         db_config,
         schema="bicam",
-        output_dir="exports"
+        output_dir="~/bicam_exports"
     )
