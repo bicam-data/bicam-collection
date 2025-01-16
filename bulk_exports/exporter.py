@@ -66,7 +66,7 @@ def export_schema_tables(
         
         # Export each group to a separate zip file
         for prefix, group_tables in prefix_groups.items():
-            zip_path = os.path.join(output_dir, f"{prefix}_tables.zip")
+            zip_path = os.path.join(output_dir, f"{prefix}.zip")
             print(f"\nProcessing {prefix} group ({len(group_tables)} tables)...")
             
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
