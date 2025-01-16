@@ -5,6 +5,7 @@ import zipfile
 from collections import defaultdict
 from tqdm import tqdm
 from dotenv import load_dotenv
+import gc
 
 load_dotenv()
 
@@ -24,6 +25,22 @@ def get_prefix(table_name):
     if table_name.startswith(('ref_', 'crosswalk_')):
         return None
     return table_name.split('_')[0]
+
+def write_chunks_to_csv(chunks, temp_csv):
+    """Write chunks to CSV file with proper encoding for text fields"""
+    first_chunk = True
+    for chunk in chunks:
+        chunk.to_csv(
+            temp_csv,
+            mode='w' if first_chunk else 'a',
+            index=False,
+            header=first_chunk,
+            encoding='utf-8'
+        )
+        first_chunk = False
+        # Clear chunk from memory
+        del chunk
+        gc.collect()
 
 def export_schema_tables(
     db_config,
@@ -64,6 +81,10 @@ def export_schema_tables(
                 if ref_table in tables['table_name'].values and ref_table not in prefix_groups['bills']:
                     prefix_groups['bills'].append(ref_table)
         
+        # Clear tables DataFrame from memory
+        del tables
+        gc.collect()
+        
         # Export each group to a separate zip file
         for prefix, group_tables in prefix_groups.items():
             zip_path = os.path.join(output_dir, f"{prefix}.zip")
@@ -76,29 +97,42 @@ def export_schema_tables(
                     count_query = f"SELECT COUNT(*) FROM {schema}.{table}"
                     row_count = pd.read_sql_query(count_query, conn).iloc[0,0]
                     
-                    # Export table in chunks with progress bar
-                    chunk_size = 100000  # Adjust based on your memory constraints
+                    # Use smaller chunk size for tables with text fields
+                    chunk_size = 10000  # Reduced chunk size for better memory management
+                    temp_csv = f"{table}.csv"
+                    
+                    print(f"\nExporting {table} ({row_count:,} rows)")
                     chunks = []
                     
+                    # Process chunks directly to CSV instead of holding in memory
                     with tqdm(total=row_count, desc=f"Rows from {table}", leave=False) as pbar:
                         for chunk_df in pd.read_sql_query(
                             f"SELECT * FROM {schema}.{table}",
                             conn,
                             chunksize=chunk_size
                         ):
-                            chunks.append(chunk_df)
+                            # Write chunk directly to CSV
+                            chunk_df.to_csv(
+                                temp_csv,
+                                mode='a' if os.path.exists(temp_csv) else 'w',
+                                header=not os.path.exists(temp_csv),
+                                index=False,
+                                encoding='utf-8'
+                            )
                             pbar.update(len(chunk_df))
-                    
-                    # Combine chunks and save to CSV
-                    df = pd.concat(chunks, ignore_index=True)
-                    temp_csv = f"{table}.csv"
-                    df.to_csv(temp_csv, index=False)
+                            
+                            # Clear chunk from memory
+                            del chunk_df
+                            gc.collect()
                     
                     # Add CSV to zip file
                     zip_file.write(temp_csv, f"{table}.csv")
                     
                     # Remove temporary CSV file
                     os.remove(temp_csv)
+                    
+                    # Force garbage collection
+                    gc.collect()
             
             print(f"Created {zip_path} with {len(group_tables)} tables")
 
