@@ -1,7 +1,16 @@
 # bicam-collection
 
-#TODO: figure out UV run for this package
-# TODO: find redundant code in scrapers
+
+order:
+create schemas
+scrapers
+insert csvs
+lobbyist_matching
+cleaning
+join
+backfills
+bulk exports
+
 # TODO: standardize the cleaning scripts
 # TODO: add documentation to everything
 # TODO: write out README(s)

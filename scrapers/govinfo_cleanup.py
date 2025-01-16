@@ -25,6 +25,34 @@ def main():
         set last_processed_date = '1789-01-01'
     """)
 
+        # Connect to the database
+    conn = pg.connect(
+        dbname=os.getenv("POSTGRESQL_DB"),
+        user=os.getenv("POSTGRESQL_USER"),
+        password=os.getenv("POSTGRESQL_PASSWORD"),
+        host=os.getenv("POSTGRESQL_HOST"),
+        port=os.getenv("POSTGRESQL_PORT"))
+
+    cur = conn.cursor()
+
+    # Get all tables in congressional schema and truncate them
+    cur.execute("""
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = '_staging_govinfo'
+        AND table_type = 'BASE TABLE';
+    """)
+    prod_tables = cur.fetchall()
+    if prod_tables is not None:
+        for table in prod_tables:
+            cur.execute(f"truncate table _staging_govinfo.{table[0]}")
+    else:
+        pass
+     # Clear error tracking table
+    cur.execute("""
+        truncate table __metadata.govinfo_errors;
+    """)
+
     # Commit the changes
     conn.commit()
 
