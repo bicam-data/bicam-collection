@@ -6,6 +6,8 @@ from collections import defaultdict
 from tqdm import tqdm
 from dotenv import load_dotenv
 import gc
+import argparse
+import shutil
 
 load_dotenv()
 
@@ -45,11 +47,17 @@ def write_chunks_to_csv(chunks, temp_csv):
 def export_schema_tables(
     db_config,
     schema,
-    output_dir
+    output_dir,
+    clean_dir=False
 ):
     """
     Export all tables from a PostgreSQL schema into zip files grouped by table prefix
     """
+    # Clean output directory if requested
+    if clean_dir and os.path.exists(output_dir):
+        print(f"Cleaning output directory: {output_dir}")
+        shutil.rmtree(output_dir)
+        
     # Create output directory if it doesn't exist
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -87,7 +95,7 @@ def export_schema_tables(
         
         # Export each group to a separate zip file
         for prefix, group_tables in prefix_groups.items():
-            zip_path = os.path.join(output_dir, f"{prefix}.zip")
+            zip_path = os.path.join(output_dir, f"bicam_{prefix}.zip")
             print(f"\nProcessing {prefix} group ({len(group_tables)} tables)...")
             
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -137,11 +145,19 @@ def export_schema_tables(
                     gc.collect()
             
             print(f"Created {zip_path} with {len(group_tables)} tables")
-
+        # make a zip file of all of the other zips named "bicam.zip"
+        with zipfile.ZipFile(os.path.join(output_dir, "bicam.zip"), 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for file in os.listdir(output_dir):
+                if file.endswith(".zip") and file != "bicam.zip":
+                    zip_file.write(os.path.join(output_dir, file), file)
     finally:
         conn.close()
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Export PostgreSQL schema tables to CSV files')
+    parser.add_argument('--clean', action='store_true', help='Clean output directory before export')
+    args = parser.parse_args()
+    
     db_config = {
         "host": os.getenv("POSTGRESQL_HOST"),
         "database": os.getenv("POSTGRESQL_DB"),
@@ -153,5 +169,6 @@ if __name__ == "__main__":
     export_schema_tables(
         db_config=db_config,
         schema="bicam",
-        output_dir="/mnt/big_data/database-congress/bicam-exports"
+        output_dir="/mnt/big_data/database-congress/bicam-exports",
+        clean_dir=args.clean
     )
