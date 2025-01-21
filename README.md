@@ -43,3 +43,6 @@ within `staging_info.yml`, and the script will follow the order of the phases as
 Next, join the schemas in `database_construction` using the `join_congressional_govinfo.sql` script. if there are errors, you can run the `backfills` section with any missing data.
 
 Finally, run the bulk exports in `bulk_exports` by running `exporter.py` from the command line with a target schema and target directory.
+
+#### DEPENDENCIES:
+Using astral's UV package (an improved version of pip), you can run `uv init` to initialize the project, and then `uv run` to run the project.
