@@ -1298,6 +1298,13 @@ CREATE TABLE IF NOT EXISTS bicam.committeemeetings_committees(
     PRIMARY KEY (meeting_id, committee_code)
 );
 
+CREATE TABLE IF NOT EXISTS bicam.bills_lobbied(
+    filing_uuid TEXT,
+    general_isue_code TEXT,
+    bill_id TEXT,
+    is_implementation BOOLEAN,
+);
+
 -- Finish off with granting permissions
 DO $$
 DECLARE
