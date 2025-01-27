@@ -26,7 +26,20 @@ This section contains the code for exporting the data to zipped folders of CSV f
 
 ## Sequence
 
-To begin, create the schemas in `database_construction`, running the `build_` scripts in any order. 
+First, set up your environment variables for your GovInfo API key, Congress.gov API key, and database configuration. 
+
+The database configuration should be in a `.env` file in the same directory as the scrapers, with the parameters:
+```
+POSTGRESQL_USER=''
+POSTGRESQL_PASSWORD=''
+POSTGRESQL_HOST=''
+POSTGRESQL_PORT=''
+POSTGRESQL_DB=''
+```
+
+The API key for Congress.gov should be within `.env.gov` with the parameter `CONGRESS_API_KEY`, while the API key for GovInfo.gov should be in the file `.env.info` with the parameter `GOVINFO_API_KEY`. 
+
+Once environmental variables are set, create the schemas in `database_construction`, running the `build_` scripts in any order. 
 
 Next, run the scrapers in `scrapers`. These both scrape the data from the source websites - you may need to setup external tables to fully
 make use of the functionality to begin from the previous last-processed date and store errors. These scrapers utilize the package found within `api_interface` to interact with the API.
