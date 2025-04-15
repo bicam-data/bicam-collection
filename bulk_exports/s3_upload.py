@@ -27,6 +27,8 @@ logging.basicConfig(
 def get_target_prefix(filename_stem: str) -> str:
     """
     Determines the S3 prefix based on the filename stem.
+    - "bicam_PREFIX.zip" -> "PREFIX"
+    - "bicam.zip" -> "complete"
 
     Args:
         filename_stem: The name of the file without the .zip extension.
@@ -34,13 +36,28 @@ def get_target_prefix(filename_stem: str) -> str:
     Returns:
         The derived S3 prefix (folder name).
     """
-    parts = filename_stem.split('-', 1) # Split only on the first hyphen
-    if len(parts) > 1:
-        return parts[0]
-    elif parts != 'bicam':
-        return filename_stem
+    if filename_stem == "bicam":
+        # Special case for the master zip file
+        return "complete"
+    elif filename_stem.startswith("bicam_"):
+        # Extract the part after "bicam_"
+        parts = filename_stem.split('_', 1)
+        if len(parts) > 1:
+            return parts[1] # e.g., "bills" from "bicam_bills"
+        else:
+            # Should not happen if starts with "bicam_", but handle defensively
+            logging.warning(f"Filename stem '{filename_stem}' started with 'bicam_' but could not extract prefix. Using full stem.")
+            return filename_stem
     else:
-        return 'complete'
+        # Handle filename patterns that don't match expected "bicam_" or "bicam"
+        # Option 1: Use the full stem as prefix (current fallback)
+        logging.warning(f"Unexpected filename stem pattern: '{filename_stem}'. Using full stem as prefix.")
+        return filename_stem
+        # Option 2: Assign a default prefix like 'unknown'
+        # logging.warning(f"Unexpected filename stem pattern: '{filename_stem}'. Using 'unknown' prefix.")
+        # return "unknown"
+        # Option 3: Raise an error if strict matching is required
+        # raise ValueError(f"Unexpected filename stem pattern: {filename_stem}")
 
 def upload_file_to_s3(local_path: Path, bucket: str, s3_key: str) -> bool:
     """
@@ -56,7 +73,7 @@ def upload_file_to_s3(local_path: Path, bucket: str, s3_key: str) -> bool:
     """
     try:
         # Create a new client per thread for thread safety
-        s3_client = boto3.client(os.getenv('AWS_PROFILE'))
+        s3_client = boto3.client("s3")
         logging.info(f"Uploading {local_path.name} to s3://{bucket}/{s3_key}...")
         s3_client.upload_file(str(local_path), bucket, s3_key)
         logging.info(f"Successfully uploaded {local_path.name} to s3://{bucket}/{s3_key}")
