@@ -1,0 +1,1568 @@
+name: govinfo
+version: '1.0'
+description: Schema imported from configs/govinfo_config.yaml
+data_types:
+- name: bill_collections
+  table_name: bill_collections
+  description: null
+  is_main: true
+  create_raw: true
+  id_fields:
+  - package_id
+  fields:
+  - name: bill_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: bill_version
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: child_ils_system_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: child_ils_title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: current_chamber
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: details_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author1
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author2
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: is_appropriation
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: is_private
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: migrated_doc_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: mods_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: origin_chamber
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pages
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: parent_ils_system_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: parent_ils_title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pdf_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: premis_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: publisher
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: stock_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: su_doc_class_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: txt_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: xml_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: zip_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: committee_prints
+  table_name: committee_prints
+  description: null
+  is_main: true
+  create_raw: true
+  id_fields:
+  - package_id
+  fields:
+  - name: branch
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: chamber
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: congress
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: document_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: document_type
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author1
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author2
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: migrated_doc_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pages
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: print_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: publisher
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: session
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: su_doc_class_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields:
+  - committee_prints_granules
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: committee_prints_granules
+  table_name: committee_prints_granules
+  description: null
+  is_main: false
+  create_raw: true
+  id_fields:
+  - granule_id
+  fields:
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: details_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granules_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: is_graphics_in_pdf
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: mods_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pdf_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: premis_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: related_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: txt_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: zip_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: congressional_directories
+  table_name: congressional_directories
+  description: null
+  is_main: true
+  create_raw: true
+  id_fields:
+  - package_id
+  fields:
+  - name: branch
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: congress
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: document_type
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author1
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author2
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: ils_system_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: migrated_doc_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pdf_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: publisher
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: su_doc_class_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: txt_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields:
+  - member_granules
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: congressional_directories_granules
+  table_name: congressional_directories_granules
+  description: null
+  is_main: false
+  create_raw: true
+  id_fields:
+  - granule_id
+  fields:
+  - name: authority_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: biography
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: bioguide_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: facebook_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: gpo_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: instagram_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: official_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: other_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: population
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: sub_granule_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: twitter_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: youtube_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: congressional_reports
+  table_name: congressional_reports
+  description: null
+  is_main: true
+  create_raw: true
+  id_fields:
+  - package_id
+  fields:
+  - name: branch
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: chamber
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: congress
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: document_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: document_type
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author1
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author2
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granules_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: migrated_doc_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pages
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: publisher
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: report_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: session
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: su_doc_class_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: subtitle
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields:
+  - congressional_reports_granules
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: congressional_reports_granules
+  table_name: congressional_reports_granules
+  description: null
+  is_main: false
+  create_raw: true
+  id_fields:
+  - granule_id
+  fields:
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: hearings
+  table_name: hearings
+  description: null
+  is_main: true
+  create_raw: true
+  id_fields:
+  - package_id
+  fields:
+  - name: branch
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: chamber
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: congress
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: details_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: document_type
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author1
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author2
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: held_dates
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: migrated_doc_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: mods_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pages
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pdf_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: premis_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: publisher
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: session
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: su_doc_class_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: txt_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: zip_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields:
+  - hearings_granules
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: hearings_granules
+  table_name: hearings_granules
+  description: null
+  is_main: false
+  create_raw: true
+  id_fields:
+  - granule_id
+  fields:
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: details_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granules_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: graphics_in_pdf
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: is_appropriation
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: jacketnumber
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: mods_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pdf_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: premis_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: related_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: txt_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: zip_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: treaties
+  table_name: treaties
+  description: null
+  is_main: true
+  create_raw: true
+  id_fields:
+  - package_id
+  fields:
+  - name: branch
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: chamber
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: congress
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: details_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: document_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: document_type
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author1
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: government_author2
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granules_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: ils_system_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: migrated_doc_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: mods_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pages
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pdf_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: premis_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: publisher
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: session
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: su_doc_class_number
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: treaty_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: txt_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: zip_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields:
+  - treaties_granules
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: treaties_granules
+  table_name: treaties_granules
+  description: null
+  is_main: false
+  create_raw: true
+  id_fields:
+  - granule_id
+  fields:
+  - name: category
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_code
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: collection_name
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date_issued
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: details_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: doc_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_class
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: granule_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: is_graphics_in_pdf
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: last_modified
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: mods_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: package_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: pdf_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: premis_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: summary
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: title
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: txt_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: zip_url
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3

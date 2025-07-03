@@ -1,0 +1,4 @@
+name: congressional_schema
+version: '1.0'
+description: Schema imported from configs/congressional_schema.yaml
+data_types: []

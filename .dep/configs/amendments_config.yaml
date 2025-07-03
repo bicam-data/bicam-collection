@@ -1,0 +1,449 @@
+- name: amendments
+  table_name: amendments
+  description: null
+  is_main: true
+  create_raw: true
+  id_fields:
+  - amendment_id
+  fields:
+  - name: actions_count
+    type: integer
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: amended_amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amended_bill_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amended_treaty_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amendment_number
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amendment_type
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amendments_to_amendment_count
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: chamber
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: congress
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: cosponsors_count
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: description
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: notes
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: proposed_at
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: purpose
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: submitted_at
+    type: datetime
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: updated_at
+    type: datetime
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields:
+    - sponsors
+  related_fields:
+    - actions
+    - cosponsors
+    - texts
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+- name: amendments_actions
+  table_name: amendments_actions
+  description: null
+  is_main: false
+  create_raw: true
+  id_fields:
+  - amendment_id
+  - action_id
+  fields:
+  - name: action_code
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: action_date
+    type: datetime
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: action_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: action_type
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amendment_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: calendar
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: calendar_number
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: source_system
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: source_system_code
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: text
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields:
+  - recorded_votes
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+
+- name: amendments_actions_recorded_votes
+  table_name: amendments_actions_recorded_votes
+  description: null
+  is_main: false
+  create_raw: false
+  id_fields:
+  - action_id
+  - amendment_id
+  fields:
+  - name: action_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: chamber
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: congress
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: date
+    type: datetime
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: roll_number
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: session
+    type: integer
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: url
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+
+- name: amendments_cosponsors
+  table_name: amendments_cosponsors
+  description: null
+  is_main: false
+  create_raw: true
+  id_fields:
+  - amendment_id
+  - bioguide_id
+  fields:
+  - name: amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: bioguide_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+
+- name: amendments_texts
+  table_name: amendments_texts
+  description: null
+  is_main: false
+  create_raw: true
+  id_fields:
+  - amendment_id
+  - html
+  - pdf
+  - xml
+  - url
+  fields:
+  - name: amendment_id
+    type: string
+    required: true
+    description: null
+    max_length: null
+    default: null
+  - name: date
+    type: datetime
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: description
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: formatted_text
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: html
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: pdf
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: type
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: url
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: xml
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+  batch_size: 1000
+  checkpoint_frequency: 100
+  retry_attempts: 3
+
+- name: amendments_sponsors
+  table_name: amendments_sponsors
+  description: null
+  is_main: false
+  create_raw: false
+  id_fields:
+  - amendment_id
+  - bioguide_id
+  fields:
+  - name: amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: bioguide_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+
+- name: amendments_amended_bills
+  table_name: amendments_amended_bills
+  description: null
+  is_main: false
+  create_raw: false
+  id_fields:
+  - amendment_id
+  - bill_id
+  fields:
+  - name: amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: bill_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+
+- name: amendments_amended_treaties
+  table_name: amendments_amended_treaties
+  description: null
+  is_main: false
+  create_raw: false
+  id_fields:
+  - amendment_id
+  - treaty_id
+  fields:
+  - name: amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: treaty_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []
+
+- name: amendments_amended_amendments
+  table_name: amendments_amended_amendments
+  description: null
+  is_main: false
+  create_raw: false
+  id_fields:
+  - amendment_id
+  - amended_amendment_id
+  fields:
+  - name: amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  - name: amended_amendment_id
+    type: string
+    required: false
+    description: null
+    max_length: null
+    default: null
+  nested_fields: []
+  related_fields: []

@@ -1,0 +1,44 @@
+# Configuration for Congressional Committees Data Type
+# This file defines the schema structure and processing rules for committees data
+
+data_type: "committees"
+api_data_type: "committee"  # Used in Congressional API endpoints
+
+# Database schemas
+schemas:
+  raw: "bicam_raw_congressional"
+  staging: "bicam_staging_congressional" 
+  production: "bicam_congressional"
+
+# Table configurations
+tables:
+  # Main committees table
+  - name: "committees"
+    table_name: "committees"
+    is_main: true
+    create_raw: true
+    id_fields: ["committees_id"]
+    nested_fields: []  # TODO: Define nested fields from API response
+    
+    fields:
+      - name: "committees_id"
+        type: "varchar"
+        max_length: 50
+        nullable: false
+        description: "Unique committee identifier"
+      
+      # TODO: Add more fields based on Congressional API response structure
+      - name: "congress"
+        type: "integer"
+        nullable: true
+        description: "Congress number"
+      
+      - name: "update_date"
+        type: "datetime"
+        nullable: true
+        description: "Last update date"
+
+  # TODO: Add related tables as needed based on API structure
+  # Example related tables:
+  # - committees_actions
+  # - committees_texts
