@@ -14,7 +14,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from ...schema_loader import get_all_data_type_configs
 from ..base import CongressionalBaseDatabaseNormalizer
 
 logger = logging.getLogger(__name__)
@@ -51,32 +50,6 @@ class TreatiesDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
     # =============================================================================
     # TREATIES-SPECIFIC IMPLEMENTATIONS
     # =============================================================================
-
-    def _get_related_tables_with_raw_data(self) -> list[str]:
-        """Get list of related table suffixes that have raw data tables for treaties."""
-        try:
-            all_configs = get_all_data_type_configs(self.config_path)
-            related_tables = []
-
-            for config in all_configs:
-                if config.is_main or not config.create_raw:
-                    continue
-
-                if config.table_name.startswith("treaties_"):
-                    table_suffix = config.table_name.replace("treaties_", "")
-                    related_tables.append(table_suffix)
-                else:
-                    table_suffix = config.name.replace("treaties_", "")
-                    related_tables.append(table_suffix)
-
-            logger.info(f"Related tables: {related_tables}")
-            return related_tables
-
-        except Exception as e:
-            logger.error(f"Error loading related tables from config: {e}")
-            fallback_list = []
-            logger.info(f"Using fallback list: {fallback_list}")
-            return fallback_list
 
     def _process_item_record(
         self, raw_row: dict[str, Any]
@@ -150,7 +123,7 @@ class TreatiesDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
         )
 
         logger.debug(
-        f"Successfully processed treaty {existing_id}: {len(flattened)} main fields, {len(extracted_lists)} list tables"
+            f"Successfully processed treaty {existing_id}: {len(flattened)} main fields, {len(extracted_lists)} list tables"
         )
         return flattened, extracted_lists
 

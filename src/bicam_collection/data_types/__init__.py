@@ -29,18 +29,13 @@ from .abstract import (
     AbstractFetcher,
     AbstractSpecializedAssets,
 )
+
+# Expose Congressional base classes for convenience
 from .congressional.base import (
     CongressionalBaseCleaner,
     CongressionalBaseDatabaseNormalizer,
     CongressionalBaseFetcher,
     CongressionalBaseSpecializedAssets,
-)
-
-# Import schema loader for configuration management
-from .schema_loader import (
-    get_all_data_type_configs,
-    get_data_type_config,
-    get_main_data_type_config,
 )
 
 __all__ = [
@@ -54,8 +49,4 @@ __all__ = [
     "CongressionalBaseDatabaseNormalizer",
     "CongressionalBaseFetcher",
     "CongressionalBaseSpecializedAssets",
-    # Configuration utilities
-    "get_data_type_config",
-    "get_all_data_type_configs",
-    "get_main_data_type_config",
 ]

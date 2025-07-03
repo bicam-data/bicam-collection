@@ -19,6 +19,8 @@ from typing import Any, Literal
 
 import asyncpg
 
+from bicam_collection.libs.data_type_registry import get_global_registry
+
 from ....libs.batch_accumulator import BatchAccumulator
 from ....libs.checkpoint import (
     HierarchicalProgressTracker,
@@ -28,7 +30,6 @@ from ....libs.checkpoint import (
 from ....libs.record_processing_context import RecordProcessingContext
 from ....libs.run_tracking import RunMetadata, RunType
 from ...abstract import AbstractDatabaseNormalizer
-from ...schema_loader import get_all_data_type_configs, get_main_data_type_config
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,12 @@ class CongressionalBaseDatabaseNormalizer(AbstractDatabaseNormalizer):
         kwargs.setdefault("target_schema", "bicam_staging_congressional")
         kwargs.setdefault("source_schema", "bicam_raw_congressional")
         super().__init__(**kwargs)
-        self.main_config = get_main_data_type_config(self.config_path)
-        self.main_table_name, self.main_id_field, self.main_expected_key = (
-            self._get_main_id_configs()
+        self.main_config = get_global_registry().get_data_type_config(
+            self.data_type_name
         )
+        self.main_table_name = self.main_config.table_name
+        self.main_id_field = self.main_config.id_field
+        self.main_expected_key = self.main_config.api.expected_key
 
         # Initialize class-level batch accumulator if needed
         if CongressionalBaseDatabaseNormalizer._batch_accumulator is None:
@@ -120,26 +123,8 @@ class CongressionalBaseDatabaseNormalizer(AbstractDatabaseNormalizer):
             return main_table_name, id_field, expected_key
 
     def _get_related_tables_with_raw_data(self) -> list[str]:
-        """Get list of related table suffixes that have raw data tables."""
-        try:
-            all_configs = get_all_data_type_configs(self.config_path)
-            related_tables = []
-
-            for config in all_configs:
-                if config.is_main or not config.create_raw:
-                    continue
-
-                if config.table_name.startswith(f"{self.data_type_name}_"):
-                    table_suffix = config.table_name.replace(
-                        f"{self.data_type_name}_", ""
-                    )
-                    related_tables.append(table_suffix)
-
-            return related_tables
-
-        except Exception as e:
-            logger.error(f"Error loading related tables from config: {e}")
-            return []
+        """Get related table suffixes from config."""
+        return self.main_config.related_tables
 
     # =============================================================================
     # BATCH ACCUMULATION METHODS

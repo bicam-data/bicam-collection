@@ -59,8 +59,6 @@ class NominationsFetcher(CongressionalBaseFetcher):
         This guarantees a non-null value so the progress-tracker can reliably
         decide whether the item was processed in a previous run.
         """
-
-        # 1. direct field
         return self.extract_item_id(list_item)
 
     # =============================================================================
@@ -72,7 +70,7 @@ class NominationsFetcher(CongressionalBaseFetcher):
     ) -> list[dict[str, Any]]:
         """Get actions from actions URL in full nomination data."""
         return await self.get_generic_related_data(
-            full_nomination_data, "actions", "actions"
+            full_nomination_data
         )
 
     async def get_nominations_committeeactivities(
@@ -139,7 +137,7 @@ class NominationsFetcher(CongressionalBaseFetcher):
     ) -> list[dict[str, Any]]:
         """Get hearings from hearings URL in full nomination data."""
         return await self.get_generic_related_data(
-            full_nomination_data, "hearings", "hearings"
+            full_nomination_data
         )
 
     async def get_nominations_individualnominees(
@@ -181,7 +179,7 @@ class NominationsFetcher(CongressionalBaseFetcher):
                     nominee.update(
                         {
                             "nomination_id": nomination_id,  # Link back to parent nomination
-                            "position_id": nominee_info.get("ordinal")
+                            "position_id": nominee_info.get("ordinal"),
                         }
                     )
 
@@ -192,62 +190,3 @@ class NominationsFetcher(CongressionalBaseFetcher):
                 continue
 
         return all_nominees
-
-    # =============================================================================
-    # UTILITY METHODS FOR BACKWARD COMPATIBILITY
-    # =============================================================================
-
-    async def sync_checkpoint_with_api_tracking(
-        self, force_current_time: bool = False
-    ) -> bool:
-        """
-        Sync the checkpoint system with the Congressional API last_processed_date tracking.
-        """
-        if not self.progress_tracker:
-            logger.warning("No progress tracker available for syncing")
-            return False
-
-        if (
-            not hasattr(self, "client")
-            or not hasattr(self.client, "db_pool")
-            or not self.client.db_pool
-        ):
-            logger.warning(
-                "No Congressional API client with database pool available for syncing"
-            )
-            return False
-
-        try:
-            # Get the last processed date from the checkpoint system
-            checkpoint_date = self.progress_tracker.checkpoint.last_processed_date
-
-            if force_current_time or not checkpoint_date:
-                from datetime import UTC, datetime
-
-                date_to_use = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-                logger.info(f"Using current time for sync: {date_to_use}")
-            else:
-                date_to_use = checkpoint_date
-                logger.info(f"Using checkpoint date for sync: {date_to_use}")
-
-            # Update the Congressional API tracking table
-            success = await self.client.update_last_processed_date(
-                self.data_type_name, date_to_use
-            )
-
-            if success:
-                logger.info(
-                    f"Successfully synced {self.data_type_name} last_processed_date to: {date_to_use}"
-                )
-                return True
-            else:
-                logger.error(
-                    f"Failed to sync {self.data_type_name} last_processed_date"
-                )
-                return False
-
-        except Exception as e:
-            logger.error(
-                f"Error syncing checkpoint with API tracking: {str(e)}", exc_info=True
-            )
-            return False

@@ -72,30 +72,24 @@ class CongressionalBaseFetcher(AbstractFetcher):
 
     def get_main_id_configs(self) -> tuple[str, str, str]:
         """
-        Get the expected key for full data API responses.
-
-        First tries to load from config.yaml, then falls back to
-        singular form of data type name as default.
-
-        Returns:
-            Expected key name for API response parsing
+        Get API / ID configuration from the new typed config system.
+        Returns (expected_key, id_field, outer_api_field).
         """
+        # Use typed config via global registry (avoids direct config_manager dependency)
+        from bicam_collection.libs.data_type_registry import get_global_registry
+
         try:
-            # Try to get expected key from config
-            from ...schema_loader import get_data_type_config
+            cfg = get_global_registry().get_data_type_config(self.data_type_name)
 
-            config = get_data_type_config(self.data_type_name)
-            expected_key = config.expected_key if config else None
-            outer_api_field = config.outer_api_field if config else None
-            id_fields = config.id_fields if config else None
+            expected_key = cfg.api.expected_key
+            outer_api_field = cfg.api.outer_field
+            id_field = cfg.id_field
 
-            if len(id_fields) > 1:
-                raise ValueError(f"Multiple id fields found for {self.data_type_name}")
-            else:
-                return expected_key, id_fields[0], outer_api_field
+            return expected_key, id_field, outer_api_field
 
-        except Exception as e:
-            logger.debug(f"Could not load expected_key from config: {e}")
+        except Exception as exc:
+            logger.error("Config lookup failed for %s: %s", self.data_type_name, exc)
+            # Fallback to old heuristic so the system still runs if config is missing
             return self.data_type_name, f"{self.data_type_name}_id", self.data_type_name
 
     # =============================================================================
@@ -2119,8 +2113,8 @@ class CongressionalBaseFetcher(AbstractFetcher):
     async def get_generic_related_data(
         self,
         full_data: dict[str, Any],
-        field_name: str,
-        expected_key: str | list[str],
+        field_name: str = None,
+        expected_key: str | list[str] = None,
     ) -> list[dict[str, Any]]:
         """
         Generic method to fetch related data from URLs in full_data.
@@ -2133,6 +2127,55 @@ class CongressionalBaseFetcher(AbstractFetcher):
         Returns:
             List of related data items
         """
+        # ------------------------------------------------------------------
+        # Resolve *field_name* / *expected_key* if the caller did not specify
+        # them explicitly.  We try, in order:
+        #   1. Config for the specific *related* data-type (e.g.  bills_actions)
+        #   2. Fall back to the *main* data-type config (current behaviour)
+        # ------------------------------------------------------------------
+
+        # Lazily import here to avoid circular dependencies
+        from bicam_collection.libs.data_type_registry import get_global_registry
+
+        if not field_name or not expected_key:
+            # Attempt to discover the related data-type config based on
+            #   {main_name}_{suffix}  – where *suffix* is the table alias as
+            # defined in the main config's *related_tables* list.
+            try:
+                if field_name:
+                    candidate_name = f"{self.data_type_name}_{field_name.lower()}"
+                    related_cfg = get_global_registry().get_data_type_config(
+                        candidate_name
+                    )
+                else:
+                    # Fall back to first related table that resolves
+                    related_cfg = None
+                    for suffix in self.main_config.related_tables:
+                        try:
+                            related_cfg = get_global_registry().get_data_type_config(
+                                f"{self.data_type_name}_{suffix}"
+                            )
+                            break
+                        except Exception as e:
+                            logger.error(f"Error getting related config: {e}")
+                            continue
+
+                if related_cfg:
+                    if not field_name:
+                        field_name = related_cfg.api.outer_field
+                    if not expected_key:
+                        expected_key = related_cfg.api.expected_key
+            except Exception as e:
+                logger.error(f"Error getting related config: {e}")
+                # Best-effort only – if discovery fails we fall back to main cf
+
+        # Final fallback so we *always* have sensible defaults
+        if not field_name:
+            field_name = self.main_config.api.outer_field
+
+        if not expected_key:
+            expected_key = self.main_config.api.expected_key
+
         if field_name not in full_data:
             return []
 

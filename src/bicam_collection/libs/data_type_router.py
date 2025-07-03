@@ -13,307 +13,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from ..data_types.abstract import (
-    AbstractCleaner,
-    AbstractDatabaseNormalizer,
-    AbstractFetcher,
+from .data_type_registry import (
+    get_global_registry,
+    register_data_type,
 )
 
 logger = logging.getLogger(__name__)
-
-
-class DataTypeRegistry:
-    """
-    Registry for data type components.
-
-    This class maintains a mapping of data types to their corresponding
-    fetcher, normalizer, and cleaner classes, along with their data source.
-    """
-
-    def __init__(self):
-        self._registry: dict[
-            str,
-            tuple[
-                type[AbstractFetcher],
-                type[AbstractDatabaseNormalizer],
-                type[AbstractCleaner],
-                str,
-                str,
-            ],
-        ] = {}
-
-    def register_data_type(
-        self,
-        data_type: str,
-        fetcher_class: type["AbstractFetcher"],
-        normalizer_class: type["AbstractDatabaseNormalizer"],
-        cleaner_class: type["AbstractCleaner"],
-        config_file: str,
-        data_source: str,
-    ):
-        """
-        Register a data type with its component classes.
-
-        Args:
-            data_type: Name of the data type (e.g., "bills")
-            fetcher_class: Fetcher class for this data type
-            normalizer_class: Normalizer class for this data type
-            cleaner_class: Cleaner class for this data type
-            config_file: Path to the config file for this data type
-            data_source: Data source category (e.g., "congressional", "govinfo")
-        """
-        self._registry[data_type] = (
-            fetcher_class,
-            normalizer_class,
-            cleaner_class,
-            config_file,
-            data_source,
-        )
-        logger.info(
-            f"Registered data type: {data_type} (source: {data_source}) with config: {config_file}"
-        )
-
-    def get_components(
-        self, data_type: str
-    ) -> tuple[
-        type["AbstractFetcher"],
-        type["AbstractDatabaseNormalizer"],
-        type["AbstractCleaner"],
-    ]:
-        """
-        Get component classes for a data type.
-
-        Args:
-            data_type: Name of the data type
-
-        Returns:
-            Tuple of (fetcher_class, normalizer_class, cleaner_class)
-
-        Raises:
-            ValueError: If data type is not registered
-        """
-        if data_type not in self._registry:
-            available_types = list(self._registry.keys())
-            raise ValueError(
-                f"Data type '{data_type}' not registered. Available types: {available_types}"
-            )
-
-        fetcher_class, normalizer_class, cleaner_class, config_file, data_source = (
-            self._registry[data_type]
-        )
-        return fetcher_class, normalizer_class, cleaner_class
-
-    def get_fetcher_class(self, data_type: str) -> type["AbstractFetcher"]:
-        """Get fetcher class for a data type."""
-        fetcher_class, _, _ = self.get_components(data_type)
-        return fetcher_class
-
-    def get_normalizer_class(
-        self, data_type: str
-    ) -> type["AbstractDatabaseNormalizer"]:
-        """Get normalizer class for a data type."""
-        _, normalizer_class, _ = self.get_components(data_type)
-        return normalizer_class
-
-    def get_cleaner_class(self, data_type: str) -> type["AbstractCleaner"]:
-        """Get cleaner class for a data type."""
-        _, _, cleaner_class = self.get_components(data_type)
-        return cleaner_class
-
-    def get_config_file(self, data_type: str) -> str:
-        """Get config file path for a data type."""
-        if data_type not in self._registry:
-            available_types = list(self._registry.keys())
-            raise ValueError(
-                f"Data type '{data_type}' not registered. Available types: {available_types}"
-            )
-
-        _, _, _, config_file, data_source = self._registry[data_type]
-        return config_file
-
-    def get_data_source(self, data_type: str) -> str:
-        """Get data source for a data type."""
-        if data_type not in self._registry:
-            available_types = list(self._registry.keys())
-            raise ValueError(
-                f"Data type '{data_type}' not registered. Available types: {available_types}"
-            )
-
-        _, _, _, config_file, data_source = self._registry[data_type]
-        return data_source
-
-    def get_schema_names(self, data_type: str) -> dict[str, str]:
-        """Get schema names for a data type based on its data source."""
-        data_source = self.get_data_source(data_type)
-
-        return {
-            "raw": f"bicam_raw_{data_source}",
-            "staging": f"bicam_staging_{data_source}",
-            "production": f"bicam_{data_source}",
-        }
-
-    def get_table_names(self, data_type: str) -> list[str]:
-        """
-        Get table names for a data type from its config file.
-
-        Args:
-            data_type: Name of the data type
-
-        Returns:
-            List of table names for this data type
-
-        Raises:
-            ValueError: If data type is not registered or config file cannot be read
-        """
-        config_file = self.get_config_file(data_type)
-
-        try:
-            # Try to load the config file
-            config_path = Path(config_file)
-            if not config_path.is_absolute():
-                project_root = _get_project_root()
-                config_path = project_root / config_file
-
-            if not config_path.exists():
-                logger.warning(f"Config file not found: {config_file}")
-                return [data_type]  # Fallback to data type name
-
-            with open(config_path, encoding="utf-8") as f:
-                config_data = yaml.safe_load(f)
-
-            if not config_data:
-                logger.warning(f"Empty config file: {config_file}")
-                return [data_type]
-
-            # Extract table names from the list of table configurations
-            table_names = []
-
-            if isinstance(config_data, list):
-                # list of table configurations
-                for table_config in config_data:
-                    if isinstance(table_config, dict) and "name" in table_config:
-                        table_names.append(table_config["name"])
-
-            # Sort to ensure consistent ordering with main table first
-            table_names.sort(key=lambda x: (x != data_type, x))
-
-            if not table_names:
-                logger.warning(f"No tables found for data type '{data_type}' in config")
-                return [data_type]
-
-            logger.debug(f"Found tables for {data_type}: {table_names}")
-            return table_names
-
-        except Exception as e:
-            logger.error(f"Error reading config file {config_file}: {e}")
-            return [data_type]  # Fallback to data type name
-
-    def get_table_config(self, data_type: str, table_name: str) -> dict:
-        """
-        Get configuration for a specific table.
-
-        Args:
-            data_type: Name of the data type
-            table_name: Name of the table
-
-        Returns:
-            Dictionary containing table configuration
-        """
-        config_file = self.get_config_file(data_type)
-
-        try:
-            config_path = Path(config_file)
-            if not config_path.is_absolute():
-                project_root = _get_project_root()
-                config_path = project_root / config_file
-
-            with open(config_path, encoding="utf-8") as f:
-                config_data = yaml.safe_load(f)
-
-            if not config_data:
-                return {}
-
-            if isinstance(config_data, list):
-                # New format: list of table configurations
-                for table_config in config_data:
-                    if (
-                        isinstance(table_config, dict)
-                        and table_config.get("name") == table_name
-                    ):
-                        return table_config
-                return {}
-
-            else:
-                logger.warning(f"Invalid config data format in {config_file}")
-                return {}
-
-        except Exception as e:
-            logger.error(f"Error reading table config for {table_name}: {e}")
-            return {}
-
-    def get_table_configs(self, data_type: str) -> dict:
-        """
-        Get all table configurations for a data type.
-
-        Args:
-            data_type: Name of the data type
-
-        Returns:
-            Dictionary containing all table configurations
-        """
-        config_file = self.get_config_file(data_type)
-
-        try:
-            config_path = Path(config_file)
-            if not config_path.is_absolute():
-                project_root = _get_project_root()
-                config_path = project_root / config_file
-
-            with open(config_path, encoding="utf-8") as f:
-                config_data = yaml.safe_load(f)
-
-            if not config_data:
-                return {}
-
-            if isinstance(config_data, list):
-                # New format: convert list to dictionary
-                table_configs = {}
-                for table_config in config_data:
-                    if isinstance(table_config, dict) and "name" in table_config:
-                        table_configs[table_config["name"]] = table_config
-                return table_configs
-
-            else:
-                logger.warning(f"Invalid config data format in {config_file}")
-                return {}
-
-        except Exception as e:
-            logger.error(f"Error reading config file {config_file}: {e}")
-            return {}
-
-    def list_data_types(self) -> list[str]:
-        """Get list of registered data types."""
-        return list(self._registry.keys())
-
-    def list_data_types_by_source(self, data_source: str) -> list[str]:
-        """Get list of registered data types for a specific data source."""
-        return [
-            data_type
-            for data_type, (_, _, _, _, source) in self._registry.items()
-            if source == data_source
-        ]
-
-    def list_data_sources(self) -> list[str]:
-        """Get list of available data sources."""
-        return sorted(
-            {data_source for _, _, _, _, data_source in self._registry.values()}
-        )
-
-    def is_registered(self, data_type: str) -> bool:
-        """Check if a data type is registered."""
-        return data_type in self._registry
 
 
 class DataTypeRouter:
@@ -324,8 +29,8 @@ class DataTypeRouter:
     and cleaner classes for specific data types.
     """
 
-    def __init__(self, registry: DataTypeRegistry):
-        self.registry = registry
+    def __init__(self):
+        self.registry = get_global_registry()
 
     def create_fetcher(self, data_type: str, api_client) -> Any:
         """
@@ -385,53 +90,9 @@ class DataTypeRouter:
         )
 
 
-# Global registry instance
-_global_registry = DataTypeRegistry()
-_registry_initialized = False
-
-
-def get_global_registry() -> DataTypeRegistry:
-    """Get the global data type registry."""
-    global _registry_initialized
-    if not _registry_initialized:
-        _register_builtin_types()
-        _registry_initialized = True
-    return _global_registry
-
-
-def register_data_type(
-    data_type: str,
-    fetcher_class: type["AbstractFetcher"],
-    normalizer_class: type["AbstractDatabaseNormalizer"],
-    cleaner_class: type["AbstractCleaner"],
-    config_file: str,
-    data_source: str,
-):
-    """
-    Register a data type with the global registry.
-
-    Args:
-        data_type: Name of the data type
-        fetcher_class: Fetcher class for this data type
-        normalizer_class: Normalizer class for this data type
-        cleaner_class: Cleaner class for this data type
-        config_file: Path to the config file for this data type
-        data_source: Data source category (e.g., "congressional", "govinfo")
-    """
-    _global_registry.register_data_type(
-        data_type,
-        fetcher_class,
-        normalizer_class,
-        cleaner_class,
-        config_file,
-        data_source,
-    )
-
-
 def create_router() -> DataTypeRouter:
     """Create a router using the global registry."""
-    return DataTypeRouter(_global_registry)
-
+    return DataTypeRouter()
 
 def _register_builtin_types():
     """Register built-in data types automatically by scanning data source directories."""
@@ -651,3 +312,7 @@ def _get_project_root() -> Path:
     # __file__ = <repo_root>/src/bicam_collection/libs/data_type_router.py
     # Need to move up 4 levels: libs → bicam_collection → src → repo_root
     return Path(__file__).resolve().parent.parent.parent.parent
+
+
+# Global registry instance
+_global_registry = get_global_registry()

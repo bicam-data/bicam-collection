@@ -19,6 +19,8 @@ from typing import Any
 import asyncpg
 from dateutil.parser import parse as parse_date
 
+from bicam_collection.libs.data_type_registry import get_global_registry
+
 from ....libs.checkpoint import (
     HierarchicalProgressTracker,
     ProcessingPhase,
@@ -26,7 +28,6 @@ from ....libs.checkpoint import (
 )
 from ....libs.run_tracking import RunMetadata, RunType
 from ...abstract import AbstractCleaner
-from ...schema_loader import get_all_data_type_configs
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,26 @@ class CongressionalBaseCleaner(AbstractCleaner):
     def _load_configs(self):
         """Lazy load the schema configurations."""
         if self._configs is None:
-            self._configs = get_all_data_type_configs(self.config_path)
+            try:
+                main_cfg = get_global_registry().get_data_type_config(
+                    self.data_type_name
+                )
+                configs = [main_cfg]
+
+                # Attempt to load configs for related tables if YAML exists; ignore missing
+                for suffix in main_cfg.related_tables:
+                    related_name = f"{self.data_type_name}_{suffix}"
+                    try:
+                        cfg = get_global_registry().get_data_type_config(related_name)
+                        configs.append(cfg)
+                    except FileNotFoundError:
+                        # Related table may not have its own config file yet
+                        continue
+
+                self._configs = configs
+            except Exception as exc:
+                logger.error("Failed to load configs via DataTypeRegistry: %s", exc)
+                self._configs = []
 
     # =============================================================================
     # CHECKPOINT MANAGEMENT
@@ -1352,18 +1372,30 @@ class CongressionalBaseCleaner(AbstractCleaner):
 
     def _get_config_table_name(self, config) -> str:
         """Get table name from config object."""
+        from bicam_collection.libs.data_type_config import DataTypeConfig as _DC
+
+        if isinstance(config, _DC):
+            return config.table_name
         if isinstance(config, dict):
             return config.get("table_name", "")
         return getattr(config, "table_name", "")
 
     def _get_config_fields(self, config):
         """Get fields from config object."""
+        from bicam_collection.libs.data_type_config import DataTypeConfig as _DC
+
+        if isinstance(config, _DC):
+            return config.schema.fields
         if isinstance(config, dict):
             return config.get("fields", [])
         return getattr(config, "fields", [])
 
     def _get_config_id_fields(self, config):
         """Get ID fields from config object."""
+        from bicam_collection.libs.data_type_config import DataTypeConfig as _DC
+
+        if isinstance(config, _DC):
+            return config.schema.id_fields
         if isinstance(config, dict):
             return config.get("id_fields", [])
         return getattr(config, "id_fields", [])

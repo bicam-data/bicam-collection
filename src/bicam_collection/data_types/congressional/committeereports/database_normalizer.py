@@ -14,7 +14,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from ...schema_loader import get_all_data_type_configs
 from ..base import CongressionalBaseDatabaseNormalizer
 
 logger = logging.getLogger(__name__)
@@ -52,32 +51,6 @@ class CommitteereportsDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
     # COMMITTEEREPORTS-SPECIFIC IMPLEMENTATIONS
     # =============================================================================
 
-    def _get_related_tables_with_raw_data(self) -> list[str]:
-        """Get list of related table suffixes that have raw data tables for committeereports."""
-        try:
-            all_configs = get_all_data_type_configs(self.config_path)
-            related_tables = []
-
-            for config in all_configs:
-                if config.is_main or not config.create_raw:
-                    continue
-
-                if config.table_name.startswith("committeereports_"):
-                    table_suffix = config.table_name.replace("committeereports_", "")
-                    related_tables.append(table_suffix)
-                else:
-                    table_suffix = config.name.replace("committeereports_", "")
-                    related_tables.append(table_suffix)
-
-            logger.info(f"Related tables: {related_tables}")
-            return related_tables
-
-        except Exception as e:
-            logger.error(f"Error loading related tables from config: {e}")
-            fallback_list = []
-            logger.info(f"Using fallback list: {fallback_list}")
-            return fallback_list
-
     def _process_item_record(
         self, raw_row: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
@@ -95,7 +68,6 @@ class CommitteereportsDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
         # Handle different data structures with committeereports-specific logic
         committeereport_data = {}
 
-
         if isinstance(data, dict):
             # Case 1: Data wrapped in "committeereports" key -> {"committeereports": {...}}
             if "committeeReports" in data:
@@ -104,7 +76,9 @@ class CommitteereportsDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
                 elif isinstance(data.get("committeeReports"), list):
                     committeereport_data = data["committeeReports"][0]
                 else:
-                    logger.error(f"Invalid committeereport data structure for {existing_id}")
+                    logger.error(
+                        f"Invalid committeereport data structure for {existing_id}"
+                    )
                     return {}, {}
                 logger.debug(
                     f"Found committeereport data wrapped in 'committeeReports' key for {existing_id}"
@@ -114,7 +88,9 @@ class CommitteereportsDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
                 key in data for key in ["isConferenceReport", "reportType", "part"]
             ):
                 committeereport_data = data
-                logger.debug(f"Found direct committeereport data (no wrapper) for {existing_id}")
+                logger.debug(
+                    f"Found direct committeereport data (no wrapper) for {existing_id}"
+                )
             # Case 3: Empty or invalid data structure
             else:
                 logger.error(
@@ -157,7 +133,7 @@ class CommitteereportsDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
         )
 
         logger.debug(
-        f"Successfully processed committeereport {existing_id}: {len(flattened)} main fields, {len(extracted_lists)} list tables"
+            f"Successfully processed committeereport {existing_id}: {len(flattened)} main fields, {len(extracted_lists)} list tables"
         )
         return flattened, extracted_lists
 

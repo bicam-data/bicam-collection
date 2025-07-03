@@ -78,14 +78,14 @@ class BillsFetcher(CongressionalBaseFetcher):
         self, full_bill_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get bill actions from actions URL in full bill data."""
-        return await self.get_generic_related_data(full_bill_data, "actions", "actions")
+        return await self.get_generic_related_data(full_bill_data)
 
     async def get_bills_cosponsors(
         self, full_bill_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get bill cosponsors from cosponsors URL in full bill data."""
         return await self.get_generic_related_data(
-            full_bill_data, "cosponsors", "cosponsors"
+            full_bill_data
         )
 
     async def get_bills_texts(
@@ -93,7 +93,7 @@ class BillsFetcher(CongressionalBaseFetcher):
     ) -> list[dict[str, Any]]:
         """Get bill text versions from textVersions URL in full bill data."""
         return await self.get_generic_related_data(
-            full_bill_data, "textVersions", "textVersions"
+            full_bill_data
         )
 
     async def get_bills_summaries(
@@ -101,7 +101,7 @@ class BillsFetcher(CongressionalBaseFetcher):
     ) -> list[dict[str, Any]]:
         """Get bill summaries from summaries URL in full bill data."""
         return await self.get_generic_related_data(
-            full_bill_data, "summaries", "summaries"
+            full_bill_data
         )
 
     async def get_bills_subjects(
@@ -113,14 +113,14 @@ class BillsFetcher(CongressionalBaseFetcher):
         {"subjects": {"legislativeSubjects": [...], "policyArea": {...}}}
         """
         return await self.get_generic_related_data(
-            full_bill_data, "subjects", ["subjects", "legislativeSubjects"]
+            full_bill_data
         )
 
     async def get_bills_titles(
         self, full_bill_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get bill titles from titles URL in full bill data."""
-        return await self.get_generic_related_data(full_bill_data, "titles", "titles")
+        return await self.get_generic_related_data(full_bill_data)
 
     async def get_bills_relatedbills(
         self, full_bill_data: dict[str, Any]
@@ -242,63 +242,3 @@ class BillsFetcher(CongressionalBaseFetcher):
                     )
 
         return committee_activities
-
-        # =============================================================================
-
-    # UTILITY METHODS FOR BACKWARD COMPATIBILITY
-    # =============================================================================
-
-    async def sync_checkpoint_with_api_tracking(
-        self, force_current_time: bool = False
-    ) -> bool:
-        """
-        Sync the checkpoint system with the Congressional API last_processed_date tracking.
-        """
-        if not self.progress_tracker:
-            logger.warning("No progress tracker available for syncing")
-            return False
-
-        if (
-            not hasattr(self, "client")
-            or not hasattr(self.client, "db_pool")
-            or not self.client.db_pool
-        ):
-            logger.warning(
-                "No Congressional API client with database pool available for syncing"
-            )
-            return False
-
-        try:
-            # Get the last processed date from the checkpoint system
-            checkpoint_date = self.progress_tracker.checkpoint.last_processed_date
-
-            if force_current_time or not checkpoint_date:
-                from datetime import UTC, datetime
-
-                date_to_use = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-                logger.info(f"Using current time for sync: {date_to_use}")
-            else:
-                date_to_use = checkpoint_date
-                logger.info(f"Using checkpoint date for sync: {date_to_use}")
-
-            # Update the Congressional API tracking table
-            success = await self.client.update_last_processed_date(
-                self.data_type_name, date_to_use
-            )
-
-            if success:
-                logger.info(
-                    f"Successfully synced {self.data_type_name} last_processed_date to: {date_to_use}"
-                )
-                return True
-            else:
-                logger.error(
-                    f"Failed to sync {self.data_type_name} last_processed_date"
-                )
-                return False
-
-        except Exception as e:
-            logger.error(
-                f"Error syncing checkpoint with API tracking: {str(e)}", exc_info=True
-            )
-            return False
