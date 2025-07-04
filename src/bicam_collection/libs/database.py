@@ -13,11 +13,6 @@ import asyncpg
 import yaml
 
 from .config import BicamConfig
-from .schema import (
-    DataTypeSchema,
-    FieldType,
-    SchemaField,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +122,7 @@ class DatabaseManager:
                 "bicam_final",
                 "bicam_metadata",
                 "bicam_runs",
+                "bicam_checkpoints",
             ]
 
             for schema_name in schema_names:
@@ -137,12 +133,10 @@ class DatabaseManager:
             # Execute essential SQL files for metadata and runs
             base_path = Path(__file__).parent / "sql"
             schema_sql_files = {
-                "bicam_staging_congressional": base_path
-                / "build_staging_schema_congressional.sql",
-                "bicam_staging_govinfo": base_path / "build_staging_schema_govinfo.sql",
                 "bicam_final": base_path / "build_schema_bicam.sql",
                 "bicam_metadata": base_path / "build_metadata_schema.sql",
                 "bicam_runs": base_path / "build_runs_schema.sql",
+                "bicam_checkpoints": base_path / "build_checkpoints_schema.sql",
             }
 
             # Set up schemas from SQL files
@@ -155,112 +149,14 @@ class DatabaseManager:
                 else:
                     logger.warning(f"No SQL file found for schema: {schema}")
 
-            # Now create dynamic tables from Pydantic schema configurations
-            # Discover all config.yaml files in data_types directory
-            data_types_path = Path(__file__).parent.parent / "data_types"
-            config_files = []
+            # ------------------------------------------------------------------
+            #  Insert default rows in metadata tables for every *main* data-type
+            # ------------------------------------------------------------------
+            await self._initialise_metadata_tables()
 
-            # Find all config.yaml files in data_types directory
-            for config_file in data_types_path.rglob("config.yaml"):
-                config_files.append(config_file)
-
-            logger.info(f"Found {len(config_files)} config.yaml files")
-
-            # Process each config file to create Pydantic schema objects
-            for config_file in config_files:
-                try:
-                    # Determine data type name and category from path
-                    # e.g., data_types/congressional/bills/config.yaml -> bills, congressional
-                    data_type_name = config_file.parent.name
-                    category = (
-                        config_file.parent.parent.name
-                    )  # congressional or govinfo
-
-                    logger.info(f"Processing config for {category}/{data_type_name}")
-
-                    # Load YAML config
-                    with open(config_file) as f:
-                        yaml_configs = yaml.safe_load(f)
-
-                    logger.debug(f"Loaded YAML from {config_file}: {yaml_configs}")
-                    logger.debug(f"Type of yaml_configs: {type(yaml_configs)}")
-
-                    if not yaml_configs:
-                        logger.warning(f"No configs loaded from {config_file}")
-                        continue
-
-                    # Handle case where YAML contains a single dict instead of a list
-                    if isinstance(yaml_configs, dict):
-                        yaml_configs = [yaml_configs]
-                    elif not isinstance(yaml_configs, list):
-                        logger.error(
-                            f"Invalid YAML structure in {config_file}: expected dict or list, got {type(yaml_configs)}"
-                        )
-                        continue
-
-                    # Process each config in the file (usually just one)
-                    for config_dict in yaml_configs:
-                        # Convert YAML field dictionaries to Pydantic SchemaField objects
-                        schema_fields = []
-                        for field_dict in config_dict.get("fields", []):
-                            # Map string types to FieldType enum
-                            field_type_str = field_dict.get("type", "string")
-                            try:
-                                field_type = FieldType(field_type_str)
-                            except ValueError:
-                                logger.warning(
-                                    f"Unknown field type '{field_type_str}', defaulting to STRING"
-                                )
-                                field_type = FieldType.STRING
-
-                            schema_field = SchemaField(
-                                name=field_dict.get("name", ""),
-                                type=field_type,
-                                required=field_dict.get("required", True),
-                                description=field_dict.get("description"),
-                                max_length=field_dict.get("max_length"),
-                                default=field_dict.get("default"),
-                            )
-                            schema_fields.append(schema_field)
-
-                        # Create Pydantic DataTypeSchema object
-                        data_type_schema = DataTypeSchema(
-                            name=config_dict.get("name", data_type_name),
-                            table_name=config_dict.get("table_name", data_type_name),
-                            is_main=config_dict.get("is_main", True),
-                            description=config_dict.get("description"),
-                            create_raw=config_dict.get("create_raw", True),
-                            fields=schema_fields,
-                            id_fields=config_dict.get("id_fields", []),
-                            related_fields=config_dict.get("related_fields", []),
-                        )
-
-                        # Convert to config object for compatibility with existing table creation
-                        config = type(
-                            "Config",
-                            (),
-                            {
-                                "name": data_type_schema.name,
-                                "table_name": data_type_schema.table_name_computed,
-                                "create_raw": data_type_schema.create_raw,
-                                "is_main": data_type_schema.is_main,
-                                "fields": data_type_schema.fields,  # These are now SchemaField objects
-                                "id_fields": data_type_schema.id_fields,
-                            },
-                        )()
-
-                        success = await self._create_tables_for_config(config, category)
-                        if not success:
-                            logger.error(
-                                f"Failed to create tables for {data_type_schema.name}"
-                            )
-                            return False
-
-                except Exception as e:
-                    logger.error(f"Error processing config file {config_file}: {e}")
-                    return False
-
-            logger.info("All schemas and tables created successfully")
+            logger.info(
+                "Schemas prepared successfully (tables will be created by individual loaders at runtime)"
+            )
             return True
 
         except Exception as e:
@@ -628,11 +524,14 @@ class DatabaseManager:
                     "public",
                     "bicam_raw_congressional",
                     "bicam_raw_govinfo",
+                    "bicam_staging_congressional",
+                    "bicam_staging_govinfo",
                     "bicam_congressional",
                     "bicam_govinfo",
                     "bicam_final",
                     "bicam_metadata",
                     "bicam_runs",
+                    "bicam_checkpoints",
                 }
                 validation_results["schemas_exist"] = required_schemas.issubset(
                     existing_schemas
@@ -691,6 +590,72 @@ class DatabaseManager:
             logger.error(f"Error getting database info: {e}")
             return {}
 
+    # ------------------------------------------------------------------
+    #  Metadata bootstrap helpers
+    # ------------------------------------------------------------------
+    async def _collect_main_data_types(self) -> dict[str, list[str]]:
+        """Return {category: [data_type, …]} for every *main* data-type found in config.yaml files."""
+        categories: dict[str, list[str]] = {"congressional": [], "govinfo": []}
+        data_types_path = Path(__file__).parent.parent / "data_types"
+
+        for cfg_file in data_types_path.rglob("config.yaml"):
+            category = cfg_file.parent.parent.name  # congressional / govinfo
+            data_type = cfg_file.parent.name
+
+            if category not in categories:
+                continue
+
+            try:
+                with open(cfg_file) as f:
+                    cfg_data = yaml.safe_load(f)
+
+                # normalise to list
+                if isinstance(cfg_data, dict):
+                    cfg_data = [cfg_data]
+
+                first_cfg = cfg_data[0] if cfg_data else {}
+                if first_cfg.get("is_main", True):
+                    categories[category].append(data_type)
+            except Exception as exc:
+                logger.warning("Failed parsing %s: %s", cfg_file, exc)
+
+        return categories
+
+    async def _ensure_metadata_row(self, conn, table: str, data_type: str):
+        row = await conn.fetchrow(
+            f"SELECT 1 FROM {table} WHERE data_type = $1", data_type
+        )
+        if row is None:
+            await conn.execute(
+                f"INSERT INTO {table} (data_type, last_processed_date, last_total_count) VALUES ($1, $2, $3)",
+                data_type,
+                "1789-01-01T00:00:00Z",
+                0,
+            )
+
+    async def _initialise_metadata_tables(self):
+        """Insert default rows (1789-01-01) for every main data-type if they are missing."""
+        categories = await asyncio.to_thread(self._collect_main_data_types)
+
+        if not categories["congressional"] and not categories["govinfo"]:
+            logger.warning(
+                "No data-types discovered – skipping metadata initialisation"
+            )
+            return
+
+        conn = await asyncpg.connect(self.db_config.connection_string)
+        try:
+            for category, dts in categories.items():
+                if not dts:
+                    continue
+                tbl = f"bicam_metadata.{category}_last_processed_dates"
+                for dt in dts:
+                    await self._ensure_metadata_row(conn, tbl, dt)
+
+            logger.info("Inserted default rows into metadata tables where needed")
+        finally:
+            await conn.close()
+
 
 async def setup_database(config: BicamConfig, recreate: bool = False) -> bool:
     """Set up the database, schemas, and tables"""
@@ -704,15 +669,16 @@ async def setup_database(config: BicamConfig, recreate: bool = False) -> bool:
 
         # Schemas to manage
         schemas_to_manage = [
-            "bicam_staging_congressional",
-            "bicam_staging_govinfo",
             "bicam_raw_congressional",
             "bicam_raw_govinfo",
+            "bicam_staging_congressional",
+            "bicam_staging_govinfo",
             "bicam_congressional",
             "bicam_govinfo",
             "bicam_final",
             "bicam_metadata",
             "bicam_runs",
+            "bicam_checkpoints",
         ]
 
         if recreate:

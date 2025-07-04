@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS bicam_runs.runs (
     priority INTEGER DEFAULT 1,
     tags TEXT[] DEFAULT '{}',
     created_by TEXT DEFAULT 'system',
-    
+
     status TEXT DEFAULT 'pending',
     started_at TIMESTAMP WITH TIME ZONE,
     completed_at TIMESTAMP WITH TIME ZONE,
@@ -139,8 +139,8 @@ CREATE INDEX IF NOT EXISTS idx_run_logs_timestamp ON bicam_runs.run_logs(timesta
 CREATE INDEX IF NOT EXISTS idx_active_locks_expires ON bicam_runs.active_locks(expires_at);
 
 -- Trigger to update updated_at on runs table
-CREATE OR REPLACE TRIGGER update_runs_updated_at 
-    BEFORE UPDATE ON bicam_runs.runs 
+CREATE OR REPLACE TRIGGER update_runs_updated_at
+    BEFORE UPDATE ON bicam_runs.runs
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Grant permissions
@@ -152,4 +152,4 @@ GRANT USAGE ON SCHEMA bicam_runs TO bicam_pipeline;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA bicam_runs TO bicam_pipeline;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA bicam_runs TO bicam_pipeline;
 
-COMMIT; 
+COMMIT;

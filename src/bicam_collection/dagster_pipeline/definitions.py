@@ -346,7 +346,7 @@ dagster asset materialize -a bills_actions_staging
 dagster asset materialize -g bills_pipeline
 
 ## 4. Environment variables needed
-export CONGRESS_API_KEYS="key1,key2,key3,key4"
+export CONGRESSIONAL_API_KEYS="key1,key2,key3,key4"
 export POSTGRESQL_HOST="localhost"
 export POSTGRESQL_DATABASE="bicam_collection"
 export POSTGRESQL_USERNAME="bicam_user"

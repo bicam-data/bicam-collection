@@ -1,0 +1,138 @@
+- name: committeereports
+  description: Congressional committee reports main data
+  
+  api:
+    expected_key: report
+    outer_field: reports
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committeereports
+    is_main: true
+    create_raw: true
+    id_fields: [report_id]
+    related_tables:
+      - bills
+      - treaties
+      - committees
+      - texts
+    fields:
+      - name: report_id
+        type: string
+      - name: report_type
+        type: string
+      - name: report_number
+        type: integer
+      - name: report_part
+        type: integer
+      - name: congress
+        type: integer
+      - name: session
+        type: integer
+      - name: title
+        type: string
+      - name: chamber
+        type: string
+      - name: is_conference_report
+        type: boolean
+      - name: issued_at
+        type: timestamp
+      - name: citation
+        type: string
+      - name: texts_count
+        type: integer
+      - name: updated_at
+        type: timestamp
+  
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: committeereports_committees
+  description: Committee reports committees data
+  
+  api:
+    expected_key: committee
+    outer_field: committees
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committeereports_committees
+    is_main: false
+    create_raw: true
+    id_fields: [report_id, committee_code]
+    fields:
+      - name: report_id
+        type: string
+      - name: committee_code
+        type: string
+      - name: committee_name
+        type: string
+  
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeereports_bills
+  description: Committee reports bills data
+  
+  api:
+    expected_key: bill
+    outer_field: bills
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committeereports_bills
+    is_main: false
+    create_raw: true
+    id_fields: [report_id, bill_id]
+    fields:
+      - name: report_id
+        type: string
+      - name: bill_id
+        type: string
+      - name: bill_type
+        type: string
+      - name: bill_number
+        type: float
+      - name: congress
+        type: integer
+  
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeereports_texts
+  description: Committee reports texts data
+  
+  api:
+    expected_key: text
+    outer_field: texts
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committeereports_texts
+    is_main: false
+    create_raw: true
+    id_fields: [report_id, formatted_text, pdf]
+    fields:
+      - name: report_id
+        type: string
+      - name: raw_text
+        type: string
+      - name: formatted_text
+        type: string
+      - name: formatted_text_is_errata
+        type: boolean
+      - name: pdf
+        type: string
+      - name: pdf_is_errata
+        type: boolean
+  
+  processing:
+    batch_size: 200
+    checkpoint_frequency: 100

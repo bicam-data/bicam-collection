@@ -1,0 +1,133 @@
+- name: committeeprints
+  description: Congressional committee prints main data
+
+  api:
+    expected_key: print
+    outer_field: prints
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: committeeprints
+    is_main: true
+    create_raw: true
+    id_fields: [print_id]
+    related_tables:
+      - bills
+      - committees
+      - texts
+    fields:
+      - name: print_id
+        type: string
+      - name: print_type
+        type: string
+      - name: jacket_number
+        type: string
+      - name: congress
+        type: integer
+      - name: chamber
+        type: string
+      - name: title
+        type: string
+      - name: print_number
+        type: string
+      - name: citation
+        type: string
+      - name: texts_count
+        type: integer
+      - name: updated_at
+        type: timestamp
+  
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: committeeprints_committees
+  description: Committee prints committees data
+  
+  api:
+    expected_key: committee
+    outer_field: committees
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committeeprints_committees
+    is_main: false
+    create_raw: true
+    id_fields: [print_id, committee_code]
+    fields:
+      - name: print_id
+        type: string
+      - name: committee_code
+        type: string
+      - name: committee_name
+        type: string
+  
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeeprints_bills
+  description: Committee prints bills data
+  
+  api:
+    expected_key: bill
+    outer_field: bills
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committeeprints_bills
+    is_main: false
+    create_raw: true
+    id_fields: [print_id, bill_id]
+    fields:
+      - name: print_id
+        type: string
+      - name: bill_id
+        type: string
+      - name: bill_type
+        type: string
+      - name: bill_number
+        type: float
+      - name: congress
+        type: integer
+  
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeeprints_texts
+  description: Committee prints texts data
+  
+  api:
+    expected_key: text
+    outer_field: texts
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committeeprints_texts
+    is_main: false
+    create_raw: true
+    id_fields: [print_id, formatted_text, pdf, html, xml, png]
+    fields:
+      - name: print_id
+        type: string
+      - name: raw_text
+        type: string
+      - name: formatted_text
+        type: string
+      - name: pdf
+        type: string
+      - name: html
+        type: string
+      - name: xml
+        type: string
+      - name: png
+        type: string
+  
+  processing:
+    batch_size: 200
+    checkpoint_frequency: 100

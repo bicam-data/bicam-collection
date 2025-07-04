@@ -1,0 +1,209 @@
+- name: amendments
+  description: Congressional amendments main data
+  
+  api:
+    expected_key: amendment
+    outer_field: amendments
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: amendments
+    is_main: true
+    create_raw: true
+    id_fields: [amendment_id]
+    related_tables:
+      - sponsors
+      - cosponsors
+      - on_behalf_of
+      - links
+      - amended_bills
+      - amended_treaties
+      - amended_amendments
+      - actions
+      - texts
+      - notes
+    fields:
+      - name: amendment_id
+        type: string
+      - name: amendment_type
+        type: string
+      - name: amendment_number
+        type: integer
+      - name: congress
+        type: integer
+      - name: chamber
+        type: string
+      - name: purpose
+        type: string
+      - name: description
+        type: string
+      - name: proposed_at
+        type: timestamp
+      - name: submitted_at
+        type: timestamp
+      - name: is_bill_amendment
+        type: boolean
+      - name: is_treaty_amendment
+        type: boolean
+      - name: is_amendment_amendment
+        type: boolean
+      - name: actions_count
+        type: integer
+      - name: cosponsors_count
+        type: integer
+      - name: cosponsors_withdrawn_count
+        type: integer
+      - name: texts_count
+        type: integer
+      - name: amendments_to_amendment_count
+        type: integer
+      - name: updated_at
+        type: timestamp
+  
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: amendments_sponsors
+  description: Amendment sponsors data
+  
+  api:
+    expected_key: sponsor
+    outer_field: sponsors
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: amendments_sponsors
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, bioguide_id]
+    fields:
+      - name: amendment_id
+        type: string
+      - name: bioguide_id
+        type: string
+      - name: display_name
+        type: string
+      - name: party
+        type: string
+      - name: state
+        type: string
+      - name: district
+        type: integer
+      - name: name
+        type: string
+  
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_cosponsors
+  description: Amendment cosponsors data
+  
+  api:
+    expected_key: cosponsor
+    outer_field: cosponsors
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: amendments_cosponsors
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, bioguide_id]
+    fields:
+      - name: amendment_id
+        type: string
+      - name: bioguide_id
+        type: string
+      - name: display_name
+        type: string
+      - name: party
+        type: string
+      - name: state
+        type: string
+      - name: district
+        type: integer
+      - name: is_original_cosponsor
+        type: boolean
+      - name: sponsorship_date
+        type: date
+      - name: sponsorship_withdrawal_date
+        type: date
+  
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_actions
+  description: Amendment actions data
+  
+  api:
+    expected_key: action
+    outer_field: actions
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: amendments_actions
+    is_main: false
+    create_raw: true
+    id_fields: [action_id]
+    related_tables:
+      - recordedvotes
+      - committees
+    fields:
+      - name: action_id
+        type: string
+      - name: amendment_id
+        type: string
+      - name: action_code
+        type: string
+      - name: action_date
+        type: timestamp
+      - name: text
+        type: string
+      - name: action_type
+        type: string
+      - name: source_system
+        type: string
+      - name: source_system_code
+        type: integer
+  
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_texts
+  description: Amendment texts data
+  
+  api:
+    expected_key: text
+    outer_field: texts
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: amendments_texts
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, date, type]
+    fields:
+      - name: amendment_id
+        type: string
+      - name: date
+        type: timestamp
+      - name: type
+        type: string
+      - name: raw_text
+        type: string
+      - name: pdf
+        type: string
+      - name: html
+        type: string
+  
+  processing:
+    batch_size: 200
+    checkpoint_frequency: 100

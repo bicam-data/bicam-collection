@@ -12,9 +12,12 @@ receive either this context object or the specific component they need.  This re
 lots of duplicated boiler-plate currently scattered around `dagster_pipeline/main.py`
 and the base classes.
 """
+
 from __future__ import annotations
 
+import json
 import logging
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,6 +45,86 @@ class ApplicationContext:
     _run_manager: RunManager | None = field(default=None, init=False)
     _db_pool: asyncpg.Pool | None = field(default=None, init=False)
 
+    # ------------------------------------------------------------------
+    #  Dataclass lifecycle hooks
+    # ------------------------------------------------------------------
+    def __post_init__(self):
+        """Apply logging configuration exactly once when the context is created."""
+        self._configure_logging(self.config.logging)
+
+    # ------------------------------------------------------------------
+    #  Internal helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _configure_logging(logging_cfg):  # type: ignore[override]
+        """(Re)configure the root logger based on *LoggingConfig* settings.
+
+        This centralises structured-logging setup so all components share the
+        same configuration regardless of who imported *logging* first.
+        """
+
+        # Map level enum / string to numeric level
+        level = (
+            logging_cfg.level
+            if isinstance(logging_cfg.level, int)
+            else getattr(logging, str(logging_cfg.level).upper(), logging.INFO)
+        )
+
+        # Remove any previously registered root handlers to avoid duplicates
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+
+        # ------------------------------------------------------------------
+        #  Build formatter – basic text vs. structured JSON
+        # ------------------------------------------------------------------
+        if logging_cfg.enable_structured_logging:
+
+            class _JSONFormatter(logging.Formatter):
+                def format(self, record: logging.LogRecord) -> str:  # noqa: D401
+                    log_entry = {
+                        "time": self.formatTime(record, self.datefmt),
+                        "level": record.levelname,
+                        "name": record.name,
+                        "message": record.getMessage(),
+                    }
+                    if record.exc_info:
+                        log_entry["exc_info"] = self.formatException(record.exc_info)
+                    return json.dumps(log_entry, ensure_ascii=False)
+
+            formatter: logging.Formatter = _JSONFormatter()
+        else:
+            formatter = logging.Formatter(logging_cfg.log_format)
+
+        # ------------------------------------------------------------------
+        #  Handlers – console and/or file
+        # ------------------------------------------------------------------
+        handlers: list[logging.Handler] = []
+
+        if logging_cfg.log_to_console:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            handlers.append(console_handler)
+
+        if logging_cfg.log_file:
+            log_path = Path(logging_cfg.log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+            file_handler.setFormatter(formatter)
+            handlers.append(file_handler)
+
+        # Fallback to a default console handler if none configured
+        if not handlers:
+            fallback_handler = logging.StreamHandler(sys.stdout)
+            fallback_handler.setFormatter(formatter)
+            handlers.append(fallback_handler)
+
+        root = logging.getLogger()
+        root.setLevel(level)
+        for h in handlers:
+            root.addHandler(h)
+
+        root.debug("Logging configured (level=%s, handlers=%s)", level, len(handlers))
+
     # ---------------------------------------------------------------------
     #  Public factory helpers
     # ---------------------------------------------------------------------
@@ -67,17 +150,31 @@ class ApplicationContext:
             logger.info("Created SystemAPIKeyManager with %s API keys", len(keys))
         return self._api_key_manager
 
-    def get_checkpoint_manager(self) -> CheckpointManager:
+    def get_checkpoint_manager(self):
+        """Return checkpoint manager (SQLite or Postgres depending on config)."""
         if self._checkpoint_manager is None:
-            db_path = (
-                Path(self.config.processing.temp_directory)
-                / ".."
-                / ".."
-                / "checkpoints"
-                / "checkpoints.db"
-            ).resolve()
-            self._checkpoint_manager = CheckpointManager(db_path)
-            logger.info("Created CheckpointManager at %s", db_path)
+            if getattr(self.config.processing, "use_postgres_checkpoints", False):
+                # Lazy import to avoid mandatory psycopg2 install for SQLite users
+                from .pg_checkpoint import PostgresCheckpointManager
+
+                db_cfg = self.config.database
+                self._checkpoint_manager = PostgresCheckpointManager(
+                    host=db_cfg.host,
+                    port=db_cfg.port,
+                    database=db_cfg.database,
+                    user=db_cfg.username,
+                    password=db_cfg.password,
+                )
+                logger.info("Using PostgreSQL-backed checkpoint manager")
+            else:
+                # Store SQLite checkpoints inside the project *data/checkpoints* dir
+                project_root = (
+                    Path(__file__).resolve().parents[4]
+                )  # src/bicam_collection/libs/ → project root
+                db_path = project_root / "data" / "checkpoints" / "checkpoints.db"
+                self._checkpoint_manager = CheckpointManager(db_path)
+                logger.info("Using SQLite checkpoint manager at %s", db_path)
+
         return self._checkpoint_manager
 
     async def get_db_pool(self) -> asyncpg.Pool:

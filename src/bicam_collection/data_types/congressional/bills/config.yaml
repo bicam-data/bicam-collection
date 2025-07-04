@@ -1,0 +1,424 @@
+- name: bills
+  description: Congressional bills main data
+
+  api:
+    expected_key: bill
+    outer_field: bill
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: bills
+    is_main: true
+    create_raw: true
+    id_fields: [bill_id]
+    related_tables:
+      - actions
+      - cosponsors
+      - subjects
+      - summaries
+      - texts
+      - titles
+      - relatedbills
+    fields:
+      - name: bill_id
+        type: string
+      - name: bill_type
+        type: string
+      - name: number
+        type: string
+      - name: congress
+        type: integer
+      - name: title
+        type: string
+      - name: origin_chamber
+        type: string
+      - name: update_date
+        type: timestamp
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: bills_actions
+  description: Congressional bills actions data
+
+  api:
+    expected_key: actions
+    outer_field: actions
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: bills_actions
+    is_main: false
+    create_raw: true
+    id_fields: [bill_id,action_id]
+    fields:
+      - name: action_id
+        type: string
+      - name: bill_id
+        type: string
+      - name: action_date
+        type: date
+      - name: text
+        type: string
+      - name: action_code
+        type: string
+      - name: source_system
+        type: string
+  
+  processing:
+    batch_size: 100
+
+- name: bills_actions_committees
+  description: Bills actions committees data
+  
+  schema:
+    table_name: bills_actions_committees
+    is_main: false
+    create_raw: false
+    id_fields: [bill_id, action_id, committee_code]
+    fields:
+      - name: action_id
+        type: string
+      - name: bill_id
+        type: string
+      - name: committee_code
+        type: string
+
+- name: bills_actions_recordedvotes
+  description: Bills actions recorded votes data
+  
+  schema:
+    table_name: bills_actions_recordedvotes
+    is_main: false
+    create_raw: false
+    id_fields: [action_id, bill_id, url]
+    fields:
+      - name: action_id
+        type: string
+      - name: bill_id
+        type: string
+      - name: chamber
+        type: string
+      - name: congress
+        type: integer
+      - name: date
+        type: timestamp
+      - name: roll_number
+        type: integer
+      - name: session
+        type: integer
+      - name: url
+        type: string
+
+- name: bills_committeeactivities
+  description: Bills committee activities data
+  
+  api:
+    expected_key: committees
+    outer_field: committees
+  
+  schema:
+    table_name: bills_committeeactivities
+    is_main: false
+    create_raw: false
+    id_fields: [bill_id, committee_code, activity_date, activity_name]
+    fields:
+      - name: bill_id
+        type: string
+      - name: committee_code
+        type: string
+      - name: name
+        type: string
+      - name: activity_date
+        type: date
+      - name: activity_name
+        type: string
+
+- name: bills_cosponsors
+  description: Congressional bills cosponsors data
+  
+  api:
+    expected_key: cosponsors
+    outer_field: cosponsors
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: bills_cosponsors
+    is_main: false
+    create_raw: true
+    id_fields: [bill_id, bioguide_id]
+    fields:
+      - name: bill_id
+        type: string
+      - name: bioguide_id
+        type: string
+      - name: party
+        type: string
+      - name: state
+        type: string
+      - name: district
+        type: integer
+      - name: sponsorship_date
+        type: date
+      - name: is_original_cosponsor
+        type: boolean
+  
+  processing:
+    batch_size: 100
+
+- name: bills_subjects
+  description: Congressional bills subjects data
+  
+  api:
+    expected_key: [subjects, legislativeSubjects]
+    outer_field: subjects
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: bills_subjects
+    is_main: false
+    create_raw: true
+    id_fields: [bill_id, subject_name]
+    fields:
+      - name: bill_id
+        type: string
+      - name: subject_name
+        type: string
+      - name: update_date
+        type: timestamp
+  
+  processing:
+    batch_size: 100
+
+- name: bills_summaries
+  description: Congressional bills summaries data
+  
+  api:
+    expected_key: summaries
+    outer_field: summaries
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: bills_summaries
+    is_main: false
+    create_raw: true
+    id_fields: [bill_id, version_code]
+    fields:
+      - name: bill_id
+        type: string
+      - name: version_code
+        type: string
+      - name: action_date
+        type: date
+      - name: action_desc
+        type: string
+      - name: text
+        type: string
+      - name: update_date
+        type: timestamp
+  
+  processing:
+    batch_size: 50
+
+- name: bills_texts
+  description: Congressional bills text data
+  
+  api:
+    expected_key: textVersions
+    outer_field: text
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: bills_texts
+    is_main: false
+    create_raw: true
+    id_fields: [bill_id, type]
+    fields:
+      - name: bill_id
+        type: string
+      - name: type
+        type: string
+      - name: date
+        type: date
+      - name: formats
+        type: array
+  
+  processing:
+    batch_size: 50
+
+- name: bills_titles
+  description: Congressional bills titles data
+
+  api:
+    expected_key: titles
+    outer_field: titles
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: bills_titles
+    is_main: false
+    create_raw: true
+    id_fields: [bill_id, title_type_code, chamber_code]
+    fields:
+      - name: bill_id
+        type: string
+      - name: title
+        type: string
+      - name: title_type
+        type: string
+      - name: title_type_code
+        type: integer
+      - name: chamber_code
+        type: string
+      - name: chamber_name
+        type: string
+      - name: bill_text_version_name
+        type: string
+      - name: bill_text_version_code
+        type: string
+      - name: update_date
+        type: timestamp
+
+  processing:
+    batch_size: 100
+
+- name: bills_relatedbills
+  description: Congressional bills related bills data
+
+  api:
+    expected_key: relatedBills
+    outer_field: relatedbills
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: bills_relatedbills
+    is_main: false
+    create_raw: true
+    id_fields: [bill_id, relatedbill_id, relationship_type]
+    fields:
+      - name: bill_id
+        type: string
+      - name: relatedbill_id
+        type: string
+      - name: relationship_identified_by
+        type: string
+      - name: relationship_type
+        type: string
+  
+  processing:
+    batch_size: 100
+
+- name: bills_cbocostestimates
+  description: Bills CBO cost estimates data
+
+  schema:
+    table_name: bills_cbocostestimates
+    is_main: false
+    create_raw: false
+    id_fields: [bill_id, url]
+    fields:
+      - name: bill_id
+        type: string
+      - name: description
+        type: string
+      - name: pub_date
+        type: date
+      - name: title
+        type: string
+      - name: url
+        type: string
+
+- name: bills_laws
+  description: Bills laws data
+
+  schema:
+    table_name: bills_laws
+    is_main: false
+    create_raw: false
+    id_fields: [bill_id, law_number]
+    fields:
+      - name: bill_id
+        type: string
+      - name: law_number
+        type: string
+      - name: law_type
+        type: string
+
+- name: bills_notes
+  description: Bills notes data
+
+  schema:
+    table_name: bills_notes
+    is_main: false
+    create_raw: false
+    id_fields: [bill_id, note_text]
+    fields:
+      - name: bill_id
+        type: string
+      - name: note_text
+        type: string
+
+- name: bills_notes_links
+  description: Bills notes links data
+
+  schema:
+    table_name: bills_notes_links
+    is_main: false
+    create_raw: false
+    id_fields: [bill_id, url]
+    fields:
+      - name: bill_id
+        type: string
+      - name: name
+        type: string
+      - name: url
+        type: string
+
+- name: bills_committeereports
+  description: Bills committee reports data
+
+  schema:
+    table_name: bills_committeereports
+    is_main: false
+    create_raw: false
+    id_fields: [bill_id, citation]
+    fields:
+      - name: bill_id
+        type: string
+      - name: report_id
+        type: string
+      - name: citation
+        type: string
+
+- name: bills_sponsors
+  description: Bills sponsors data
+  
+  schema:
+    table_name: bills_sponsors
+    is_main: false
+    create_raw: false
+    id_fields: [bill_id, bioguide_id]
+    fields:
+      - name: bill_id
+        type: string
+      - name: bioguide_id
+        type: string
+      - name: party
+        type: string
+      - name: state
+        type: string
+      - name: district
+        type: integer
+      - name: first_name
+        type: string
+      - name: last_name
+        type: string

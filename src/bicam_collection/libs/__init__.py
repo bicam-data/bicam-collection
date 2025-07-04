@@ -7,12 +7,14 @@ data pipeline system.
 
 from .checkpoint import CheckpointManager, HierarchicalProgressTracker, ProgressTracker
 from .config import BicamConfig, create_sample_config, load_config
-from .data_type_router import (
+from .data_type_registry import (
     DataTypeRegistry,
-    DataTypeRouter,
-    create_router,
     get_global_registry,
     register_data_type,
+)
+from .data_type_router import (
+    DataTypeRouter,
+    create_router,
 )
 from .database import DatabaseManager, setup_database, setup_database_sync
 from .run_tracking import RunContext, RunManager, get_run_manager, init_run_manager

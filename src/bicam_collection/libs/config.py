@@ -14,6 +14,28 @@ from urllib.parse import quote_plus
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 
+# ------------------------------------------------------------------
+#  Automatically load environment variables from a local *.env* file
+#  -----------------------------------------------------------------
+#  We defer the import so that *python-dotenv* only becomes a runtime
+#  dependency when users rely on the implicit *.env* loading behaviour.
+#  This keeps the library usable in restricted environments where the
+#  package might be unavailable.
+# ------------------------------------------------------------------
+try:
+    from dotenv import load_dotenv  # type: ignore
+
+    # Load *.env* from the current working directory (project root).  We do
+    # *not* override pre-existing environment variables so explicit exports
+    # still win.
+    load_dotenv(override=False)
+except ModuleNotFoundError:  # pragma: no cover – optional dependency
+    # If python-dotenv is not installed the user must export variables
+    # explicitly in the shell.  We don't hard-fail because most pipelines
+    # are executed in container images where secrets are injected via
+    # `docker run -e …` or Kubernetes ConfigMaps.
+    pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,13 +105,20 @@ class ProcessingConfig(BaseModel):
     """Data processing configuration settings"""
 
     chunk_size: int = Field(1000, description="Chunk size for batch processing")
-    max_workers: int = Field(4, description="Maximum number of worker processes")
+    max_workers: int = Field(
+        min(os.cpu_count() - 4, 32),
+        description="Maximum number of worker processes",
+    )
     temp_directory: Path = Field(
         Path("/tmp/bicam-processing"), description="Temporary processing directory"
     )
     memory_limit_gb: float = Field(4.0, description="Memory limit in GB")
     enable_parallel_processing: bool = Field(
         True, description="Enable parallel processing"
+    )
+    use_postgres_checkpoints: bool = Field(
+        True,
+        description="Store checkpoints in PostgreSQL instead of local SQLite",
     )
 
     @field_validator("temp_directory")
@@ -156,13 +185,14 @@ class LoggingConfig(BaseModel):
     """Logging configuration settings"""
 
     level: LogLevel = Field(LogLevel.INFO, description="Logging level")
-    log_file: Path | None = Field(None, description="Log file path")
+    log_file: Path | None = Field(Path("logs/bicam.log"), description="Log file path")
     log_format: str = Field(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         description="Log format string",
     )
     enable_structured_logging: bool = Field(
-        True, description="Enable structured logging"
+        False,
+        description="Enable structured logging (JSON lines).  Defaults to plain text logs.",
     )
     log_to_console: bool = Field(True, description="Log to console")
 
@@ -217,10 +247,25 @@ class BicamConfig(BaseSettings):
             password=os.getenv("POSTGRESQL_PASSWORD", ""),
         )
 
-        # Map scraping configuration
+        # ------------------------------------------------------------------
+        #  Scraping API keys – support singular *…_API_KEY* or comma-separated
+        #  *…_API_KEYS* variants.  If both are provided we merge them into a
+        #  single comma-separated string so downstream splitting logic works.
+        # ------------------------------------------------------------------
+
+        def _merge_keys(single_var: str, multi_var: str) -> str | None:
+            single = os.getenv(single_var)
+            multi = os.getenv(multi_var)
+
+            if single and multi:
+                return ",".join([single, multi])
+            return single or multi  # may be None
+
         scraping_config = ScrapingConfig(
-            congressional_api_key=os.getenv("CONGRESSIONAL_API_KEY"),
-            govinfo_api_key=os.getenv("GOVINFO_API_KEY"),
+            congressional_api_key=_merge_keys(
+                "CONGRESSIONAL_API_KEY", "CONGRESSIONAL_API_KEYS"
+            ),
+            govinfo_api_key=_merge_keys("GOVINFO_API_KEY", "GOVINFO_API_KEYS"),
             output_directory=Path(os.getenv("SCRAPING_OUTPUT_DIR", "/tmp/bicam-data")),
         )
 

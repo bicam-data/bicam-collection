@@ -94,6 +94,7 @@ def create_router() -> DataTypeRouter:
     """Create a router using the global registry."""
     return DataTypeRouter()
 
+
 def _register_builtin_types():
     """Register built-in data types automatically by scanning data source directories."""
     import importlib
@@ -123,6 +124,10 @@ def _register_builtin_types():
         # Scan for data type directories within each data source
         for data_type_item in data_source_item.iterdir():
             if not data_type_item.is_dir() or data_type_item.name.startswith("_"):
+                continue
+
+            # Skip base directories - they are not data types
+            if data_type_item.name == "base":
                 continue
 
             data_type = data_type_item.name
@@ -188,11 +193,11 @@ def _register_builtin_types():
                 # Register the data type with its data source
                 register_data_type(
                     data_type,
-                    fetcher_class,
-                    normalizer_class,
-                    cleaner_class,
-                    config_file,
-                    data_source,
+                    fetcher_class=fetcher_class,
+                    normalizer_class=normalizer_class,
+                    cleaner_class=cleaner_class,
+                    config_file=config_file,
+                    data_source=data_source,
                 )
 
                 logger.info(
@@ -316,3 +321,12 @@ def _get_project_root() -> Path:
 
 # Global registry instance
 _global_registry = get_global_registry()
+
+# ---------------------------------------------------------------------------
+# Trigger automatic registration of built-in data types at import time.
+# This guarantees that *get_data_type_config* calls succeed even when the
+# registry is accessed in a new interpreter (e.g. Dagster subprocesses) where
+# register_all_data_types() hasn't been invoked explicitly.
+# ---------------------------------------------------------------------------
+
+_register_builtin_types()

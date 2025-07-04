@@ -1,0 +1,115 @@
+- name: committees
+  description: Congressional committees main data
+  
+  api:
+    expected_key: committee
+    outer_field: committee
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committees
+    is_main: true
+    create_raw: true
+    id_fields: [system_code]
+    related_tables:
+      - subcommittees
+      - history
+      - committeereports
+    fields:
+      - name: system_code
+        type: string
+      - name: name
+        type: string
+      - name: chamber
+        type: string
+      - name: committee_type_code
+        type: string
+      - name: parent_committee_code
+        type: string
+      - name: is_subcommittee
+        type: boolean
+      - name: update_date
+        type: timestamp
+  
+  processing:
+    batch_size: 50
+    checkpoint_frequency: 25
+
+- name: committees_subcommittees
+  description: Congressional committees subcommittees data
+  
+  api:
+    expected_key: subcommittee
+    outer_field: subcommittees
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committees_subcommittees
+    is_main: false
+    create_raw: true
+    id_fields: [system_code, subcommittee_code]
+    fields:
+      - name: system_code
+        type: string
+      - name: subcommittee_code
+        type: string
+      - name: name
+        type: string
+      - name: chamber
+        type: string
+      - name: committee_type_code
+        type: string
+      - name: update_date
+        type: timestamp
+  
+  processing:
+    batch_size: 100
+
+- name: committees_history
+  description: Congressional committees history data
+  
+  api:
+    expected_key: history
+    outer_field: history
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: committees_history
+    is_main: false
+    create_raw: true
+    id_fields: [system_code, start_date]
+    fields:
+      - name: system_code
+        type: string
+      - name: name
+        type: string
+      - name: start_date
+        type: date
+      - name: end_date
+        type: date
+  
+  processing:
+    batch_size: 100
+
+- name: committees_committeereports
+  description: Congressional committees reports data
+  
+  api:
+    expected_key: committeeReport
+    outer_field: committeeReports
+  
+  schema:
+    table_name: committees_committeereports
+    is_main: false
+    create_raw: false
+    id_fields: [system_code, citation]
+    fields:
+      - name: system_code
+        type: string
+      - name: citation
+        type: string
+      - name: url
+        type: string

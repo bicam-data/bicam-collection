@@ -52,9 +52,23 @@ class CongressionalBaseFetcher(AbstractFetcher):
         super().__init__(
             client, db_pool, data_type_name, checkpoint_manager, run_manager
         )
-        self.expected_key, self.id_field, self.outer_api_field = (
-            self.get_main_id_configs()
-        )
+        (
+            self.expected_key,
+            self.id_field,
+            self.outer_api_field,
+        ) = self.get_main_id_configs()
+
+        # Keep a reference to the full typed config for advanced look-ups in
+        # get_generic_related_data().  If the registry lookup fails we store
+        # None so attribute access elsewhere can be guarded.
+        try:
+            from bicam_collection.libs.data_type_registry import get_global_registry
+
+            self.main_config = get_global_registry().get_data_type_config(
+                data_type_name
+            )
+        except Exception:
+            self.main_config = None
 
     def setup_progress_tracker(self) -> HierarchicalProgressTracker | None:
         """Congressional-specific progress tracker setup."""
@@ -2127,49 +2141,8 @@ class CongressionalBaseFetcher(AbstractFetcher):
         Returns:
             List of related data items
         """
-        # ------------------------------------------------------------------
-        # Resolve *field_name* / *expected_key* if the caller did not specify
-        # them explicitly.  We try, in order:
-        #   1. Config for the specific *related* data-type (e.g.  bills_actions)
-        #   2. Fall back to the *main* data-type config (current behaviour)
-        # ------------------------------------------------------------------
-
-        # Lazily import here to avoid circular dependencies
-        from bicam_collection.libs.data_type_registry import get_global_registry
-
-        if not field_name or not expected_key:
-            # Attempt to discover the related data-type config based on
-            #   {main_name}_{suffix}  – where *suffix* is the table alias as
-            # defined in the main config's *related_tables* list.
-            try:
-                if field_name:
-                    candidate_name = f"{self.data_type_name}_{field_name.lower()}"
-                    related_cfg = get_global_registry().get_data_type_config(
-                        candidate_name
-                    )
-                else:
-                    # Fall back to first related table that resolves
-                    related_cfg = None
-                    for suffix in self.main_config.related_tables:
-                        try:
-                            related_cfg = get_global_registry().get_data_type_config(
-                                f"{self.data_type_name}_{suffix}"
-                            )
-                            break
-                        except Exception as e:
-                            logger.error(f"Error getting related config: {e}")
-                            continue
-
-                if related_cfg:
-                    if not field_name:
-                        field_name = related_cfg.api.outer_field
-                    if not expected_key:
-                        expected_key = related_cfg.api.expected_key
-            except Exception as e:
-                logger.error(f"Error getting related config: {e}")
-                # Best-effort only – if discovery fails we fall back to main cf
-
-        # Final fallback so we *always* have sensible defaults
+        # Use the field_name and expected_key from method parameters
+        # If not provided, use sensible defaults from the main config
         if not field_name:
             field_name = self.main_config.api.outer_field
 
@@ -2185,7 +2158,7 @@ class CongressionalBaseFetcher(AbstractFetcher):
 
         url = field_data["url"]
         try:
-            # Fixed: ensure expected_key is passed as a list
+            # Ensure expected_key is passed as a list
             expected_key_list = (
                 [expected_key] if isinstance(expected_key, str) else expected_key
             )

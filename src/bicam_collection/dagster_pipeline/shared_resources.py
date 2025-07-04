@@ -63,7 +63,7 @@ class ProcessingResource(ConfigurableResource):
     api_keys: list[str] = [
         key.strip()
         for key in os.getenv(
-            "CONGRESS_API_KEYS", os.getenv("CONGRESSIONAL_API_KEY", "")
+            "CONGRESSIONAL_API_KEYS", os.getenv("CONGRESSIONAL_API_KEY", "")
         ).split(",")
         if key.strip()
     ]
@@ -84,6 +84,7 @@ class ProcessingResource(ConfigurableResource):
         / "checkpoints.db"
     )
     use_postgres_runs: bool = True
+    use_postgres_checkpoints: bool = True
 
     # Processing parameters (can be overridden per run)
     from_date: str | None = None
@@ -112,6 +113,29 @@ class ProcessingResource(ConfigurableResource):
         "fetcher"  # Track the type of processing: "fetcher", "normalizer", "cleaner"
     )
 
+    def set_processing_type(self, processing_type: str) -> None:
+        """Set the processing type for this resource instance."""
+        # Use object.__setattr__ to bypass the frozen model restriction
+        object.__setattr__(self, "_processing_type", processing_type)
+
+    async def initialize(self) -> None:
+        """Initialize all async components during setup phase."""
+        logger.info("Initializing ProcessingResource async components...")
+
+        # Initialize database pool
+        await self.get_db_pool()
+
+        # Initialize API key manager
+        self.get_system_key_manager()
+
+        # Initialize checkpoint manager
+        self.get_checkpoint_manager()
+
+        # Initialize run manager
+        await self.get_run_manager()
+
+        logger.info("ProcessingResource initialization completed successfully")
+
     async def get_db_pool(self) -> asyncpg.Pool:
         """Get or create database connection pool."""
         if self._db_pool is None:
@@ -136,7 +160,7 @@ class ProcessingResource(ConfigurableResource):
         if self._system_key_manager is None:
             if not self.api_keys:
                 raise ValueError(
-                    "No API keys configured. Set CONGRESS_API_KEYS or CONGRESSIONAL_API_KEY"
+                    "No API keys configured. Set CONGRESSIONAL_API_KEYS or CONGRESSIONAL_API_KEY"
                 )
 
             # Check if parallelization is enabled
@@ -169,11 +193,25 @@ class ProcessingResource(ConfigurableResource):
         return self._system_key_manager
 
     def get_checkpoint_manager(self) -> CheckpointManager:
-        """Get or create checkpoint manager."""
+        """Get or create checkpoint manager (SQLite or Postgres)."""
         if self._checkpoint_manager is None:
-            Path(self.checkpoint_db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._checkpoint_manager = CheckpointManager(self.checkpoint_db_path)
-            logger.info(f"Initialized checkpoint manager: {self.checkpoint_db_path}")
+            if self.use_postgres_checkpoints:
+                from ..libs.pg_checkpoint import PostgresCheckpointManager
+
+                self._checkpoint_manager = PostgresCheckpointManager(
+                    host=self.db_host,
+                    port=self.db_port,
+                    database=self.db_name,
+                    user=self.db_user,
+                    password=self.db_password,
+                )
+                logger.info("Initialized PostgresCheckpointManager (PostgreSQL)")
+            else:
+                Path(self.checkpoint_db_path).parent.mkdir(parents=True, exist_ok=True)
+                self._checkpoint_manager = CheckpointManager(self.checkpoint_db_path)
+                logger.info(
+                    f"Initialized checkpoint manager (SQLite): {self.checkpoint_db_path}"
+                )
 
         return self._checkpoint_manager
 
