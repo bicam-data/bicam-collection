@@ -68,9 +68,13 @@ async def _build_processing_resource(
         env_keys = os.getenv(
             "CONGRESSIONAL_API_KEYS", os.getenv("CONGRESSIONAL_API_KEY", "")
         )
+        govinfo_keys = os.getenv("GOVINFO_API_KEYS", "")
         if env_keys:
-            api_keys = [key.strip() for key in env_keys.split(",") if key.strip()]
-
+            api_keys.extend([key.strip() for key in env_keys.split(",") if key.strip()])
+        if govinfo_keys:
+            api_keys.extend(
+                [key.strip() for key in govinfo_keys.split(",") if key.strip()]
+            )
     if not api_keys:
         raise ValueError(
             "No API keys found. Set CONGRESSIONAL_API_KEYS or CONGRESSIONAL_API_KEY"
