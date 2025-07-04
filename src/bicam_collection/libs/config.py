@@ -263,7 +263,7 @@ class BicamConfig(BaseSettings):
 
         scraping_config = ScrapingConfig(
             congressional_api_key=_merge_keys(
-                "CONGRESSIONAL_API_KEY", "CONGRESSIONAL_API_KEYS"
+                "GOVINFO_API_KEYS", "CONGRESSIONAL_API_KEYS"
             ),
             govinfo_api_key=_merge_keys("GOVINFO_API_KEY", "GOVINFO_API_KEYS"),
             output_directory=Path(os.getenv("SCRAPING_OUTPUT_DIR", "/tmp/bicam-data")),
