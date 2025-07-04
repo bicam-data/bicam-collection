@@ -67,6 +67,13 @@ class ProcessingResource(ConfigurableResource):
         ).split(",")
         if key.strip()
     ]
+    api_keys.extend(
+        [
+            key.strip()
+            for key in os.getenv("GOVINFO_API_KEYS", "").split(",")
+            if key.strip()
+        ]
+    )
     api_rate_limit: float = 1.5
 
     # Parallelization configuration
