@@ -527,9 +527,10 @@ class CongressionalBaseFetcher(BaseFetcher):
                 from_date=from_date,
                 to_date=to_date,
                 limit=limit or 1,  # Use 1 to get minimal data for metadata
+                pagination_request=True,
                 **kwargs,
             ):
-                logger.error(f"Page: {page}")
+                print(f"Page: {page}")
                 first_page = page
                 break
 
