@@ -146,19 +146,16 @@ class OptimizedParallelProcessor:
 
         # Check for incremental processing using last_total_count
         last_processed_count = await self._get_last_processed_count(fetcher)
-        last_total_count = last_processed_count.get("last_total_count", 0)
-        last_processed_date = last_processed_count.get("last_processed_date")
 
-        incremental_processing = last_total_count > 0 and total_count > last_total_count
+        incremental_processing = last_processed_count > 0 and total_count > last_processed_count
 
-        logger.info(f"Last total count: {last_total_count}")
+        logger.info(f"Last processed count: {last_processed_count}")
         logger.info(f"Current total count: {total_count}")
-        logger.info(f"Last processed date: {last_processed_date}")
         logger.info(f"Incremental processing: {incremental_processing}")
 
         if incremental_processing:
             # Calculate exact pages needed based on new records
-            new_records = total_count - last_total_count
+            new_records = total_count - last_processed_count
             pages_to_process = (new_records + count_per_page - 1) // count_per_page
             logger.info(f"New records since last run: {new_records}")
             logger.info(f"Pages needed for new records: {pages_to_process}")
@@ -269,7 +266,7 @@ class OptimizedParallelProcessor:
                 "count_per_page": count_per_page,
                 "last_processed_count": last_processed_count,
                 "incremental_processing": incremental_processing,
-                "new_records": total_count - last_total_count
+                "new_records": total_count - last_processed_count
                 if incremental_processing
                 else 0,
                 "total_records": total_records,
