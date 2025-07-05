@@ -44,7 +44,7 @@ class OptimizedStorageManager:
         checkpoint_db_path: str = "checkpoints.db",
         batch_size: int = 10000,
         flush_interval: int = 10,
-        max_memory_mb: int = 500
+        max_memory_mb: int = 500,
     ):
         self.pg_pool = pg_pool
         self.batch_size = batch_size
@@ -65,10 +65,10 @@ class OptimizedStorageManager:
 
         # Statistics
         self.stats = {
-            'total_written': 0,
-            'total_batches': 0,
-            'total_time': 0,
-            'records_per_second': 0
+            "total_written": 0,
+            "total_batches": 0,
+            "total_time": 0,
+            "records_per_second": 0,
         }
 
         # Start background workers
@@ -105,14 +105,10 @@ class OptimizedStorageManager:
     async def start(self):
         """Start background workers for async processing."""
         # Start write worker
-        self.workers.append(
-            asyncio.create_task(self._write_worker())
-        )
+        self.workers.append(asyncio.create_task(self._write_worker()))
 
         # Start periodic flush worker
-        self.workers.append(
-            asyncio.create_task(self._flush_worker())
-        )
+        self.workers.append(asyncio.create_task(self._flush_worker()))
 
         logger.info("Storage manager workers started")
 
@@ -132,11 +128,7 @@ class OptimizedStorageManager:
         logger.info("Storage manager stopped")
 
     async def add_records(
-        self,
-        schema: str,
-        table: str,
-        records: list[dict],
-        ensure_table: bool = True
+        self, schema: str, table: str, records: list[dict], ensure_table: bool = True
     ):
         """
         Add records to buffer for batched writing.
@@ -163,8 +155,7 @@ class OptimizedStorageManager:
             try:
                 # Wait for work with timeout
                 table_key, ensure_table = await asyncio.wait_for(
-                    self.write_queue.get(),
-                    timeout=1.0
+                    self.write_queue.get(), timeout=1.0
                 )
 
                 # Flush this specific table
@@ -205,7 +196,7 @@ class OptimizedStorageManager:
             self.buffers[table_key] = []
             self.buffer_sizes[table_key] = 0
 
-        schema, table = table_key.split('.')
+        schema, table = table_key.split(".")
 
         try:
             start_time = time.time()
@@ -215,9 +206,9 @@ class OptimizedStorageManager:
 
             # Update statistics
             elapsed = time.time() - start_time
-            self.stats['total_written'] += len(records)
-            self.stats['total_batches'] += 1
-            self.stats['total_time'] += elapsed
+            self.stats["total_written"] += len(records)
+            self.stats["total_batches"] += 1
+            self.stats["total_time"] += elapsed
 
             records_per_second = len(records) / elapsed if elapsed > 0 else 0
             logger.info(
@@ -233,11 +224,7 @@ class OptimizedStorageManager:
             raise
 
     async def _bulk_copy(
-        self,
-        schema: str,
-        table: str,
-        records: list[dict],
-        ensure_table: bool = True
+        self, schema: str, table: str, records: list[dict], ensure_table: bool = True
     ):
         """Use PostgreSQL COPY for ultra-fast bulk inserts."""
         if not records:
@@ -254,10 +241,7 @@ class OptimizedStorageManager:
             # Create CSV data in memory
             output = io.StringIO()
             writer = csv.DictWriter(
-                output,
-                fieldnames=columns,
-                delimiter='\t',
-                quoting=csv.QUOTE_MINIMAL
+                output, fieldnames=columns, delimiter="\t", quoting=csv.QUOTE_MINIMAL
             )
 
             # Write data
@@ -268,7 +252,7 @@ class OptimizedStorageManager:
                     if isinstance(value, dict | list):
                         processed_record[key] = json.dumps(value)
                     elif value is None:
-                        processed_record[key] = '\\N'
+                        processed_record[key] = "\\N"
                     else:
                         processed_record[key] = str(value)
 
@@ -283,16 +267,12 @@ class OptimizedStorageManager:
                 source=output,
                 schema_name=schema,
                 columns=columns,
-                delimiter='\t',
-                null='\\N'
+                delimiter="\t",
+                null="\\N",
             )
 
     async def _ensure_table_exists(
-        self,
-        conn: asyncpg.Connection,
-        schema: str,
-        table: str,
-        sample_record: dict
+        self, conn: asyncpg.Connection, schema: str, table: str, sample_record: dict
     ):
         """Ensure table exists with proper columns."""
         # Check if table exists
@@ -304,18 +284,18 @@ class OptimizedStorageManager:
             )
             """,
             schema,
-            table
+            table,
         )
 
         if not exists:
             # Create table based on sample record
             columns = []
             for key, value in sample_record.items():
-                if key == 'id_uuid':
+                if key == "id_uuid":
                     columns.append(f"{key} TEXT PRIMARY KEY")
-                elif key == 'payload' or isinstance(value, dict | list):
+                elif key == "payload" or isinstance(value, dict | list):
                     columns.append(f"{key} JSONB")
-                elif key in ['scraped_at', 'created_at', 'updated_at']:
+                elif key in ["scraped_at", "created_at", "updated_at"]:
                     columns.append(f"{key} TIMESTAMPTZ")
                 elif isinstance(value, bool):
                     columns.append(f"{key} BOOLEAN")
@@ -366,7 +346,7 @@ class OptimizedStorageManager:
         phase: str,
         offset: int,
         item_id: str,
-        records_processed: int
+        records_processed: int,
     ):
         """Save checkpoint to SQLite (fast, lightweight)."""
         conn = sqlite3.connect(self.checkpoint_db)
@@ -377,7 +357,7 @@ class OptimizedStorageManager:
                 (data_type, phase, last_offset, last_item_id, records_processed, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (data_type, phase, offset, item_id, records_processed, time.time())
+                (data_type, phase, offset, item_id, records_processed, time.time()),
             )
             conn.commit()
         finally:
@@ -393,15 +373,15 @@ class OptimizedStorageManager:
                 FROM checkpoints
                 WHERE data_type = ? AND phase = ?
                 """,
-                (data_type, phase)
+                (data_type, phase),
             )
             row = cursor.fetchone()
             if row:
                 return {
-                    'last_offset': row[0],
-                    'last_item_id': row[1],
-                    'records_processed': row[2],
-                    'timestamp': row[3]
+                    "last_offset": row[0],
+                    "last_item_id": row[1],
+                    "records_processed": row[2],
+                    "timestamp": row[3],
                 }
             return None
         finally:
@@ -410,22 +390,23 @@ class OptimizedStorageManager:
     def get_stats(self) -> dict:
         """Get performance statistics."""
         avg_records_per_second = (
-            self.stats['total_written'] / self.stats['total_time']
-            if self.stats['total_time'] > 0 else 0
+            self.stats["total_written"] / self.stats["total_time"]
+            if self.stats["total_time"] > 0
+            else 0
         )
 
         return {
-            'total_written': self.stats['total_written'],
-            'total_batches': self.stats['total_batches'],
-            'avg_batch_size': (
-                self.stats['total_written'] / self.stats['total_batches']
-                if self.stats['total_batches'] > 0 else 0
+            "total_written": self.stats["total_written"],
+            "total_batches": self.stats["total_batches"],
+            "avg_batch_size": (
+                self.stats["total_written"] / self.stats["total_batches"]
+                if self.stats["total_batches"] > 0
+                else 0
             ),
-            'avg_records_per_second': avg_records_per_second,
-            'buffer_status': {
-                table: len(records)
-                for table, records in self.buffers.items()
-            }
+            "avg_records_per_second": avg_records_per_second,
+            "buffer_status": {
+                table: len(records) for table, records in self.buffers.items()
+            },
         }
 
     @property
@@ -442,46 +423,41 @@ class OptimizedFetcherStorage:
     efficient batched operations.
     """
 
-    def __init__(self, storage_manager: OptimizedStorageManager):
+    def __init__(
+        self, storage_manager: OptimizedStorageManager, id_field: str = "parent_id"
+    ):
         self.storage = storage_manager
+        self.id_field = id_field
         self.phase_buffers = defaultdict(list)
         self.checkpoint_interval = 10000  # Checkpoint every 10k records
         self.last_checkpoint = 0
 
     async def store_phase_1_data(
-        self,
-        schema: str,
-        table: str,
-        data: dict[str, Any],
-        batch_id: str | None = None
+        self, schema: str, table: str, data: dict[str, Any], batch_id: str | None = None
     ):
         """Store Phase 1 data with batching."""
         # Add metadata
-        data['id_uuid'] = data.get('id_uuid', str(uuid.uuid4()))
-        data['batch_id'] = batch_id or str(uuid.uuid4())
-        data['scraped_at'] = datetime.now(UTC)
+        data["id_uuid"] = data.get("id_uuid", str(uuid.uuid4()))
+        data["batch_id"] = batch_id or str(uuid.uuid4())
+        data["scraped_at"] = datetime.now(UTC)
 
         # Buffer it
-        self.phase_buffers['phase1'].append(data)
+        self.phase_buffers["phase1"].append(data)
 
         # Add to storage manager (non-blocking)
         await self.storage.add_records(schema, table, [data])
 
     async def store_phase_2_data(
-        self,
-        schema: str,
-        table: str,
-        data: dict[str, Any],
-        batch_id: str | None = None
+        self, schema: str, table: str, data: dict[str, Any], batch_id: str | None = None
     ):
         """Store Phase 2 data with batching."""
         # Add metadata
-        data['id_uuid'] = data.get('id_uuid', str(uuid.uuid4()))
-        data['batch_id'] = batch_id or str(uuid.uuid4())
-        data['scraped_at'] = datetime.now(UTC)
+        data["id_uuid"] = data.get("id_uuid", str(uuid.uuid4()))
+        data["batch_id"] = batch_id or str(uuid.uuid4())
+        data["scraped_at"] = datetime.now(UTC)
 
         # Buffer it
-        self.phase_buffers['phase2'].append(data)
+        self.phase_buffers["phase2"].append(data)
 
         # Add to storage manager (non-blocking)
         await self.storage.add_records(schema, table, [data])
@@ -492,22 +468,22 @@ class OptimizedFetcherStorage:
         table_prefix: str,
         data: list[dict[str, Any]],
         parent_id: str,
-        batch_id: str | None = None
+        batch_id: str | None = None,
     ):
         """Store Phase 3 data with batching."""
         # Group by type
         by_type = defaultdict(list)
 
         for item in data:
-            item_type = item.get('type', 'unknown')
-            item_data = item.get('data', item)
+            item_type = item.get("type", "unknown")
+            item_data = item.get("data", item)
 
             # Add metadata
             if isinstance(item_data, dict):
-                item_data['parent_id'] = parent_id
-                item_data['id_uuid'] = str(uuid.uuid4())
-                item_data['batch_id'] = batch_id or str(uuid.uuid4())
-                item_data['scraped_at'] = datetime.now(UTC)
+                item_data[self.id_field] = parent_id
+                item_data["id_uuid"] = str(uuid.uuid4())
+                item_data["batch_id"] = batch_id or str(uuid.uuid4())
+                item_data["scraped_at"] = datetime.now(UTC)
 
             by_type[item_type].append(item_data)
 
@@ -529,13 +505,7 @@ class OptimizedFetcherStorage:
         phase: str,
         offset: int,
         item_id: str,
-        total_processed: int
+        total_processed: int,
     ):
         """Save checkpoint using SQLite."""
-        self.storage.save_checkpoint(
-            data_type,
-            phase,
-            offset,
-            item_id,
-            total_processed
-        )
+        self.storage.save_checkpoint(data_type, phase, offset, item_id, total_processed)

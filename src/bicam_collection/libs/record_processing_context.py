@@ -22,7 +22,8 @@ class RecordProcessingContext:
 
     # Applicable only for *related* / *nested* records
     table_suffix: str | None = None
-    parent_id: str | None = None
+    parent_id: str | None = None  # Keep for backward compatibility
+    id_field: str = "parent_id"  # Configurable field name for parent reference
 
     # ------------------------------------------------------------------
     # Utility helpers

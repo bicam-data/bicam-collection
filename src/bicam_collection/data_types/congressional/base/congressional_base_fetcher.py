@@ -180,7 +180,7 @@ class CongressionalBaseFetcher(BaseFetcher):
                     related_data.append(
                         {
                             "type": method_name,
-                            "parent_id": item_id,
+                            self.id_field: item_id,
                             "data": result,
                             "method": method_name,
                         }
@@ -290,7 +290,7 @@ class CongressionalBaseFetcher(BaseFetcher):
             # Add parent reference to each item
             for record in related_data:
                 if isinstance(record, dict):
-                    record["parent_id"] = parent_id
+                    record[self.id_field] = parent_id
 
             await self.store_raw_data(
                 schema=self.get_default_schema(),
