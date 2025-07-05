@@ -24,8 +24,11 @@ from dagster import ConfigurableResource
 
 from ..api_clients import CongressionalAPIClient
 from ..libs.api_key_manager import SystemAPIKeyManager
-from ..libs.checkpoint import CheckpointManager
+
+# New checkpointing and storage modules
+from ..libs.hierarchical_checkpoint_system import HierarchicalCheckpointManager
 from ..libs.run_tracking import RunManager
+from ..processing.optimized_storage_manager import OptimizedStorageManager
 
 logger = logging.getLogger(__name__)
 
@@ -97,17 +100,22 @@ class ProcessingResource(ConfigurableResource):
     rerun_mode: bool = (
         False  # True when items should be reprocessed regardless of checkpoint status
     )
+    use_dynamic_pool: bool = False
+
+    # Storage backend configuration
+    use_optimized_storage: bool = False  # Enable OptimizedStorageManager
 
     # Internal state (not configurable)
     _db_pool: asyncpg.Pool | None = None
     _system_key_manager: SystemAPIKeyManager | None = None
-    _checkpoint_manager: CheckpointManager | None = None
+    _checkpoint_manager: HierarchicalCheckpointManager | None = None
     _run_manager: RunManager | None = None
     _api_clients: dict[str, CongressionalAPIClient] = {}  # Track created clients
     _parallel_sessions: dict[str, list] = {}  # Track parallel sessions per data type
     _processing_type: str = (
         "fetcher"  # Track the type of processing: "fetcher", "normalizer", "cleaner"
     )
+    _storage_manager: OptimizedStorageManager | None = None  # Optimized storage backend
 
     def set_processing_type(self, processing_type: str) -> None:
         """Set the processing type for this resource instance."""
@@ -129,6 +137,10 @@ class ProcessingResource(ConfigurableResource):
 
         # Initialize run manager
         await self.get_run_manager()
+
+        # Initialize storage manager if enabled
+        if self.use_optimized_storage:
+            await self.get_storage_manager()
 
         logger.info("ProcessingResource initialization completed successfully")
 
@@ -174,6 +186,7 @@ class ProcessingResource(ConfigurableResource):
                 api_keys=self.api_keys,
                 default_keys_per_client=keys_per_session,
                 enable_parallelization=enable_parallelization,
+                use_dynamic_pool=self.use_dynamic_pool,
             )
 
             if enable_parallelization:
@@ -188,26 +201,17 @@ class ProcessingResource(ConfigurableResource):
 
         return self._system_key_manager
 
-    def get_checkpoint_manager(self) -> CheckpointManager:
+    def get_checkpoint_manager(self) -> HierarchicalCheckpointManager:
         """Get or create checkpoint manager (SQLite or Postgres)."""
         if self._checkpoint_manager is None:
-            if self.use_postgres_checkpoints:
-                from ..libs.pg_checkpoint import PostgresCheckpointManager
-
-                self._checkpoint_manager = PostgresCheckpointManager(
-                    host=self.db_host,
-                    port=self.db_port,
-                    database=self.db_name,
-                    user=self.db_user,
-                    password=self.db_password,
-                )
-                logger.info("Initialized PostgresCheckpointManager (PostgreSQL)")
-            else:
-                Path(self.checkpoint_db_path).parent.mkdir(parents=True, exist_ok=True)
-                self._checkpoint_manager = CheckpointManager(self.checkpoint_db_path)
-                logger.info(
-                    f"Initialized checkpoint manager (SQLite): {self.checkpoint_db_path}"
-                )
+            # Always use hierarchical checkpoint manager going forward
+            Path(self.checkpoint_db_path).parent.mkdir(parents=True, exist_ok=True)
+            self._checkpoint_manager = HierarchicalCheckpointManager(
+                db_path=self.checkpoint_db_path
+            )
+            logger.info(
+                f"Initialized HierarchicalCheckpointManager: {self.checkpoint_db_path}"
+            )
 
         return self._checkpoint_manager
 
@@ -497,6 +501,16 @@ class ProcessingResource(ConfigurableResource):
         self._run_manager = None
         self._parallel_sessions.clear()
 
+        # Flush/stop storage manager last
+        if self._storage_manager:
+            try:
+                await self._storage_manager.flush_all()
+                await self._storage_manager.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping storage manager: {e}")
+            finally:
+                self._storage_manager = None
+
         logger.debug("Bicam processing resources cleanup completed")
 
     def get_configuration_summary(self) -> dict[str, Any]:
@@ -525,7 +539,31 @@ class ProcessingResource(ConfigurableResource):
                 "use_postgres_runs": self.use_postgres_runs,
             },
             "key_manager_status": self.get_key_manager_status(),
+            "optimized_storage": {
+                "enabled": self.use_optimized_storage,
+                "buffered": self._storage_manager.total_buffered
+                if self._storage_manager
+                else 0,
+            },
         }
+
+    async def get_storage_manager(self) -> OptimizedStorageManager | None:
+        """Get or create optimized storage manager (optional)."""
+        if not self.use_optimized_storage:
+            return None
+
+        if self._storage_manager is None:
+            db_pool = await self.get_db_pool()
+
+            self._storage_manager = OptimizedStorageManager(
+                pg_pool=db_pool,
+                checkpoint_db_path=self.checkpoint_db_path,
+                batch_size=self.batch_size * 100,  # heuristic: larger batch for storage
+            )
+            await self._storage_manager.start()
+            logger.info("OptimizedStorageManager started")
+
+        return self._storage_manager
 
 
 class DataTypeSpecificResource(ConfigurableResource):
@@ -549,3 +587,22 @@ class DataTypeSpecificResource(ConfigurableResource):
     def get_effective_rate_limit(self, base_resource: ProcessingResource) -> float:
         """Get effective rate limit (override or base)."""
         return self.api_rate_limit_override or base_resource.api_rate_limit
+
+    async def get_storage_manager(
+        self, base_resource: ProcessingResource
+    ) -> OptimizedStorageManager | None:
+        """Get or create optimized storage manager (optional)."""
+        if not base_resource.use_optimized_storage:
+            return None
+
+        if base_resource._storage_manager is None:
+            db_pool = await base_resource.get_db_pool()
+            # Default parameters can be tuned via environment variables later
+            base_resource._storage_manager = OptimizedStorageManager(
+                pg_pool=db_pool,
+                checkpoint_db_path=base_resource.checkpoint_db_path,
+            )
+            await base_resource._storage_manager.start()
+            logger.info("OptimizedStorageManager started")
+
+        return base_resource._storage_manager

@@ -13,8 +13,8 @@ through source-specific base classes.
 
 from .base_cleaner import BaseCleaner
 from .base_database_normalizer import BaseDatabaseNormalizer
-from .base_specialized_assets import BaseSpecializedAssets
 from .base_fetcher import BaseFetcher
+from .base_specialized_assets import BaseSpecializedAssets
 
 __all__ = [
     "BaseFetcher",

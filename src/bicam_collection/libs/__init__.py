@@ -5,7 +5,6 @@ This package contains reusable utilities and libraries for the bicam-collection
 data pipeline system.
 """
 
-from .checkpoint import CheckpointManager, HierarchicalProgressTracker, ProgressTracker
 from .config import BicamConfig, create_sample_config, load_config
 from .data_type_registry import (
     DataTypeRegistry,
@@ -17,14 +16,31 @@ from .data_type_router import (
     create_router,
 )
 from .database import DatabaseManager, setup_database, setup_database_sync
+from .hierarchical_checkpoint_system import (
+    CheckpointState,
+    CleaningCheckpoint,
+    CleaningPhase,
+    FetchingCheckpoint,
+    FetchingPhase,
+    HierarchicalCheckpointManager,
+    ProcessingStage,
+    StagingCheckpoint,
+    StagingPhase,
+)
 from .run_tracking import RunContext, RunManager, get_run_manager, init_run_manager
 from .schema import DataTypeSchema, SchemaManager, ScrapingSchema, get_schema
 
 __all__ = [
     # Checkpoint management
-    "CheckpointManager",
-    "HierarchicalProgressTracker",
-    "ProgressTracker",
+    "CheckpointState",
+    "CleaningCheckpoint",
+    "CleaningPhase",
+    "FetchingCheckpoint",
+    "FetchingPhase",
+    "HierarchicalCheckpointManager",
+    "ProcessingStage",
+    "StagingCheckpoint",
+    "StagingPhase",
     # Configuration
     "BicamConfig",
     "load_config",

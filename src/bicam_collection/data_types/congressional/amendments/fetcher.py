@@ -77,16 +77,22 @@ class AmendmentsFetcher(CongressionalBaseFetcher):
         self, full_amendment_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get amendment actions from actions URL in full amendment data."""
-        return await self.get_generic_related_data(full_amendment_data)
+        return await self.get_generic_related_data(
+            full_amendment_data, related_table_name="actions"
+        )
 
     async def get_amendments_cosponsors(
         self, full_amendment_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get amendment cosponsors from cosponsors URL in full amendment data."""
-        return await self.get_generic_related_data(full_amendment_data)
+        return await self.get_generic_related_data(
+            full_amendment_data, related_table_name="cosponsors"
+        )
 
     async def get_amendments_texts(
         self, full_amendment_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get amendment text versions from textVersions URL in full amendment data."""
-        return await self.get_generic_related_data(full_amendment_data)
+        return await self.get_generic_related_data(
+            full_amendment_data, related_table_name="texts"
+        )

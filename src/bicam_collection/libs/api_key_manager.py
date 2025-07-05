@@ -19,6 +19,8 @@ from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Any
 
+from ..processing.dynamic_key_pool_manager import DynamicKeyPool
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,6 +90,7 @@ class SystemAPIKeyManager:
         api_keys: list[str],
         default_keys_per_client: int = 2,
         enable_parallelization: bool = True,
+        use_dynamic_pool: bool = False,
     ):
         if not api_keys:
             raise ValueError("No API keys provided to SystemAPIKeyManager")
@@ -95,6 +98,12 @@ class SystemAPIKeyManager:
         self.api_keys = list(set(api_keys))  # Remove duplicates
         self.default_keys_per_client = min(default_keys_per_client, len(self.api_keys))
         self.enable_parallelization = enable_parallelization
+        self.use_dynamic_pool = use_dynamic_pool
+        self.dynamic_pool: DynamicKeyPool | None = None
+
+        if self.use_dynamic_pool:
+            self.dynamic_pool = DynamicKeyPool(self.api_keys)
+            logger.info("Initialized SystemAPIKeyManager with dynamic key pool.")
 
         # Track key status
         self.key_status: dict[str, APIKeyStatus] = {
@@ -117,6 +126,10 @@ class SystemAPIKeyManager:
         logger.info(
             f"Initialized SystemAPIKeyManager with {len(self.api_keys)} keys (parallelization: {enable_parallelization})"
         )
+
+    def get_dynamic_pool(self) -> DynamicKeyPool | None:
+        """Get the dynamic pool if enabled."""
+        return self.dynamic_pool if self.use_dynamic_pool else None
 
     def assign_parallel_sessions_for_data_type(
         self, data_type: str, num_sessions: int | None = None, keys_per_session: int = 2

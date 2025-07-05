@@ -122,7 +122,7 @@ def create_raw_data_asset(data_type: str):
                         f"No API keys available for data type: {data_type}"
                     )
 
-                # Create API client
+                # Create API client (single client for legacy path)
                 from ..api_clients import CongressionalAPIClient
 
                 client = CongressionalAPIClient(api_keys=keys, db_pool=db_pool)
@@ -133,18 +133,17 @@ def create_raw_data_asset(data_type: str):
                     client, db_pool, checkpoint_manager, run_manager
                 )
 
+                # Provide full API key list to fetcher for optimized parallel processing
+                try:
+                    fetcher.set_api_keys(processing_resource.api_keys)
+                except Exception as e:
+                    dagster_logger.debug(f"Could not set API keys on fetcher: {e}")
+
                 # Set processing type for this phase
                 processing_resource.set_processing_type("fetcher")
 
                 # Set the processing resource for parallel session support
                 fetcher.set_processing_resource(processing_resource)
-
-                # Setup progress tracker for checkpointing
-                progress_tracker = fetcher.setup_progress_tracker()
-                if not progress_tracker:
-                    dagster_logger.warning(
-                        f"No progress tracker created for {data_type}"
-                    )
 
                 # Coordinate checkpoint systems based on configuration flags
                 from_date = processing_resource.from_date

@@ -489,12 +489,12 @@ class CongressionalAPIClient(BaseAPIClient):
 
                 # Return the full response - let the fetcher handle data extraction using config
                 # Handle limit=0 case - just get metadata and return empty data
-                if limit == 0:
-                    logger.info(
-                        "Limit=0 mode: returning empty data with pagination metadata only"
-                    )
-                    yield []
-                    break
+                # if limit == 0:
+                #     logger.info(
+                #         "Limit=0 mode: returning empty data with pagination metadata only"
+                #     )
+                #     yield []
+                #     break
 
                 # Check pagination - if there's no data and we're not in limit=0 mode, we're done
                 if not response:

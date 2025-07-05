@@ -79,7 +79,7 @@ class CommitteeprintsFetcher(CongressionalBaseFetcher):
     async def get_committeeprints_texts(
         self, full_committeeprint_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        """Get texts from texts URL in full committeeprint data."""
+        """Get committee print texts using the generic helper."""
         return await self.get_generic_related_data(
-            full_committeeprint_data
+            full_committeeprint_data, related_table_name="texts"
         )
