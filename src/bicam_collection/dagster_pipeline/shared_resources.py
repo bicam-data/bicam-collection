@@ -60,20 +60,9 @@ class ProcessingResource(ConfigurableResource):
     db_password: str = os.getenv("POSTGRESQL_PASSWORD", "password")
 
     # API configuration (supports various API types)
-    api_keys: list[str] = [
-        key.strip()
-        for key in os.getenv(
-            "CONGRESSIONAL_API_KEYS", os.getenv("CONGRESSIONAL_API_KEY", "")
-        ).split(",")
-        if key.strip()
-    ]
-    api_keys.extend(
-        [
-            key.strip()
-            for key in os.getenv("GOVINFO_API_KEYS", "").split(",")
-            if key.strip()
-        ]
-    )
+    api_keys: list[
+        str
+    ] = []  # Will be populated at runtime, not at class definition time
     api_rate_limit: float = 1.5
 
     # Parallelization configuration

@@ -3,7 +3,7 @@
   
   api:
     expected_key: nomination
-    outer_field: nominations
+    outer_field: nomination
     page_size: 250
     retry_attempts: 3
   
@@ -16,179 +16,110 @@
       - actions
       - positions
       - committeeactivities
-      - committees
       - hearings
       - nominees
-    fields:
-      - name: nomination_id
-        type: string
-      - name: nomination_number
-        type: string
-      - name: nomination_part
-        type: string
-      - name: congress
-        type: integer
-      - name: description
-        type: string
-      - name: is_privileged
-        type: boolean
-      - name: is_civilian
-        type: boolean
-      - name: is_special
-        type: boolean
-      - name: received_at
-        type: date
-      - name: authority_date
-        type: date
-      - name: executive_calendar_number
-        type: string
-      - name: citation
-        type: string
-      - name: committees_count
-        type: integer
-      - name: actions_count
-        type: integer
-      - name: updated_at
-        type: timestamp
-  
+
   processing:
     batch_size: 100
     checkpoint_frequency: 50
 
 - name: nominations_actions
   description: Nomination actions data
-  
+
   api:
-    expected_key: action
+    expected_key: actions
     outer_field: actions
     page_size: 250
     retry_attempts: 3
-  
+
   schema:
     table_name: nominations_actions
     is_main: false
     create_raw: true
-    id_fields: [action_id]
+    id_fields: [action_id, nomination_id]
     related_tables:
       - committees
-    fields:
-      - name: action_id
-        type: string
-      - name: nomination_id
-        type: string
-      - name: action_code
-        type: string
-      - name: action_type
-        type: string
-      - name: action_date
-        type: date
-      - name: text
-        type: string
-  
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250
 
-- name: nominations_positions
-  description: Nomination positions data
-  
-  api:
-    expected_key: position
-    outer_field: positions
-    page_size: 250
-    retry_attempts: 3
-  
-  schema:
-    table_name: nominations_positions
-    is_main: false
-    create_raw: true
-    id_fields: [nomination_id, position_id]
-    fields:
-      - name: nomination_id
-        type: string
-      - name: position_id
-        type: integer
-      - name: position_title
-        type: string
-      - name: organization
-        type: string
-      - name: division
-        type: string
-      - name: intro_text
-        type: string
-      - name: nominee_count
-        type: integer
-  
-  processing:
-    batch_size: 500
-    checkpoint_frequency: 250
+- name: nominations_actions_committees
+  description: Nomination actions committees data
 
-- name: nominations_committees
-  description: Nomination committees data
-  
-  api:
-    expected_key: committee
-    outer_field: committees
-    page_size: 250
-    retry_attempts: 3
-  
   schema:
-    table_name: nominations_committees
+    table_name: nominations_actions_committees
     is_main: false
     create_raw: false
-    id_fields: [nomination_id, committee_code]
-    fields:
-      - name: nomination_id
-        type: string
-      - name: committee_code
-        type: string
-      - name: committee_name
-        type: string
-  
+    id_fields: [action_id, nomination_id, committee_code]
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250
 
+
 - name: nominations_nominees
-  description: Nomination nominees data
+  description: Nomination positions data - will be routed into nominations_positions
+
+  schema:
+    table_name: nominations_nominees
+    is_main: false
+    create_raw: false
+    id_fields: [nomination_id, position_id]
+    related_tables:
+      - individualnominees
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: nominations_individualnominees
+  description: Nomination nominees data - will be routed into nominations_nominees
   
   api:
-    expected_key: nominee
+    expected_key: nominees
     outer_field: nominees
     page_size: 250
     retry_attempts: 3
   
   schema:
-    table_name: nominations_nominees
+    table_name: nominations_individualnominees
     is_main: false
     create_raw: true
     id_fields: [nomination_id, position_id, nominee_ordinal]
-    fields:
-      - name: nomination_id
-        type: string
-      - name: position_id
-        type: integer
-      - name: nominee_ordinal
-        type: integer
-      - name: first_name
-        type: string
-      - name: middle_name
-        type: string
-      - name: last_name
-        type: string
-      - name: prefix
-        type: string
-      - name: suffix
-        type: string
-      - name: state
-        type: string
-      - name: effective_date
-        type: timestamp
-      - name: predecessor_name
-        type: string
-      - name: corps_code
-        type: string
-  
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: nominations_hearings
+  description: Nomination hearings data
+
+  schema:
+    table_name: nominations_hearings
+    is_main: false
+    create_raw: false
+    id_fields: [nomination_id, hearing_id]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: nominations_committeeactivities
+  description: Nomination committee activities data
+
+  api:
+    expected_key: committees
+    outer_field: committees
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: nominations_committeeactivities
+    is_main: false
+    create_raw: true
+    id_fields: [nomination_id, committee_code]
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250

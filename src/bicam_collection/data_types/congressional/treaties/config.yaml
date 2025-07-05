@@ -1,12 +1,12 @@
 - name: treaties
   description: Congressional treaties main data
-  
+
   api:
     expected_key: treaty
     outer_field: treaties
     page_size: 250
     retry_attempts: 3
-  
+
   schema:
     table_name: treaties
     is_main: true
@@ -17,125 +17,88 @@
       - countries
       - indexterms
       - committeeactivities
-      - committees
       - titles
       - committeereports
-    fields:
-      - name: treaty_id
-        type: string
-      - name: treaty_number
-        type: integer
-      - name: suffix
-        type: string
-      - name: congress_received
-        type: integer
-      - name: congress_considered
-        type: integer
-      - name: topic
-        type: string
-      - name: transmitted_at
-        type: timestamp
-      - name: in_force_at
-        type: timestamp
-      - name: resolution_text
-        type: string
-      - name: parts_count
-        type: integer
-      - name: actions_count
-        type: integer
-      - name: old_number
-        type: string
-      - name: old_number_display_name
-        type: string
-      - name: updated_at
-        type: timestamp
-  
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: treaties_indexterms
+  description: Treaty index terms data
+
+  schema:
+    table_name: treaties_indexterms
+    is_main: false
+    create_raw: false
+    id_fields: [treaty_id, index_term]
+    related_tables:
+      - indexterms
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: treaties_titles
+  description: Treaty titles data
+
+  schema:
+    table_name: treaties_titles
+    is_main: false
+    create_raw: false
+    id_fields: [treaty_id, title, title_type]
+
   processing:
     batch_size: 100
     checkpoint_frequency: 50
 
 - name: treaties_actions
   description: Treaty actions data
-  
+
   api:
-    expected_key: action
+    expected_key: actions
     outer_field: actions
     page_size: 250
     retry_attempts: 3
-  
+
   schema:
     table_name: treaties_actions
     is_main: false
     create_raw: true
-    id_fields: [action_id]
-    fields:
-      - name: action_id
-        type: string
-      - name: treaty_id
-        type: string
-      - name: action_code
-        type: string
-      - name: action_date
-        type: date
-      - name: text
-        type: string
-      - name: action_type
-        type: string
-      - name: committee_code
-        type: string
-      - name: committee_name
-        type: string
-  
+    id_fields: [action_id, treaty_id]
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250
 
 - name: treaties_countries
   description: Treaty countries data
-  
-  api:
-    expected_key: country
-    outer_field: countries
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: treaties_countries
     is_main: false
     create_raw: false
     id_fields: [treaty_id, country]
-    fields:
-      - name: treaty_id
-        type: string
-      - name: country
-        type: string
-  
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250
 
-- name: treaties_committees
+- name: treaties_committeeactivities
   description: Treaty committees data
-  
+
   api:
-    expected_key: committee
+    expected_key: committees
     outer_field: committees
     page_size: 250
     retry_attempts: 3
-  
+
   schema:
-    table_name: treaties_committees
+    table_name: treaties_committeeactivities
     is_main: false
     create_raw: true
-    id_fields: [treaty_id, committee_code]
-    fields:
-      - name: treaty_id
-        type: string
-      - name: committee_code
-        type: string
-      - name: committee_name
-        type: string
-  
+    id_fields: [treaty_id, committee_code, activity_date, activity_name]
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250

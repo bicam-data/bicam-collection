@@ -16,27 +16,6 @@
       - terms
       - leadershiproles
       - partyhistory
-    fields:
-      - name: bioguide_id
-        type: string
-      - name: first_name
-        type: string
-      - name: last_name
-        type: string
-      - name: middle_name
-        type: string
-      - name: suffix
-        type: string
-      - name: nickname
-        type: string
-      - name: party
-        type: string
-      - name: state
-        type: string
-      - name: district
-        type: integer
-      - name: update_date
-        type: timestamp
 
   processing:
     batch_size: 50
@@ -45,100 +24,39 @@
 - name: members_terms
   description: Congressional members terms data
 
-  api:
-    expected_key: term
-    outer_field: terms
-    page_size: 250
-    retry_attempts: 3
-
   schema:
     table_name: members_terms
     is_main: false
-    create_raw: true
-    id_fields: [bioguide_id, start_year, chamber]
-    fields:
-      - name: bioguide_id
-        type: string
-      - name: chamber
-        type: string
-      - name: start_year
-        type: integer
-      - name: end_year
-        type: integer
-      - name: party_code
-        type: string
-      - name: party_name
-        type: string
-      - name: state_code
-        type: string
-      - name: state_name
-        type: string
-      - name: district
-        type: integer
-      - name: member_type
-        type: string
-  
+    create_raw: false
+    id_fields: [bioguide_id, start_year, end_year]
+
   processing:
     batch_size: 100
+    checkpoint_frequency: 50
 
 - name: members_leadershiproles
   description: Congressional members leadership roles data
-  
-  api:
-    expected_key: leadershipRole
-    outer_field: leadershipRoles
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: members_leadershiproles
     is_main: false
-    create_raw: true
-    id_fields: [bioguide_id, type, start_date]
-    fields:
-      - name: bioguide_id
-        type: string
-      - name: type
-        type: string
-      - name: congress
-        type: integer
-      - name: chamber
-        type: string
-      - name: start_date
-        type: date
-      - name: end_date
-        type: date
-      - name: current
-        type: boolean
-  
+    create_raw: false
+    id_fields: [bioguide_id, role, congress, chamber, is_current]
+
   processing:
     batch_size: 100
+    checkpoint_frequency: 50
 
 - name: members_partyhistory
   description: Congressional members party history data
-  
-  api:
-    expected_key: partyHistory
-    outer_field: partyHistory
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: members_partyhistory
     is_main: false
-    create_raw: true
-    id_fields: [bioguide_id, party_code, start_date]
-    fields:
-      - name: bioguide_id
-        type: string
-      - name: party_code
-        type: string
-      - name: party_name
-        type: string
-      - name: start_date
-        type: date
-      - name: end_date
-        type: date
-  
+    create_raw: false
+    id_fields: [bioguide_id, party_code, start_year, end_year]
+
   processing:
     batch_size: 100
+    checkpoint_frequency: 50
+

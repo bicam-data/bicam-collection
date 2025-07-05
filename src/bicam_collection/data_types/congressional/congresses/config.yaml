@@ -1,12 +1,12 @@
 - name: congresses
   description: Congressional congresses main data
-  
+
   api:
-    expected_key: congress
-    outer_field: congresses
+    expected_key: congresses
+    outer_field: congress
     page_size: 250
     retry_attempts: 3
-  
+
   schema:
     table_name: congresses
     is_main: true
@@ -14,50 +14,20 @@
     id_fields: [congress_number]
     related_tables:
       - sessions
-    fields:
-      - name: congress_number
-        type: integer
-      - name: name
-        type: string
-      - name: start_year
-        type: integer
-      - name: end_year
-        type: integer
-      - name: updated_at
-        type: timestamp
-  
+
   processing:
     batch_size: 100
     checkpoint_frequency: 50
 
 - name: congresses_sessions
   description: Congressional sessions data
-  
-  api:
-    expected_key: session
-    outer_field: sessions
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: congresses_sessions
     is_main: false
     create_raw: true
     id_fields: [congress_number, session, chamber, type]
-    fields:
-      - name: congress_number
-        type: integer
-      - name: session
-        type: integer
-      - name: chamber
-        type: string
-      - name: type
-        type: string
-      - name: start_date
-        type: timestamp
-      - name: end_date
-        type: timestamp
-  
+
   processing:
-    batch_size: 500
-    checkpoint_frequency: 250
+    batch_size: 100
+    checkpoint_frequency: 50

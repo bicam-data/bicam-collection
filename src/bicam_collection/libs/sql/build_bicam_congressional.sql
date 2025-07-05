@@ -410,7 +410,7 @@ CREATE TABLE IF NOT EXISTS bicam_congressional.amendments_notes(
 -- Bills related tables
 CREATE TABLE IF NOT EXISTS bicam_congressional.bills_texts(
     bill_id TEXT,
-    date TEXT,
+    date TIMESTAMP WITH TIME ZONE,
     type TEXT,
     raw_text TEXT,
     formatted_text TEXT,
@@ -467,8 +467,8 @@ CREATE TABLE IF NOT EXISTS bicam_congressional.bills_cbocostestimates(
     pub_date TIMESTAMP WITH TIME ZONE,
     title TEXT,
     url TEXT,
-    PRIMARY KEY (bill_id, pub_date, url)
-);
+    PRIMARY KEY (bill_id, url)
+)
 
 CREATE TABLE IF NOT EXISTS bicam_congressional.bills_committees(
     bill_id TEXT,

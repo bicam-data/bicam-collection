@@ -1,12 +1,12 @@
 - name: hearings
   description: Congressional hearings main data
-  
+
   api:
     expected_key: hearing
     outer_field: hearings
     page_size: 250
     retry_attempts: 3
-  
+
   schema:
     table_name: hearings
     is_main: true
@@ -16,108 +16,46 @@
       - committees
       - dates
       - texts
-    fields:
-      - name: hearing_id
-        type: string
-      - name: chamber
-        type: string
-      - name: jacketnumber
-        type: string
-      - name: hearing_part
-        type: integer
-      - name: congress
-        type: integer
-      - name: title
-        type: string
-      - name: hearing_number
-        type: integer
-      - name: loc_id
-        type: string
-      - name: citation
-        type: string
-      - name: meeting_id
-        type: string
-      - name: updated_at
-        type: timestamp
-  
+
   processing:
     batch_size: 100
     checkpoint_frequency: 50
 
 - name: hearings_committees
   description: Hearing committees data
-  
-  api:
-    expected_key: committee
-    outer_field: committees
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: hearings_committees
     is_main: false
-    create_raw: true
+    create_raw: false
     id_fields: [hearing_id, committee_code]
-    fields:
-      - name: hearing_id
-        type: string
-      - name: committee_code
-        type: string
-      - name: committee_name
-        type: string
-  
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250
 
 - name: hearings_dates
   description: Hearing dates data
-  
-  api:
-    expected_key: date
-    outer_field: dates
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: hearings_dates
     is_main: false
-    create_raw: true
+    create_raw: false
     id_fields: [hearing_id, hearing_date]
-    fields:
-      - name: hearing_id
-        type: string
-      - name: hearing_date
-        type: timestamp
-  
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250
 
 - name: hearings_texts
   description: Hearing texts data
-  
-  api:
-    expected_key: text
-    outer_field: texts
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: hearings_texts
     is_main: false
     create_raw: true
     id_fields: [hearing_id, pdf, formatted_text]
-    fields:
-      - name: hearing_id
-        type: string
-      - name: raw_text
-        type: string
-      - name: pdf
-        type: string
-      - name: formatted_text
-        type: string
-  
+
   processing:
     batch_size: 200
     checkpoint_frequency: 100

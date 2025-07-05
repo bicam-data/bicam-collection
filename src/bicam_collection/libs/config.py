@@ -25,10 +25,13 @@ from pydantic_settings import BaseSettings
 try:
     from dotenv import load_dotenv  # type: ignore
 
-    # Load *.env* from the current working directory (project root).  We do
-    # *not* override pre-existing environment variables so explicit exports
-    # still win.
-    load_dotenv(override=False)
+    # Only load default .env if no custom env file loading is expected
+    # This check prevents conflicts with custom env file loading
+    if not os.getenv("_BICAM_CUSTOM_ENV_LOADING"):
+        # Load *.env* from the current working directory (project root).  We do
+        # *not* override pre-existing environment variables so explicit exports
+        # still win.
+        load_dotenv(override=False)
 except ModuleNotFoundError:  # pragma: no cover – optional dependency
     # If python-dotenv is not installed the user must export variables
     # explicitly in the shell.  We don't hard-fail because most pipelines
@@ -236,8 +239,31 @@ class BicamConfig(BaseSettings):
     }
 
     @classmethod
-    def from_env(cls) -> "BicamConfig":
-        """Create configuration from environment variables"""
+    def from_env(cls, env_file: str | Path | None = None) -> "BicamConfig":
+        """Create configuration from environment variables
+
+        Args:
+            env_file: Optional path to .env file to load. If not provided, uses default behavior.
+        """
+        # If a custom env file is specified, load it
+        if env_file:
+            try:
+                from dotenv import load_dotenv
+
+                # Set flag to prevent automatic .env loading conflicts
+                os.environ["_BICAM_CUSTOM_ENV_LOADING"] = "1"
+                load_dotenv(
+                    env_file, override=True
+                )  # Use override=True for custom files
+                logger.info(f"Loaded environment variables from {env_file}")
+            except ModuleNotFoundError:
+                logger.warning(
+                    "python-dotenv not installed, cannot load custom .env file"
+                )
+            except Exception as e:
+                logger.error(f"Failed to load environment file {env_file}: {e}")
+                raise
+
         # Map environment variables to database config
         db_config = DatabaseConfig(
             host=os.getenv("POSTGRESQL_HOST", "localhost"),
@@ -263,7 +289,7 @@ class BicamConfig(BaseSettings):
 
         scraping_config = ScrapingConfig(
             congressional_api_key=_merge_keys(
-                "GOVINFO_API_KEYS", "CONGRESSIONAL_API_KEYS"
+                "CONGRESSIONAL_API_KEY", "CONGRESSIONAL_API_KEYS"
             ),
             govinfo_api_key=_merge_keys("GOVINFO_API_KEY", "GOVINFO_API_KEYS"),
             output_directory=Path(os.getenv("SCRAPING_OUTPUT_DIR", "/tmp/bicam-data")),

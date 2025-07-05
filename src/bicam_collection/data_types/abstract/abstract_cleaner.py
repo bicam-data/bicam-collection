@@ -31,6 +31,7 @@ class AbstractCleaner(ABC):
         self.production_schema = production_schema
         self.progress_tracker = None
         self.current_run_id = None
+        self.processing_resource = None  # Added for processing resource support
 
         # Validate required schemas
         if not staging_schema or not production_schema:
@@ -49,3 +50,17 @@ class AbstractCleaner(ABC):
     @abstractmethod
     def get_data_types_to_process(self) -> list[str]:
         """Get list of data types to clean."""
+
+    def set_processing_resource(self, processing_resource) -> None:
+        """
+        Set the processing resource for accessing shared resources.
+
+        This method is called by the Dagster pipeline to provide access to:
+        - Shared database pools
+        - Checkpoint managers
+        - Other shared resources
+
+        Args:
+            processing_resource: Resource providing shared infrastructure
+        """
+        self.processing_resource = processing_resource

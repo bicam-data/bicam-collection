@@ -869,3 +869,26 @@ class GovInfoBaseDatabaseNormalizer(AbstractDatabaseNormalizer):
         """Extract package ID from data - must be implemented by subclasses."""
         # This is a fallback - subclasses should implement their specific logic
         return item_data.get("extracted_package_id", str(uuid.uuid4()))
+
+    async def _get_recent_package_ids(self, limit: int = 1000) -> list[str]:
+        """Get recent package IDs from raw data for processing."""
+        if not self.db_pool:
+            return []
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Try to get recent package IDs from the collection raw table
+                query = f"""
+                    SELECT DISTINCT source_doc_id
+                    FROM {self.source_schema}.{self.data_type_name}_collection_raw
+                    WHERE source_doc_id IS NOT NULL
+                    ORDER BY scraped_at DESC
+                    LIMIT $1
+                """
+
+                rows = await conn.fetch(query, limit)
+                return [row["source_doc_id"] for row in rows if row["source_doc_id"]]
+
+        except Exception as e:
+            logger.warning(f"Could not get recent package IDs: {e}")
+            return []

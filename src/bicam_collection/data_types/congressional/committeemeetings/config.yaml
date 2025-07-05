@@ -2,8 +2,8 @@
   description: Congressional committee meetings main data
   
   api:
-    expected_key: meeting
-    outer_field: meetings
+    expected_key: committeeMeeting
+    outer_field: committee-meeting
     page_size: 250
     retry_attempts: 3
 
@@ -13,129 +13,107 @@
     create_raw: true
     id_fields: [meeting_id]
     related_tables:
-      - bills
-      - treaties
-      - nominations
+      # - bills
+      # - treaties
+      # - nominations
       - meetingdocuments
       - videos
       - witnessdocuments
       - witnesses
       - hearings
       - committees
-    fields:
-      - name: meeting_id
-        type: string
-      - name: title
-        type: string
-      - name: meeting_type
-        type: string
-      - name: chamber
-        type: string
-      - name: congress
-        type: integer
-      - name: date
-        type: timestamp
-      - name: room
-        type: string
-      - name: street_address
-        type: string
-      - name: building
-        type: string
-      - name: city
-        type: string
-      - name: state
-        type: string
-      - name: zip_code
-        type: string
-      - name: meeting_status
-        type: string
-      - name: updated_at
-        type: timestamp
-  
+
   processing:
     batch_size: 100
     checkpoint_frequency: 50
 
 - name: committeemeetings_committees
   description: Committee meetings committees data
-  
-  api:
-    expected_key: committee
-    outer_field: committees
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: committeemeetings_committees
     is_main: false
     create_raw: true
     id_fields: [meeting_id, committee_code]
-    fields:
-      - name: meeting_id
-        type: string
-      - name: committee_code
-        type: string
-      - name: committee_name
-        type: string
-  
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250
 
-- name: committeemeetings_bills
-  description: Committee meetings bills data
-  
-  api:
-    expected_key: bill
-    outer_field: bills
-    page_size: 250
-    retry_attempts: 3
-  
-  schema:
-    table_name: committeemeetings_bills
-    is_main: false
-    create_raw: true
-    id_fields: [meeting_id, bill_id]
-    fields:
-      - name: meeting_id
-        type: string
-      - name: bill_id
-        type: string
-      - name: bill_type
-        type: string
-      - name: bill_number
-        type: float
-      - name: congress
-        type: integer
-  
-  processing:
-    batch_size: 500
-    checkpoint_frequency: 250
+# - name: committeemeetings_bills
+#   description: Committee meetings bills data
+
+#   schema:
+#     table_name: committeemeetings_bills
+#     is_main: false
+#     create_raw: false
+#     id_fields: [meeting_id, bill_id]
+
+  # processing:
+  #   batch_size: 500
+  #   checkpoint_frequency: 250
 
 - name: committeemeetings_witnesses
   description: Committee meetings witnesses data
-  
-  api:
-    expected_key: witness
-    outer_field: witnesses
-    page_size: 250
-    retry_attempts: 3
-  
+
   schema:
     table_name: committeemeetings_witnesses
     is_main: false
-    create_raw: true
+    create_raw: false
     id_fields: [meeting_id, name, position, organization]
-    fields:
-      - name: meeting_id
-        type: string
-      - name: name
-        type: string
-      - name: position
-        type: string
-      - name: organization
-        type: string
-  
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeemeetings_witnessdocuments
+  description: Committee meetings witness documents data
+
+  schema:
+    table_name: committeemeetings_witnessdocuments
+    is_main: false
+    create_raw: false
+    id_fields: [meeting_id, document_type, format, url]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeemeetings_videos
+  description: Committee meetings videos data
+
+  schema:
+    table_name: committeemeetings_videos
+    is_main: false
+    create_raw: false
+    id_fields: [meeting_id, video_name, url]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeemeetings_meetingdocuments
+  description: Committee meetings meeting documents data
+
+  schema:
+    table_name: committeemeetings_meetingdocuments
+    is_main: false
+    create_raw: false
+    id_fields: [meeting_id, document_name, document_type, description, format, url]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeemeetings_hearingtranscript
+  description: Committee meetings hearings data (will be routed to hearings table)
+
+  schema:
+    table_name: committeemeetings_hearingtranscript
+    is_main: false
+    create_raw: false
+    id_fields: [meeting_id, hearing_id]
+
   processing:
     batch_size: 500
     checkpoint_frequency: 250

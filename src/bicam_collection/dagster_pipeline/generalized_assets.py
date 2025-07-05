@@ -423,7 +423,7 @@ def create_staging_data_asset(data_type: str):
                 normalizer.set_processing_resource(processing_resource)
 
                 # Setup progress tracker for checkpointing
-                progress_tracker = normalizer.setup_progress_tracker(checkpoint_manager)
+                progress_tracker = normalizer.setup_progress_tracker()
                 if not progress_tracker:
                     dagster_logger.warning(
                         f"No progress tracker created for {data_type}"
@@ -614,7 +614,7 @@ def create_production_data_asset(data_type: str):
                 cleaner.set_processing_resource(processing_resource)
 
                 # Setup progress tracker for checkpointing
-                progress_tracker = cleaner.setup_progress_tracker(checkpoint_manager)
+                progress_tracker = cleaner.setup_progress_tracker()
                 if not progress_tracker:
                     dagster_logger.warning(
                         f"No progress tracker created for {data_type}"
@@ -909,13 +909,13 @@ def create_data_type_job(data_type: str, phases: list[int] = None):
     def data_type_job():
         """Job for processing specific data type through all phases."""
         if phases is None or 1 in phases:
-            raw_result = globals()[f"{data_type}_raw_data"]()
+            raw_result = globals()[f"{data_type}_raw_data"]()  # noqa: F841
 
         if phases is None or 2 in phases:
-            staging_result = globals()[f"{data_type}_staging_data"]()
+            staging_result = globals()[f"{data_type}_staging_data"]()  # noqa: F841
 
         if phases is None or 3 in phases:
-            production_result = globals()[f"{data_type}_production_data"]()
+            production_result = globals()[f"{data_type}_production_data"]()  # noqa: F841
 
     return data_type_job
 

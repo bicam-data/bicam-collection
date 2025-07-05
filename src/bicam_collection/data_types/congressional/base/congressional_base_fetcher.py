@@ -440,69 +440,263 @@ class CongressionalBaseFetcher(AbstractFetcher):
         processed_count = 0
         first_batch_processed = False
 
-        async for list_batch in self.fetch_list_data(
-            from_date=from_date, to_date=to_date, limit=limit, **kwargs
-        ):
-            # Capture total count from first response
-            if not first_batch_processed and hasattr(
-                self.client, "last_response_metadata"
-            ):
-                metadata = self.client.last_response_metadata
-                if metadata and isinstance(metadata, dict) and "pagination" in metadata:
-                    pagination = metadata.get("pagination")
-                    if (
-                        pagination
-                        and isinstance(pagination, dict)
-                        and "count" in pagination
-                    ):
-                        total_count = pagination.get("count")
-                        if total_count is not None and isinstance(total_count, int):
-                            stats["total_count"] = total_count
-                            logger.info(
-                                f"Captured total count for sequential processing: {total_count}"
-                            )
-                first_batch_processed = True
+        # Use the same pagination metadata analysis as parallel processing
+        # This ensures sequential processing handles date filters correctly
+        try:
+            pages_to_process, pagination_metadata = await self._get_pagination_metadata(
+                from_date, to_date, limit, **kwargs
+            )
 
-            for list_item in list_batch:
-                if max_items and processed_count >= max_items:
-                    break
-
-                try:
-                    processed_item = await self._process_single_item(list_item)
-                    batch_items.append(processed_item)
-                    stats["successful"] += 1
-
-                    # Track latest updateDate for incremental processing
-                    update_date = list_item.get("updateDate") or processed_item.get(
-                        "full_data", {}
-                    ).get("updateDate")
-                    if update_date and (
-                        not stats["latest_update_date"]
-                        or update_date > stats["latest_update_date"]
-                    ):
-                        stats["latest_update_date"] = update_date
-
-                except Exception as e:
-                    logger.error(
-                        f"Error processing item {list_item.get('url', 'UNKNOWN')}: {e}",
-                        exc_info=True,
+            if pages_to_process is not None:
+                # We have pagination metadata, use it to guide processing
+                if pages_to_process == 0:
+                    logger.info("No new items to process based on pagination analysis")
+                    stats["end_time"] = datetime.now(UTC)
+                    stats["duration"] = (
+                        stats["end_time"] - stats["start_time"]
+                    ).total_seconds()
+                    logger.info(
+                        f"Sequential processing completed (no new items): {stats}"
                     )
-                    stats["errors"] += 1
+                    return stats
 
-                processed_count += 1
-                stats["total_processed"] += 1
+                # Store pagination metadata in stats for tracking
+                stats["total_count"] = pagination_metadata.get("total_count")
+                stats["last_processed_count"] = pagination_metadata.get(
+                    "last_processed_count"
+                )
+                stats["incremental_count"] = pagination_metadata.get(
+                    "incremental_count"
+                )
 
-                # Store batch when full
-                if len(batch_items) >= batch_size:
-                    await self._store_batch(batch_items)
-                    stats["batches_stored"] += 1
-                    batch_items.clear()
+                logger.info(
+                    f"Sequential processing: {pagination_metadata.get('incremental_count')} items "
+                    f"across {pages_to_process} pages to process"
+                )
+
+                # Use the pagination metadata to guide fetching
+                # Start from the calculated offset and process the determined number of pages
+                page_size = pagination_metadata.get("page_size", limit or 250)
+                start_offset = pagination_metadata.get("start_offset", 0)
+
+                # Process pages sequentially using the calculated offsets
+                for page_num in range(pages_to_process):
+                    if max_items and processed_count >= max_items:
+                        break
+
+                    offset = start_offset + (page_num * page_size)
+
+                    async for list_batch in self.fetch_list_data(
+                        from_date=from_date,
+                        to_date=to_date,
+                        limit=page_size,
+                        offset=offset,
+                        single_page_only=True,
+                        **kwargs,
+                    ):
+                        # Capture total count from first response
+                        if not first_batch_processed and hasattr(
+                            self.client, "last_response_metadata"
+                        ):
+                            metadata = self.client.last_response_metadata
+                            if (
+                                metadata
+                                and isinstance(metadata, dict)
+                                and "pagination" in metadata
+                            ):
+                                pagination = metadata.get("pagination")
+                                if (
+                                    pagination
+                                    and isinstance(pagination, dict)
+                                    and "count" in pagination
+                                ):
+                                    total_count = pagination.get("count")
+                                    if total_count is not None and isinstance(
+                                        total_count, int
+                                    ):
+                                        # Update stats with actual total count if we don't have it
+                                        if (
+                                            "total_count" not in stats
+                                            or stats["total_count"] is None
+                                        ):
+                                            stats["total_count"] = total_count
+                                        logger.info(
+                                            f"Captured total count for sequential processing: {total_count}"
+                                        )
+                            first_batch_processed = True
+
+                        for list_item in list_batch:
+                            if max_items and processed_count >= max_items:
+                                break
+
+                            try:
+                                processed_item = await self._process_single_item(
+                                    list_item
+                                )
+                                batch_items.append(processed_item)
+                                stats["successful"] += 1
+
+                                # Track latest updateDate for incremental processing
+                                update_date = list_item.get(
+                                    "updateDate"
+                                ) or processed_item.get("full_data", {}).get(
+                                    "updateDate"
+                                )
+                                if update_date and (
+                                    not stats["latest_update_date"]
+                                    or update_date > stats["latest_update_date"]
+                                ):
+                                    stats["latest_update_date"] = update_date
+
+                            except Exception as e:
+                                logger.error(
+                                    f"Error processing item {list_item.get('url', 'UNKNOWN')}: {e}",
+                                    exc_info=True,
+                                )
+                                stats["errors"] += 1
+
+                            processed_count += 1
+                            stats["total_processed"] += 1
+
+                            # Store batch when full
+                            if len(batch_items) >= batch_size:
+                                await self._store_batch(batch_items)
+                                stats["batches_stored"] += 1
+                                batch_items.clear()
+
+                            if max_items and processed_count >= max_items:
+                                break
+
+                        if max_items and processed_count >= max_items:
+                            break
+
+                    if max_items and processed_count >= max_items:
+                        break
+
+            else:
+                # Fall back to simple iteration when pagination metadata is not available
+                logger.warning(
+                    "Pagination metadata not available, falling back to simple iteration"
+                )
+
+                async for list_batch in self.fetch_list_data(
+                    from_date=from_date, to_date=to_date, limit=limit, **kwargs
+                ):
+                    # Capture total count from first response
+                    if not first_batch_processed and hasattr(
+                        self.client, "last_response_metadata"
+                    ):
+                        metadata = self.client.last_response_metadata
+                        if (
+                            metadata
+                            and isinstance(metadata, dict)
+                            and "pagination" in metadata
+                        ):
+                            pagination = metadata.get("pagination")
+                            if (
+                                pagination
+                                and isinstance(pagination, dict)
+                                and "count" in pagination
+                            ):
+                                total_count = pagination.get("count")
+                                if total_count is not None and isinstance(
+                                    total_count, int
+                                ):
+                                    stats["total_count"] = total_count
+                                    logger.info(
+                                        f"Captured total count for sequential processing: {total_count}"
+                                    )
+                        first_batch_processed = True
+
+                    for list_item in list_batch:
+                        if max_items and processed_count >= max_items:
+                            break
+
+                        try:
+                            processed_item = await self._process_single_item(list_item)
+                            batch_items.append(processed_item)
+                            stats["successful"] += 1
+
+                            # Track latest updateDate for incremental processing
+                            update_date = list_item.get(
+                                "updateDate"
+                            ) or processed_item.get("full_data", {}).get("updateDate")
+                            if update_date and (
+                                not stats["latest_update_date"]
+                                or update_date > stats["latest_update_date"]
+                            ):
+                                stats["latest_update_date"] = update_date
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error processing item {list_item.get('url', 'UNKNOWN')}: {e}",
+                                exc_info=True,
+                            )
+                            stats["errors"] += 1
+
+                        processed_count += 1
+                        stats["total_processed"] += 1
+
+                        # Store batch when full
+                        if len(batch_items) >= batch_size:
+                            await self._store_batch(batch_items)
+                            stats["batches_stored"] += 1
+                            batch_items.clear()
+
+                        if max_items and processed_count >= max_items:
+                            break
+
+                    if max_items and processed_count >= max_items:
+                        break
+
+        except Exception as e:
+            logger.error(f"Error in sequential processing pagination analysis: {e}")
+            logger.info("Falling back to simple iteration")
+
+            # Fall back to the original simple approach if pagination analysis fails
+            async for list_batch in self.fetch_list_data(
+                from_date=from_date, to_date=to_date, limit=limit, **kwargs
+            ):
+                for list_item in list_batch:
+                    if max_items and processed_count >= max_items:
+                        break
+
+                    try:
+                        processed_item = await self._process_single_item(list_item)
+                        batch_items.append(processed_item)
+                        stats["successful"] += 1
+
+                        # Track latest updateDate for incremental processing
+                        update_date = list_item.get("updateDate") or processed_item.get(
+                            "full_data", {}
+                        ).get("updateDate")
+                        if update_date and (
+                            not stats["latest_update_date"]
+                            or update_date > stats["latest_update_date"]
+                        ):
+                            stats["latest_update_date"] = update_date
+
+                    except Exception as e:
+                        logger.error(
+                            f"Error processing item {list_item.get('url', 'UNKNOWN')}: {e}",
+                            exc_info=True,
+                        )
+                        stats["errors"] += 1
+
+                    processed_count += 1
+                    stats["total_processed"] += 1
+
+                    # Store batch when full
+                    if len(batch_items) >= batch_size:
+                        await self._store_batch(batch_items)
+                        stats["batches_stored"] += 1
+                        batch_items.clear()
+
+                    if max_items and processed_count >= max_items:
+                        break
 
                 if max_items and processed_count >= max_items:
                     break
-
-            if max_items and processed_count >= max_items:
-                break
 
         # Store remaining items
         if batch_items:

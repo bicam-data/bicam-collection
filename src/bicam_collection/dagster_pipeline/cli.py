@@ -3,6 +3,8 @@
 Usage examples:
     python -m bicam_collection.dagster_pipeline.cli process bills
     python -m bicam_collection.dagster_pipeline.cli process bills --phases raw staging
+    python -m bicam_collection.dagster_pipeline.cli --env-file .env.two process bills
+    python -m bicam_collection.dagster_pipeline.cli --env-file /path/to/custom.env process amendments
 """
 
 from __future__ import annotations
@@ -59,12 +61,28 @@ async def _build_processing_resource(
 
     # Get API keys from config
     api_keys = []
-    if hasattr(config, "api_keys") and config.api_keys:
-        api_keys = config.api_keys
-    elif hasattr(config, "congressional") and hasattr(config.congressional, "api_keys"):
-        api_keys = config.congressional.api_keys
-    else:
-        # Fallback to environment variables
+
+    # Get keys from the scraping config structure
+    if hasattr(config, "scraping"):
+        # Get congressional API keys
+        congressional_keys = getattr(config.scraping, "congressional_api_key", None)
+        if congressional_keys:
+            api_keys.extend(
+                [key.strip() for key in congressional_keys.split(",") if key.strip()]
+            )
+
+        # Get govinfo API keys
+        govinfo_keys = getattr(config.scraping, "govinfo_api_key", None)
+        if govinfo_keys:
+            api_keys.extend(
+                [key.strip() for key in govinfo_keys.split(",") if key.strip()]
+            )
+
+    # Only fallback to environment if no keys found in config
+    if not api_keys:
+        logger.warning(
+            "No API keys found in config, falling back to environment variables"
+        )
         env_keys = os.getenv(
             "CONGRESSIONAL_API_KEYS", os.getenv("CONGRESSIONAL_API_KEY", "")
         )
@@ -75,10 +93,13 @@ async def _build_processing_resource(
             api_keys.extend(
                 [key.strip() for key in govinfo_keys.split(",") if key.strip()]
             )
+
     if not api_keys:
         raise ValueError(
             "No API keys found. Set CONGRESSIONAL_API_KEYS or CONGRESSIONAL_API_KEY"
         )
+
+    logger.info(f"Loaded {len(api_keys)} API keys from config")
 
     # Configure parallelization
     parallelization_config = {}
@@ -159,8 +180,8 @@ async def _setup_processing(args: argparse.Namespace):
 
     logger.info("Starting async setup phase...")
 
-    # Load configuration
-    config = BicamConfig.from_env()
+    # Load configuration from the specified env file
+    config = BicamConfig.from_env(env_file=args.env_file)
     logger.debug("Loaded configuration: %s", config)
 
     # Validate data type
@@ -192,6 +213,60 @@ async def _setup_processing(args: argparse.Namespace):
     # Initialize the processing resource (async operations)
     await _processing_resource.initialize()
 
+    # CHECK FOR CONFLICTS before proceeding to pipeline execution
+    logger.info(f"Checking for conflicts before processing {args.data_type}...")
+
+    # Get run manager from processing resource
+    run_manager = await _processing_resource.get_run_manager()
+
+    # Create run metadata for conflict detection
+    from ..libs.run_tracking import RunMetadata, RunType
+
+    # Determine run type based on data source
+    data_source = registry.get_data_source(args.data_type)
+    if data_source == "congressional":
+        run_type = RunType.SCRAPER_CONGRESSIONAL
+    elif data_source == "govinfo":
+        run_type = RunType.SCRAPER_GOVINFO
+    else:
+        run_type = RunType.OTHER
+
+    run_metadata = RunMetadata(
+        run_id="",  # Will be set by create_run
+        run_type=run_type,
+        system_name=f"{args.data_type}_fetcher_dagster",  # Use same system name as the actual Dagster asset
+        description=f"Processing {args.data_type}"
+        + (f" ({', '.join(args.phases)})" if args.phases else " (all phases)"),
+        parameters={
+            "data_type": args.data_type,
+            "phases": args.phases,
+            "from_date": args.from_date,
+            "to_date": args.to_date,
+            "congress": args.congress,
+            "parallel": args.parallel,
+            "resume": args.resume,
+            "rerun": args.rerun,
+        },
+        data_types=[args.data_type],
+        priority=3,
+        tags=["dagster", "pipeline", args.data_type],
+    )
+
+    # Check for conflicts
+    conflicts = await run_manager.check_conflicts(run_metadata)
+    if conflicts:
+        logger.error(f"Cannot start processing {args.data_type} due to conflicts:")
+        for conflict in conflicts:
+            logger.error(f"  - {conflict}")
+        raise RuntimeError(
+            f"Processing blocked by {len(conflicts)} active run(s). Stop other instances first."
+        )
+
+    logger.info(f"No conflicts detected for {args.data_type}")
+
+    # Note: The actual run will be created by the Dagster asset, not here
+    # This conflict check uses the same system name that the Dagster asset will use
+
     logger.info("Async setup phase completed successfully")
 
 
@@ -220,6 +295,7 @@ async def _cleanup_processing(success: bool, error_message: str = None):
 
     try:
         if _processing_resource:
+            # Note: Run tracking is handled by the Dagster assets, not the CLI
             # Clean up the processing resource
             await _processing_resource.cleanup()
             logger.info("Processing resource cleaned up successfully")
@@ -232,6 +308,15 @@ async def _cleanup_processing(success: bool, error_message: str = None):
 
 def _create_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("bicam-collection data pipeline")
+
+    # Add global --env-file argument
+    p.add_argument(
+        "--env-file",
+        type=str,
+        help="Path to .env file to load (default: .env)",
+        default=None,
+    )
+
     sub = p.add_subparsers(dest="command", required=True)
 
     # ------------------------------------------------------------------
@@ -307,7 +392,7 @@ async def main_async(argv: list[str] | None = None):
     elif ns.command == "setup-db":
         from .commands import setup_db
 
-        config = BicamConfig.from_env()
+        config = BicamConfig.from_env(env_file=ns.env_file)
         resource = ProcessingResource(
             db_host=config.database.host,
             db_port=config.database.port,
@@ -322,7 +407,7 @@ async def main_async(argv: list[str] | None = None):
     elif ns.command == "check-dates":
         from .commands import check_dates
 
-        config = BicamConfig.from_env()
+        config = BicamConfig.from_env(env_file=ns.env_file)
         resource = ProcessingResource(
             db_host=config.database.host,
             db_port=config.database.port,
@@ -337,7 +422,7 @@ async def main_async(argv: list[str] | None = None):
     elif ns.command == "reset-dates":
         from .commands import reset_dates
 
-        config = BicamConfig.from_env()
+        config = BicamConfig.from_env(env_file=ns.env_file)
         resource = ProcessingResource(
             db_host=config.database.host,
             db_port=config.database.port,
@@ -352,7 +437,7 @@ async def main_async(argv: list[str] | None = None):
     elif ns.command == "clear-checkpoints":
         from .commands import clear_checkpoints
 
-        config = BicamConfig.from_env()
+        config = BicamConfig.from_env(env_file=ns.env_file)
         resource = ProcessingResource(
             db_host=config.database.host,
             db_port=config.database.port,
