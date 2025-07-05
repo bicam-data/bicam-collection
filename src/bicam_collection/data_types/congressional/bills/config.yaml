@@ -229,7 +229,7 @@
     create_raw: false
     id_fields: [bill_id, note_number]
     related_tables:
-      - notes_links
+      - links
 
 - name: bills_notes_links
   description: Bills notes links data
