@@ -11,14 +11,14 @@ All concrete implementations must inherit from these abstracts
 through source-specific base classes.
 """
 
-from .abstract_cleaner import AbstractCleaner
-from .abstract_database_normalizer import AbstractDatabaseNormalizer
-from .abstract_fetcher import AbstractFetcher
-from .abstract_specialized_assets import AbstractSpecializedAssets
+from .base_cleaner import BaseCleaner
+from .base_database_normalizer import BaseDatabaseNormalizer
+from .base_specialized_assets import BaseSpecializedAssets
+from .base_fetcher import BaseFetcher
 
 __all__ = [
-    "AbstractFetcher",
-    "AbstractDatabaseNormalizer",
-    "AbstractCleaner",
-    "AbstractSpecializedAssets",
+    "BaseFetcher",
+    "BaseDatabaseNormalizer",
+    "BaseCleaner",
+    "BaseSpecializedAssets",
 ]

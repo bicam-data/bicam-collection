@@ -9,14 +9,13 @@ Congressional-specific implementations including:
 - Congressional API patterns
 """
 
-from .congressional_base_cleaner import CongressionalBaseCleaner
-from .congressional_base_database_normalizer import CongressionalBaseDatabaseNormalizer
+# Import shared base classes from abstract module
+from ...abstract import BaseCleaner, BaseDatabaseNormalizer, BaseSpecializedAssets
 from .congressional_base_fetcher import CongressionalBaseFetcher
-from .congressional_base_specialized_assets import CongressionalBaseSpecializedAssets
 
 __all__ = [
     "CongressionalBaseFetcher",
-    "CongressionalBaseDatabaseNormalizer",
-    "CongressionalBaseCleaner",
-    "CongressionalBaseSpecializedAssets",
+    "BaseDatabaseNormalizer",
+    "BaseCleaner",
+    "BaseSpecializedAssets",
 ]

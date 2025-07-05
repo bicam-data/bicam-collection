@@ -67,21 +67,9 @@ class CongressionalAPIClient(BaseAPIClient):
         """Get the data type name for Congressional API."""
         return "congressional_api"
 
-    def _format_date_for_api(self, date: str | None) -> str | None:
-        """Format date for Congressional API (YYYY-MM-DD)."""
-        if not date:
-            return None
-        # Congressional API uses YYYY-MM-DD format
-        if len(date) == 10 and date.count("-") == 2:
-            return date
-        # Handle various datetime formats
-        try:
-            if "T" in date:
-                dt = datetime.fromisoformat(date.replace("Z", "+00:00"))
-                return dt.strftime("%Y-%m-%d")
-            return date
-        except Exception:
-            return date
+    def _get_last_processed_dates_table_name(self) -> str:
+        """Get the appropriate last processed dates table name for Congressional API."""
+        return "congressional_last_processed_dates"
 
     def _extract_latest_date(self, data_batch: list[dict[str, Any]]) -> str | None:
         """Extract the latest update date from Congressional API data."""
@@ -206,7 +194,7 @@ class CongressionalAPIClient(BaseAPIClient):
         raise CongressionalAPIError(f"Max retries ({max_retries}) exceeded")
 
     async def retrieve_full_data_from_url(
-        self, url: str, expected_key: str | None = None, max_retries: int = 5
+        self, url: str, full_key: str | None = None, max_retries: int = 5
     ) -> dict[str, Any] | None:
         """
         PHASE 2: Get full data from an individual item URL.
@@ -217,7 +205,7 @@ class CongressionalAPIClient(BaseAPIClient):
 
         Args:
             url: Full URL to the individual item (e.g., bill, member, committee)
-            expected_key: Expected top-level key in response (e.g., 'bill', 'member')
+            full_key: Expected top-level key in response (e.g., 'bill', 'member')
                         If None, will try common keys or return whole response
             max_retries: Maximum number of retries for this specific URL
 
@@ -241,18 +229,18 @@ class CongressionalAPIClient(BaseAPIClient):
 
                 response = await self._make_request(endpoint)
 
-                # If expected_key is provided, use it
-                if expected_key and expected_key in response:
-                    return response[expected_key]
-                elif expected_key:
+                # If full_key is provided, use it
+                if full_key and full_key in response:
+                    return response[full_key]
+                elif full_key:
                     # Expected key was provided but not found - log error
                     available_keys = list(response.keys())
-                    error_msg = f"Expected key '{expected_key}' not found in response. Available keys: {available_keys}"
-                    logger.error(f"Missing expected key in {endpoint}: {error_msg}")
+                    error_msg = f"Expected key '{full_key}' not found in response. Available keys: {available_keys}"
+                    logger.error(f"Missing full key in {endpoint}: {error_msg}")
 
                     # Log to database if available
                     await self._log_endpoint_error(
-                        endpoint, error_msg, "missing_expected_key"
+                        endpoint, error_msg, "missing_full_key"
                     )
                     return None
 
@@ -288,7 +276,7 @@ class CongressionalAPIClient(BaseAPIClient):
         return None
 
     async def retrieve_related_data_from_url(
-        self, url: str, expected_key: list[str] | None = None, max_retries: int = 5
+        self, url: str, list_key: list[str] | None = None, max_retries: int = 5
     ) -> list[dict[str, Any]]:
         """
         PHASE 3: Get related data from URLs within full data.
@@ -298,7 +286,7 @@ class CongressionalAPIClient(BaseAPIClient):
 
         Args:
             url: URL to related data (e.g., bill actions, cosponsors, etc.)
-            expected_key: Expected key(s) in response. Can be:
+            list_key: Expected key(s) in response. Can be:
                         - str: Single top-level key (e.g., 'actions', 'cosponsors')
                         - list[str]: Nested path (e.g., ['subjects', 'legislativeSubjects'])
                         - None: Will try common keys
@@ -323,21 +311,21 @@ class CongressionalAPIClient(BaseAPIClient):
 
                 response = await self._make_request(endpoint)
 
-                # If expected_key is provided, use it
-                if expected_key:
-                    if len(expected_key) > 1:
+                # If list_key is provided, use it
+                if list_key:
+                    if len(list_key) > 1:
                         # access the key as many times as needed
                         data = response
-                        for key in expected_key:
+                        for key in list_key:
                             if isinstance(data, dict) and key in data:
                                 data = data.get(key)
                             else:
                                 data = None
                                 break
                     else:
-                        data = response.get(expected_key[0])
+                        data = response.get(list_key[0])
                 else:
-                    # If no expected_key, try common keys for Congressional API
+                    # If no list_key, try common keys for Congressional API
                     common_keys = [
                         "actions",
                         "cosponsors",
@@ -368,7 +356,7 @@ class CongressionalAPIClient(BaseAPIClient):
                         return data
                     else:
                         logger.warning(
-                            f"Expected list for key path '{expected_key}' but got {type(data)} from {url}"
+                            f"Expected list for key path '{list_key}' but got {type(data)} from {url}"
                         )
                         return []
                 else:
@@ -378,7 +366,7 @@ class CongressionalAPIClient(BaseAPIClient):
                     )
                     logger.warning(
                         f"No list data found in response from {url}. "
-                        f"Expected key: {expected_key}, Available keys: {available_keys}"
+                        f"Expected key: {list_key}, Available keys: {available_keys}"
                     )
                     return []
 
@@ -448,7 +436,6 @@ class CongressionalAPIClient(BaseAPIClient):
 
         # Build endpoint based on data type
         endpoint = f"/{data_type}"
-        abnormal_key = kwargs.get("abnormal_key")
 
         # Build params
         params = {}
@@ -500,22 +487,7 @@ class CongressionalAPIClient(BaseAPIClient):
                     "pagination": {"count": parsed_total_count, "next": next_url}
                 }
 
-                # Extract data from response using plural form
-                # Handle data types that use camelCase in response by converting kebab-case to camelCase
-                if abnormal_key:
-                    data_key = abnormal_key
-                elif "-" in data_type:
-                    # Convert kebab-case to camelCase: committee-meeting -> committeeMeetings
-                    parts = data_type.split("-")
-                    data_key = (
-                        parts[0]
-                        + "".join(part.capitalize() for part in parts[1:])
-                        + "s"
-                    )
-                else:
-                    data_key = f"{data_type}s"  # bills, members, committees, etc.
-                data = response.get(data_key, [])
-
+                # Return the full response - let the fetcher handle data extraction using config
                 # Handle limit=0 case - just get metadata and return empty data
                 if limit == 0:
                     logger.info(
@@ -525,16 +497,26 @@ class CongressionalAPIClient(BaseAPIClient):
                     break
 
                 # Check pagination - if there's no data and we're not in limit=0 mode, we're done
-                if not data:
+                if not response:
                     logger.info(f"No more data available for {data_type}")
                     break
 
-                yield data
+                yield response
 
-                total_processed += len(data)
+                # For logging purposes, try to get the data length from the response
+                # This is just for logging - the actual data extraction is handled by the fetcher
+                data_length = 0
+                if isinstance(response, dict):
+                    # Try to find any list in the response for logging
+                    for value in response.values():
+                        if isinstance(value, list):
+                            data_length = len(value)
+                            break
+
+                total_processed += data_length
 
                 logger.info(
-                    f"Page {page_number} - Items: {len(data)}, Total processed: {total_processed}/{total_count}, Has next: {next_url is not None}"
+                    f"Page {page_number} - Items: {data_length}, Total processed: {total_processed}/{total_count}, Has next: {next_url is not None}"
                 )
 
                 # If single_page_only mode, stop after processing one page
@@ -550,7 +532,7 @@ class CongressionalAPIClient(BaseAPIClient):
                     )
                     break
 
-                current_offset += len(data)
+                current_offset += data_length
                 page_number += 1
 
             except CongressionalAPIError as e:

@@ -78,6 +78,10 @@ class GovInfoAPIClient(BaseAPIClient):
         """Get the data type name for GovInfo API."""
         return "govinfo_api"
 
+    def _get_last_processed_dates_table_name(self) -> str:
+        """Get the appropriate last processed dates table name for GovInfo API."""
+        return "govinfo_last_processed_dates"
+
     def _format_date_for_api(self, date_str: str) -> str:
         """Convert date string to GovInfo API format (YYYY-MM-DDTHH:MM:SSZ)."""
         if not date_str:
@@ -364,9 +368,7 @@ class GovInfoAPIClient(BaseAPIClient):
 
                 # If single_page_only mode, stop after processing one page
                 if single_page_only:
-                    logger.debug(
-                        "Single page mode: stopping after processing one page"
-                    )
+                    logger.debug("Single page mode: stopping after processing one page")
                     break
 
                 if not next_page:

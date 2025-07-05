@@ -2,7 +2,7 @@
 Bills Database Normalizer - Streamlined Implementation
 
 This module provides bills-specific database normalization logic that extends
-the optimized BaseDatabaseNormalizer.
+the consolidated BaseDatabaseNormalizer.
 
 BILLS-SPECIFIC FEATURES:
 - Bills data structure validation and parsing
@@ -14,12 +14,12 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from ..base import CongressionalBaseDatabaseNormalizer
+from ...abstract.base_database_normalizer import BaseDatabaseNormalizer
 
 logger = logging.getLogger(__name__)
 
 
-class BillsDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
+class BillsDatabaseNormalizer(BaseDatabaseNormalizer):
     """
     Database normalizer for Congressional bills data.
 
@@ -29,22 +29,19 @@ class BillsDatabaseNormalizer(CongressionalBaseDatabaseNormalizer):
 
     def __init__(
         self,
-        config_path: str | None = None,
-        db_pool=None,
-        checkpoint_manager=None,
-        run_manager=None,
+        data_type_name: str,
+        system_name: str,
         target_schema: str = "bicam_staging_congressional",
         source_schema: str = "bicam_raw_congressional",
+        **kwargs,
     ):
         """Initialize the bills normalizer."""
         super().__init__(
-            config_path=config_path,
-            db_pool=db_pool,
-            checkpoint_manager=checkpoint_manager,
-            run_manager=run_manager,
-            data_type_name="bills",
+            data_type_name=data_type_name,
+            system_name=system_name,
             target_schema=target_schema,
             source_schema=source_schema,
+            **kwargs,
         )
 
     # =============================================================================

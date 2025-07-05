@@ -69,7 +69,6 @@ class BillsFetcher(CongressionalBaseFetcher):
         """
         return self.extract_item_id(list_item)
 
-
     # =============================================================================
     # BILLS-SPECIFIC RELATED DATA METHODS
     # =============================================================================
@@ -78,14 +77,16 @@ class BillsFetcher(CongressionalBaseFetcher):
         self, full_bill_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get bill actions from actions URL in full bill data."""
-        return await self.get_generic_related_data(full_bill_data)
+        return await self.get_generic_related_data(
+            full_bill_data, related_table_name="actions"
+        )
 
     async def get_bills_cosponsors(
         self, full_bill_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get bill cosponsors from cosponsors URL in full bill data."""
         return await self.get_generic_related_data(
-            full_bill_data
+            full_bill_data, related_table_name="cosponsors"
         )
 
     async def get_bills_texts(
@@ -93,7 +94,7 @@ class BillsFetcher(CongressionalBaseFetcher):
     ) -> list[dict[str, Any]]:
         """Get bill text versions from textVersions URL in full bill data."""
         return await self.get_generic_related_data(
-            full_bill_data
+            full_bill_data, related_table_name="texts"
         )
 
     async def get_bills_summaries(
@@ -101,7 +102,7 @@ class BillsFetcher(CongressionalBaseFetcher):
     ) -> list[dict[str, Any]]:
         """Get bill summaries from summaries URL in full bill data."""
         return await self.get_generic_related_data(
-            full_bill_data
+            full_bill_data, related_table_name="summaries"
         )
 
     async def get_bills_subjects(
@@ -113,14 +114,16 @@ class BillsFetcher(CongressionalBaseFetcher):
         {"subjects": {"legislativeSubjects": [...], "policyArea": {...}}}
         """
         return await self.get_generic_related_data(
-            full_bill_data
+            full_bill_data, related_table_name="subjects"
         )
 
     async def get_bills_titles(
         self, full_bill_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get bill titles from titles URL in full bill data."""
-        return await self.get_generic_related_data(full_bill_data)
+        return await self.get_generic_related_data(
+            full_bill_data, related_table_name="titles"
+        )
 
     async def get_bills_relatedbills(
         self, full_bill_data: dict[str, Any]
@@ -142,9 +145,9 @@ class BillsFetcher(CongressionalBaseFetcher):
 
         related_bills_url = related_bills_info["url"]
 
-        # Get raw related bills data
+        # Get raw related bills data using config
         raw_related_bills = await self.client.retrieve_related_data_from_url(
-            related_bills_url, expected_key=["relatedBills"]
+            related_bills_url, list_key=["relatedBills"]
         )
 
         if not raw_related_bills:
@@ -199,21 +202,24 @@ class BillsFetcher(CongressionalBaseFetcher):
         committee_url = committee_info["url"]
 
         # Get raw committee data
-        raw_committees = await self.client.retrieve_related_data_from_url(
-            committee_url, expected_key=["committees"]
+        raw_committee_data = await self.client.retrieve_related_data_from_url(
+            committee_url, list_key=["committees"]
         )
 
-        if not raw_committees:
+        if not raw_committee_data:
             return []
 
-        # Process the committee data to extract activities
+        # Process committee data to extract activities
         committee_activities = []
+        bill_id = self.extract_item_id(full_bill_data)
 
-        for committee in raw_committees:
-            # Process main committee activities
-            for activity in committee.get("activities", []):
+        for committee in raw_committee_data:
+            # Extract committee activities
+            activities = committee.get("activities", [])
+            for activity in activities:
                 committee_activities.append(
                     {
+                        "bill_id": bill_id,
                         "name": committee.get("name"),
                         "committee_code": committee.get("systemCode"),
                         "chamber": committee.get("chamber", "").lower()
@@ -230,6 +236,7 @@ class BillsFetcher(CongressionalBaseFetcher):
                 for activity in subcommittee.get("activities", []):
                     committee_activities.append(
                         {
+                            "bill_id": bill_id,
                             "name": subcommittee.get("name"),
                             "committee_code": subcommittee.get("systemCode"),
                             "chamber": subcommittee.get("chamber", "").lower()

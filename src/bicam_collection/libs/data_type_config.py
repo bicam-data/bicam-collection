@@ -3,6 +3,7 @@
 This module defines *pure-data* dataclasses only – **no I/O**.  Loading and
 caching is handled by :pymod:`bicam_collection.libs.data_type_registry`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -19,8 +20,9 @@ __all__ = [
 
 @dataclass(slots=True)
 class ApiConfig:
-    outer_field: str | None = None
-    expected_key: str | list[str] | None = None
+    api_endpoint: str | None = None
+    list_key: str | list[str] | None = None
+    full_key: str | None = None
     page_size: int = 250
     retry_attempts: int = 3
 

@@ -194,12 +194,15 @@ class BaseAPIClient(ABC):
         if not self.db_pool:
             return None
 
+        # Determine which table to query based on the client type
+        table_name = self._get_last_processed_dates_table_name()
+
         try:
             async with self.db_pool.acquire() as conn:
                 result = await conn.fetchrow(
-                    """
+                    f"""
                     SELECT last_processed_date
-                    FROM bicam_metadata.last_processed_dates
+                    FROM bicam_metadata.{table_name}
                     WHERE data_type = $1
                     """,
                     data_type,
@@ -209,22 +212,29 @@ class BaseAPIClient(ABC):
             logger.warning(f"Failed to access last processed date: {e}")
             return None
 
+    def _get_last_processed_dates_table_name(self) -> str:  # noqa: B027
+        """Get the appropriate last processed dates table name based on client type."""
+
+
     async def access_last_processed_count(self, data_type: str) -> int | None:
         """Get the last processed count for a specific data type."""
         if not self.db_pool:
             return None
 
+        # Determine which table to query based on the client type
+        table_name = self._get_last_processed_dates_table_name()
+
         try:
             async with self.db_pool.acquire() as conn:
                 result = await conn.fetchrow(
-                    """
-                    SELECT total_count
-                    FROM bicam_metadata.last_processed_dates
+                    f"""
+                    SELECT last_total_count
+                    FROM bicam_metadata.{table_name}
                     WHERE data_type = $1
                     """,
                     data_type,
                 )
-                return result["total_count"] if result else None
+                return result["last_total_count"] if result else None
         except Exception as e:
             logger.warning(f"Failed to access last processed count: {e}")
             return None
@@ -236,16 +246,19 @@ class BaseAPIClient(ABC):
         if not self.db_pool:
             return False
 
+        # Determine which table to query based on the client type
+        table_name = self._get_last_processed_dates_table_name()
+
         try:
             async with self.db_pool.acquire() as conn:
                 await conn.execute(
-                    """
-                    INSERT INTO bicam_metadata.last_processed_dates
-                    (data_type, last_processed_date, total_count, updated_at)
+                    f"""
+                    INSERT INTO bicam_metadata.{table_name}
+                    (data_type, last_processed_date, last_total_count, updated_at)
                     VALUES ($1, $2, $3, $4)
                     ON CONFLICT (data_type) DO UPDATE SET
                         last_processed_date = $2,
-                        total_count = $3,
+                        last_total_count = $3,
                         updated_at = $4
                     """,
                     data_type,
@@ -268,9 +281,33 @@ class BaseAPIClient(ABC):
 
         return await self.update_last_processed_date(data_type, latest_date)
 
-    @abstractmethod
     def _format_date_for_api(self, date: str | None) -> str | None:
-        """Format date for the specific API. Must be implemented by subclasses."""
+        """Format date for Congressional API (ISO8601: YYYY-MM-DDTHH:MM:SSZ)."""
+        if not date:
+            return None
+        # If already in correct format, return as-is
+        if "T" in date and date.endswith("Z"):
+            return date
+        # If in YYYY-MM-DD format, convert to YYYY-MM-DDT00:00:00Z
+        if len(date) == 10 and date.count("-") == 2:
+            return f"{date}T00:00:00Z"
+        # Handle various datetime formats
+        try:
+            # Try parsing as ISO8601 with or without timezone
+            dt = None
+            if "T" in date:
+                # Remove Z or timezone info for parsing
+                clean = date.replace("Z", "").replace("+00:00", "")
+                try:
+                    dt = datetime.fromisoformat(clean)
+                except Exception:
+                    dt = None
+            if not dt:
+                dt = datetime.strptime(date, "%Y-%m-%d")
+            # Always output as UTC Zulu
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            return date
 
     def _extract_latest_date(self, data_batch: list[dict[str, Any]]) -> str | None:
         """Extract the latest date from a batch of data. Can be overridden by subclasses."""

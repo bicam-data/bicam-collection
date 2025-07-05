@@ -26,9 +26,9 @@ from .data_type_config import (
 logger = logging.getLogger(__name__)
 
 # forward refs (avoid circular until we split fully)
-AbstractFetcher = "AbstractFetcher"
-AbstractDatabaseNormalizer = "AbstractDatabaseNormalizer"
-AbstractCleaner = "AbstractCleaner"
+BaseFetcher = "BaseFetcher"
+BaseDatabaseNormalizer = "BaseDatabaseNormalizer"
+BaseCleaner = "BaseCleaner"
 
 
 class DataTypeRegistry:  # noqa: R0902 – central singleton, lots of stuff
@@ -39,9 +39,9 @@ class DataTypeRegistry:  # noqa: R0902 – central singleton, lots of stuff
         self._registry: dict[
             str,
             tuple[
-                type[AbstractFetcher],
-                type[AbstractDatabaseNormalizer],
-                type[AbstractCleaner],
+                type[BaseFetcher],
+                type[BaseDatabaseNormalizer],
+                type[BaseCleaner],
                 str,
                 str,
             ],
@@ -54,9 +54,9 @@ class DataTypeRegistry:  # noqa: R0902 – central singleton, lots of stuff
         self,
         data_type: str,
         *,
-        fetcher_class: type[AbstractFetcher],
-        normalizer_class: type[AbstractDatabaseNormalizer],
-        cleaner_class: type[AbstractCleaner],
+        fetcher_class: type[BaseFetcher],
+        normalizer_class: type[BaseDatabaseNormalizer],
+        cleaner_class: type[BaseCleaner],
         config_file: str,
         data_source: str,
     ) -> None:
@@ -325,9 +325,9 @@ def get_global_registry() -> DataTypeRegistry:
 def register_data_type(
     data_type: str,
     *,
-    fetcher_class: type[AbstractFetcher],
-    normalizer_class: type[AbstractDatabaseNormalizer],
-    cleaner_class: type[AbstractCleaner],
+    fetcher_class: type[BaseFetcher],
+    normalizer_class: type[BaseDatabaseNormalizer],
+    cleaner_class: type[BaseCleaner],
     config_file: str,
     data_source: str,
 ) -> None:

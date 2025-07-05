@@ -57,7 +57,13 @@ class DataTypeRouter:
             Normalizer instance
         """
         normalizer_class = self.registry.get_normalizer_class(data_type)
-        return normalizer_class()
+        data_source = self.registry.get_data_source(data_type)
+
+        # Base classes need data_type_name and system_name parameters
+        return normalizer_class(
+            data_type_name=data_type,
+            system_name=data_source,
+        )
 
     def create_cleaner(self, data_type: str) -> Any:
         """
@@ -70,7 +76,13 @@ class DataTypeRouter:
             Cleaner instance
         """
         cleaner_class = self.registry.get_cleaner_class(data_type)
-        return cleaner_class()
+        data_source = self.registry.get_data_source(data_type)
+
+        # Base classes need data_type_name and system_name parameters
+        return cleaner_class(
+            data_type_name=data_type,
+            system_name=data_source,
+        )
 
     def create_all_components(self, data_type: str, api_client) -> tuple[Any, Any, Any]:
         """
@@ -93,6 +105,83 @@ class DataTypeRouter:
 def create_router() -> DataTypeRouter:
     """Create a router using the global registry."""
     return DataTypeRouter()
+
+
+def _register_related_tables(
+    data_type: str,
+    config_file: str,
+    data_source: str,
+    fetcher_class,
+    normalizer_class,
+    cleaner_class,
+    processed_types: set[str] | None = None,
+) -> None:
+    """
+    Recursively register related tables for a data type.
+
+    Args:
+        data_type: The parent data type name
+        config_file: Path to the config file
+        data_source: The data source name
+        fetcher_class: The fetcher class to use
+        normalizer_class: The normalizer class to use
+        cleaner_class: The cleaner class to use
+        processed_types: Set of already processed data types to avoid cycles
+    """
+    if processed_types is None:
+        processed_types = set()
+
+    # Skip if we've already processed this type
+    if data_type in processed_types:
+        return
+    processed_types.add(data_type)
+
+    try:
+        from bicam_collection.libs.data_type_registry import get_global_registry
+
+        # Get config for this data type
+        try:
+            type_config = get_global_registry().get_data_type_config(data_type)
+        except Exception:
+            # If we can't get the config directly (e.g. for a related table),
+            # try to get it as a related table config
+            parent_type = data_type.rsplit("_", 1)[0]
+            suffix = data_type.rsplit("_", 1)[1]
+            type_config = get_global_registry().get_related_table_config(
+                parent_type, suffix
+            )
+
+        if (
+            type_config
+            and hasattr(type_config, "related_tables")
+            and type_config.related_tables
+        ):
+            for suffix in type_config.related_tables:
+                related_name = f"{data_type}_{suffix}"
+                logger.debug(f"Registering related table {related_name}")
+
+                # Register the related table
+                register_data_type(
+                    related_name,
+                    fetcher_class=fetcher_class,
+                    normalizer_class=normalizer_class,
+                    cleaner_class=cleaner_class,
+                    config_file=config_file,  # Use same config file
+                    data_source=data_source,
+                )
+
+                # Recursively register its related tables
+                _register_related_tables(
+                    related_name,
+                    config_file,
+                    data_source,
+                    fetcher_class,
+                    normalizer_class,
+                    cleaner_class,
+                    processed_types,
+                )
+    except Exception as e:
+        logger.warning(f"Error registering related tables for {data_type}: {e}")
 
 
 def _register_builtin_types():
@@ -140,17 +229,38 @@ def _register_builtin_types():
                 module_path = f"bicam_collection.data_types.{data_source}.{data_type}"
                 data_type_module = importlib.import_module(module_path)
 
-                # Get the component classes - they should follow the naming convention
-                fetcher_class_name = f"{data_type.title()}Fetcher"
-                normalizer_class_name = f"{data_type.title()}DatabaseNormalizer"
-                cleaner_class_name = f"{data_type.title()}Cleaner"
-
-                # Get classes from the module
-                fetcher_class = getattr(data_type_module, fetcher_class_name, None)
-                normalizer_class = getattr(
-                    data_type_module, normalizer_class_name, None
+                # Try to get the specialized classes
+                fetcher_class = getattr(
+                    data_type_module, f"{data_type.title()}Fetcher", None
                 )
-                cleaner_class = getattr(data_type_module, cleaner_class_name, None)
+                normalizer_class = getattr(
+                    data_type_module, f"{data_type.title()}DatabaseNormalizer", None
+                )
+                cleaner_class = getattr(
+                    data_type_module, f"{data_type.title()}Cleaner", None
+                )
+
+                # Fallback to base fetcher if not found
+                if fetcher_class is None:
+                    fetcher_module_path = (
+                        f"bicam_collection.data_types.{data_source}.base"
+                    )
+                    fetcher_module = importlib.import_module(fetcher_module_path)
+                    fetcher_class = getattr(
+                        fetcher_module, f"{data_source.title()}BaseFetcher", None
+                    )
+
+                # Fallback to shared base classes if not found
+                if normalizer_class is None or cleaner_class is None:
+                    abstract_module = importlib.import_module(
+                        "bicam_collection.data_types.abstract"
+                    )
+                    if normalizer_class is None:
+                        normalizer_class = getattr(
+                            abstract_module, "BaseDatabaseNormalizer", None
+                        )
+                    if cleaner_class is None:
+                        cleaner_class = getattr(abstract_module, "BaseCleaner", None)
 
                 if not all([fetcher_class, normalizer_class, cleaner_class]):
                     logger.warning(
@@ -200,6 +310,16 @@ def _register_builtin_types():
                     data_source=data_source,
                 )
 
+                # Register related tables recursively
+                _register_related_tables(
+                    data_type,
+                    config_file,
+                    data_source,
+                    fetcher_class,
+                    normalizer_class,
+                    cleaner_class,
+                )
+
                 logger.info(
                     f"Successfully registered data type: {data_type} (source: {data_source})"
                 )
@@ -235,21 +355,40 @@ def get_specialized_assets(data_type: str) -> list:
         registry = get_global_registry()
         data_source = registry.get_data_source(data_type)
 
-        # Try to import the data type module
-        module_path = f"bicam_collection.data_types.{data_source}.{data_type}"
-        data_type_module = importlib.import_module(module_path)
+        # Create specialized assets instance using the base class
+        try:
+            abstract_module = importlib.import_module(
+                "bicam_collection.data_types.abstract"
+            )
+            specialized_assets_class = getattr(
+                abstract_module, "BaseSpecializedAssets", None
+            )
 
-        # Check if the module has a get_specialized_assets function
-        if hasattr(data_type_module, "get_specialized_assets"):
-            specialized_assets = data_type_module.get_specialized_assets()
-            return specialized_assets or []
-        else:
-            logger.debug(f"No get_specialized_assets function found for {data_type}")
+            if specialized_assets_class:
+                specialized_assets_instance = specialized_assets_class(
+                    data_type_name=data_type,
+                    system_name=data_source,
+                )
+
+                # Check if the instance has a get_specialized_assets method
+                if hasattr(specialized_assets_instance, "get_specialized_assets"):
+                    assets = specialized_assets_instance.get_specialized_assets()
+                    return assets or []
+                else:
+                    logger.debug(
+                        f"No get_specialized_assets method found for {data_type}"
+                    )
+                    return []
+            else:
+                logger.debug("BaseSpecializedAssets class not found")
+                return []
+
+        except (ImportError, AttributeError) as e:
+            logger.debug(
+                f"Could not create specialized assets instance for {data_type}: {e}"
+            )
             return []
 
-    except ImportError as e:
-        logger.debug(f"Could not import specialized assets for {data_type}: {e}")
-        return []
     except Exception as e:
         logger.warning(f"Error loading specialized assets for {data_type}: {e}")
         return []

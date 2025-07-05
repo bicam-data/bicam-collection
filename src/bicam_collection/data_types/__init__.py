@@ -24,29 +24,23 @@ Usage:
 
 # Import base classes for easy access
 from .abstract import (
-    AbstractCleaner,
-    AbstractDatabaseNormalizer,
-    AbstractFetcher,
-    AbstractSpecializedAssets,
+    BaseCleaner,
+    BaseDatabaseNormalizer,
+    BaseFetcher,
+    BaseSpecializedAssets,
 )
 
 # Expose Congressional base classes for convenience
 from .congressional.base import (
-    CongressionalBaseCleaner,
-    CongressionalBaseDatabaseNormalizer,
     CongressionalBaseFetcher,
-    CongressionalBaseSpecializedAssets,
 )
 
 __all__ = [
     # Base classes for implementing new data types
-    "AbstractFetcher",
-    "AbstractDatabaseNormalizer",
-    "AbstractCleaner",
-    "AbstractSpecializedAssets",
+    "BaseFetcher",
+    "BaseDatabaseNormalizer",
+    "BaseCleaner",
+    "BaseSpecializedAssets",
     # Congressional base classes
-    "CongressionalBaseCleaner",
-    "CongressionalBaseDatabaseNormalizer",
     "CongressionalBaseFetcher",
-    "CongressionalBaseSpecializedAssets",
 ]

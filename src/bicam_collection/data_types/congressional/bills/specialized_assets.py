@@ -18,7 +18,7 @@ from dagster import (
 )
 
 from ....libs.data_type_router import get_global_registry
-from ..base import CongressionalBaseSpecializedAssets
+from ..base import BaseSpecializedAssets
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-class BillsSpecializedAssets(CongressionalBaseSpecializedAssets):
+class BillsSpecializedAssets(BaseSpecializedAssets):
     """
     Bills-specific specialized assets that inherit from BaseSpecializedAssets.
 

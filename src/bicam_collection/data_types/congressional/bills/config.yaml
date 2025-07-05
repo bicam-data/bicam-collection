@@ -2,8 +2,9 @@
   description: Congressional bills main data
 
   api:
-    expected_key: bill
-    outer_field: bill
+    list_key: bills
+    full_key: bill
+    api_endpoint: bill
     page_size: 250
     retry_attempts: 3
 
@@ -20,6 +21,8 @@
       - texts
       - titles
       - relatedbills
+      - committeeactivities
+      - notes
 
   processing:
     batch_size: 100
@@ -29,8 +32,8 @@
   description: Congressional bills actions data
 
   api:
-    expected_key: actions
-    outer_field: actions
+    list_key: actions
+    api_endpoint: actions
     page_size: 250
     retry_attempts: 3
 
@@ -39,6 +42,9 @@
     is_main: false
     create_raw: true
     id_fields: [bill_id, action_id]
+    related_tables:
+      - committees
+      - recordedvotes
 
   processing:
     batch_size: 100
@@ -66,22 +72,31 @@
   description: Bills committee activities data
 
   api:
-    expected_key: committees
-    outer_field: committees
+    list_key: committees
+    full_key: committees
+    api_endpoint: committees
+    page_size: 250
+    retry_attempts: 3
 
   schema:
     table_name: bills_committeeactivities
     is_main: false
     create_raw: false
     id_fields: [bill_id, committee_code, activity_date, activity_name]
+    related_tables: # purely for reference - this is created in a post-processing step
+      - committees
 
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
 
 - name: bills_cosponsors
   description: Congressional bills cosponsors data
 
   api:
-    expected_key: cosponsors
-    outer_field: cosponsors
+    list_key: cosponsors
+    full_key: cosponsors
+    api_endpoint: cosponsors
     page_size: 250
     retry_attempts: 3
 
@@ -98,8 +113,8 @@
   description: Congressional bills subjects data
 
   api:
-    expected_key: [subjects, legislativeSubjects]
-    outer_field: subjects
+    list_key: [subjects, legislativeSubjects]
+    api_endpoint: subjects
     page_size: 250
     retry_attempts: 3
 
@@ -116,8 +131,8 @@
   description: Congressional bills summaries data
 
   api:
-    expected_key: summaries
-    outer_field: summaries
+    list_key: summaries
+    api_endpoint: summaries
     page_size: 250
     retry_attempts: 3
   
@@ -135,8 +150,8 @@
   description: Congressional bills text data
 
   api:
-    expected_key: textVersions
-    outer_field: text
+    list_key: textVersions
+    api_endpoint: text
     page_size: 250
     retry_attempts: 3
 
@@ -154,8 +169,8 @@
   description: Congressional bills titles data
 
   api:
-    expected_key: titles
-    outer_field: titles
+    list_key: titles
+    api_endpoint: titles
     page_size: 250
     retry_attempts: 3
 
@@ -172,8 +187,8 @@
   description: Congressional bills related bills data
 
   api:
-    expected_key: relatedBills
-    outer_field: relatedbills
+    list_key: relatedBills
+    api_endpoint: relatedbills
     page_size: 250
     retry_attempts: 3
 

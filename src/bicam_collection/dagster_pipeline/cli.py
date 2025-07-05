@@ -106,9 +106,11 @@ async def _build_processing_resource(
     if parallel_enabled:
         sessions = getattr(config.processing, "max_workers", 2)
         parallelization_config = {
-            "congressional": {
-                "num_sessions": sessions,
-                "keys_per_session": 2,
+            "fetcher": {
+                "congressional": {
+                    "num_sessions": sessions,
+                    "keys_per_session": 2,
+                }
             }
         }
 

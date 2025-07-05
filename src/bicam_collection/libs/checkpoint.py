@@ -29,12 +29,12 @@ class CheckpointStatus(str, Enum):
 
 
 class ProcessingPhase(str, Enum):
-    """Different phases of data processing"""
+    """Different phases of data processing (aligned with fetcher/normalizer 4-phase logic)"""
 
-    MAIN_ITEMS = "main_items"
-    NESTED_FIELDS = "nested_fields"
-    RELATED_ENTITIES = "related_entities"
-    SECONDARY_RELATIONS = "secondary_relations"
+    PHASE_1 = "phase_1"  # Main/package normalization
+    PHASE_2 = "phase_2"  # Related/granule normalization
+    PHASE_3 = "phase_3"  # Nested/deeply nested normalization
+    PHASE_4 = "phase_4"  # Secondary relations or post-processing
 
 
 class ProcessingStage(str, Enum):
@@ -50,7 +50,7 @@ class ProcessingStage(str, Enum):
 class ProcessingState:
     """Detailed processing state for hierarchical data processing"""
 
-    phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS
+    phase: ProcessingPhase = ProcessingPhase.PHASE_1
     item_index: int = 0
     item_total: int = 0
     field_index: int = 0
@@ -378,7 +378,7 @@ class CheckpointManager:
             processing_state_data = json.loads(result["processing_state"] or "{}")
             processing_state = ProcessingState(
                 phase=ProcessingPhase(
-                    processing_state_data.get("phase", ProcessingPhase.MAIN_ITEMS.value)
+                    processing_state_data.get("phase", ProcessingPhase.PHASE_1.value)
                 ),
                 item_index=processing_state_data.get("item_index", 0),
                 item_total=processing_state_data.get("item_total", 0),
@@ -435,7 +435,7 @@ class CheckpointManager:
                 processing_state = ProcessingState(
                     phase=ProcessingPhase(
                         processing_state_data.get(
-                            "phase", ProcessingPhase.MAIN_ITEMS.value
+                            "phase", ProcessingPhase.PHASE_1.value
                         )
                     ),
                     item_index=processing_state_data.get("item_index", 0),
@@ -484,7 +484,7 @@ class CheckpointManager:
         scraper_type: str,
         data_type: str,
         item_id: str,
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> None:
@@ -567,7 +567,7 @@ class CheckpointManager:
         scraper_type: str,
         data_type: str,
         item_id: str,
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> bool:
@@ -622,7 +622,7 @@ class CheckpointManager:
         item_id: str,
         error_message: str,
         error_details: str = "",
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> None:
@@ -882,6 +882,20 @@ class HierarchicalProgressTracker:
             f"relation {relation_index}/{relation_total}"
         )
 
+    async def start_phase(self, phase: ProcessingPhase, description: str = ""):
+        """Start a processing phase (async method for compatibility with AbstractFetcher)"""
+        self.set_processing_phase(phase)
+        logger.info(f"Started phase {phase.value} for {self.data_type}: {description}")
+
+    async def complete_phase(self, phase: ProcessingPhase):
+        """Complete a processing phase (async method for compatibility with AbstractFetcher)"""
+        # Mark the phase as completed by updating the checkpoint
+        self.checkpoint.processing_state.metadata[f"phase_{phase.value}_completed"] = (
+            True
+        )
+        self.checkpoint_manager.save_checkpoint(self.checkpoint)
+        logger.info(f"Completed phase {phase.value} for {self.data_type}")
+
     def update_progress(
         self,
         processed_items: int | None = None,
@@ -909,12 +923,12 @@ class HierarchicalProgressTracker:
     def increment_processed(
         self,
         item_id: str | None = None,
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ):
         """Increment processed count for specific phase"""
-        if phase == ProcessingPhase.MAIN_ITEMS:
+        if phase == ProcessingPhase.PHASE_1:
             self.checkpoint.processed_items += 1
             self.checkpoint.processing_state.item_index += 1
 
@@ -936,7 +950,7 @@ class HierarchicalProgressTracker:
         item_id: str,
         error_message: str,
         error_details: str = "",
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ):
@@ -958,7 +972,7 @@ class HierarchicalProgressTracker:
         """Mark processing as completed"""
         self.checkpoint.status = CheckpointStatus.COMPLETED
         self.checkpoint.processing_state.phase = (
-            ProcessingPhase.MAIN_ITEMS
+            ProcessingPhase.PHASE_1
         )  # Reset for next run
         self.checkpoint_manager.save_checkpoint(self.checkpoint)
 
@@ -977,7 +991,7 @@ class HierarchicalProgressTracker:
     def should_skip_item(
         self,
         item_id: str,
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> bool:
@@ -998,10 +1012,10 @@ class HierarchicalProgressTracker:
         current_phase = self.checkpoint.processing_state.phase
         # Define phase hierarchy - later phases can resume from earlier ones
         phase_order = [
-            ProcessingPhase.MAIN_ITEMS,
-            ProcessingPhase.NESTED_FIELDS,
-            ProcessingPhase.RELATED_ENTITIES,
-            ProcessingPhase.SECONDARY_RELATIONS,
+            ProcessingPhase.PHASE_1,
+            ProcessingPhase.PHASE_2,
+            ProcessingPhase.PHASE_3,
+            ProcessingPhase.PHASE_4,
         ]
 
         current_idx = phase_order.index(current_phase)
@@ -1087,7 +1101,7 @@ class HierarchicalProgressTracker:
 
         items_to_process = []
         for item_id in available_items:
-            if not self.should_skip_item(item_id, ProcessingPhase.MAIN_ITEMS):
+            if not self.should_skip_item(item_id, ProcessingPhase.PHASE_1):
                 items_to_process.append(item_id)
 
         return items_to_process
@@ -1150,7 +1164,7 @@ class HierarchicalProgressTracker:
     def mark_item_completed(
         self,
         item_id: str,
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> None:
@@ -1165,7 +1179,7 @@ class HierarchicalProgressTracker:
     async def is_item_completed(
         self,
         item_id: str,
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> bool:
@@ -1197,14 +1211,14 @@ if __name__ == "__main__":
     tracker.start_processing(total_items=100)
 
     # Processing main items
-    tracker.set_processing_phase(ProcessingPhase.MAIN_ITEMS, item_total=100)
+    tracker.set_processing_phase(ProcessingPhase.PHASE_1, item_total=100)
 
     for i in range(5):
         item_id = f"bill_{i}"
-        if not tracker.should_skip_item(item_id, ProcessingPhase.MAIN_ITEMS):
+        if not tracker.should_skip_item(item_id, ProcessingPhase.PHASE_1):
             # Process nested fields
             tracker.set_processing_phase(
-                ProcessingPhase.NESTED_FIELDS,
+                ProcessingPhase.PHASE_2,
                 item_index=i,
                 item_total=100,
                 field_index=0,
@@ -1215,7 +1229,7 @@ if __name__ == "__main__":
                 ["sponsors", "actions", "committees"]
             ):
                 tracker.set_processing_phase(
-                    ProcessingPhase.NESTED_FIELDS,
+                    ProcessingPhase.PHASE_2,
                     item_index=i,
                     item_total=100,
                     field_index=field_idx,
@@ -1227,7 +1241,7 @@ if __name__ == "__main__":
 
             # Process related entities
             tracker.set_processing_phase(
-                ProcessingPhase.RELATED_ENTITIES,
+                ProcessingPhase.PHASE_2,
                 item_index=i,
                 item_total=100,
                 relation_index=0,
@@ -1236,7 +1250,7 @@ if __name__ == "__main__":
 
             for rel_idx, rel_type in enumerate(["amendments", "votes"]):
                 tracker.set_processing_phase(
-                    ProcessingPhase.RELATED_ENTITIES,
+                    ProcessingPhase.PHASE_2,
                     item_index=i,
                     item_total=100,
                     relation_index=rel_idx,
@@ -1247,7 +1261,7 @@ if __name__ == "__main__":
                 logger.info(f"Processing {rel_type} for {item_id}")
 
             # Mark main item as processed
-            tracker.increment_processed(item_id, ProcessingPhase.MAIN_ITEMS)
+            tracker.increment_processed(item_id, ProcessingPhase.PHASE_1)
             logger.info(f"Completed {item_id}: {tracker.detailed_progress}")
 
     tracker.complete_processing()

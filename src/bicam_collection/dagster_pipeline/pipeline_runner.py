@@ -18,7 +18,7 @@ import logging
 import os
 from collections.abc import Sequence
 
-from dagster import Definitions, materialize
+from dagster import materialize
 
 from ..libs.data_type_router import get_global_registry
 from .generalized_assets import (

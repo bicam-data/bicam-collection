@@ -10,12 +10,12 @@ from typing import Any
 
 from bicam_collection.libs.data_type_registry import get_global_registry
 
-from ..base import GovInfoBaseDatabaseNormalizer
+from ...abstract.base_database_normalizer import BaseDatabaseNormalizer
 
 logger = logging.getLogger(__name__)
 
 
-class CongressionalDirectoriesDatabaseNormalizer(GovInfoBaseDatabaseNormalizer):
+class CongressionalDirectoriesDatabaseNormalizer(BaseDatabaseNormalizer):
     """
     Congressional Directories database normalizer.
 
@@ -25,7 +25,11 @@ class CongressionalDirectoriesDatabaseNormalizer(GovInfoBaseDatabaseNormalizer):
     """
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(
+            data_type_name="congressional_directories",
+            system_name="govinfo",
+            **kwargs,
+        )
 
         # Load config to get granule settings
         try:
@@ -198,66 +202,58 @@ class CongressionalDirectoriesDatabaseNormalizer(GovInfoBaseDatabaseNormalizer):
     async def _process_related_record(
         self, payload: dict[str, Any], record_id: str, table_suffix: str
     ) -> dict[str, Any]:
-        """Process a related record (collection, granules)."""
-        # Handle special cases for granule data
-        if table_suffix == "granules" or table_suffix.startswith(self.granule_name):
-            # This is granule data - extract granule ID
-            granule_id = payload.get("granuleId") or payload.get("granule_id")
-            if granule_id:
-                record_id = granule_id
+        """Process a related record (granules, granule_data, collection)."""
+        # Extract list items with proper parent relationships
+        items = payload if isinstance(payload, list) else [payload]
 
-            # Flatten the payload
-            flat_item = self._flatten_dict(payload)
+        processed_items = []
+        for item_idx, item_data in enumerate(items):
+            # Process item with extraction
+            flat_item = self._flatten_dict(item_data)
 
-            # Set the appropriate ID field
-            if (
-                table_suffix == "granules"
-                or table_suffix == f"{self.granule_name}_list"
-            ):
-                flat_item["granule_id"] = record_id
-                flat_item["id"] = record_id
-            else:
-                flat_item["granule_id"] = record_id
-                flat_item["id"] = record_id
+            # Generate unique ID for this item
+            item_id = f"{record_id}_{table_suffix}_{item_idx}"
+            flat_item["id"] = item_id
 
-            # Add parent package reference
-            parent_package_id = payload.get("parent_package_id")
-            if parent_package_id:
-                flat_item[self.get_foreign_key_column()] = parent_package_id
+            # Add parent reference
+            flat_item[self.get_foreign_key_column()] = record_id
 
-            # Store the item
-            if table_suffix.startswith(self.granule_name):
-                actual_table_name = table_suffix
-            else:
-                actual_table_name = f"{self.granule_name}_{table_suffix}"
-
-            all_table_records = {actual_table_name: [flat_item]}
-
-            return await self._store_all_table_records(all_table_records)
-
-        else:
-            # Handle regular related records (collection data)
-            return await super()._process_related_record(
-                payload, record_id, table_suffix
+            # Extract nested lists
+            extracted_lists = self._extract_lists(
+                item_data,
+                item_id,
+                is_nested=True,
+                parent_table=table_suffix,
+                root_id=record_id,
             )
 
+            processed_items.append(flat_item)
+
+            # Store any nested lists from this item
+            if extracted_lists:
+                await self._store_all_table_records(extracted_lists)
+
+        # Store the main items for this table
+        table_name = f"{self.data_type_name}_{table_suffix}"
+        all_table_records = {table_name: processed_items}
+
+        return await self._store_all_table_records(all_table_records)
+
     # =============================================================================
-    # HELPER METHODS
+    # UTILITY METHODS
     # =============================================================================
 
     def get_table_names(self) -> list[str]:
-        """Get all table names for Congressional Directories."""
+        """Get all table names for this GovInfo data type."""
         tables = [self.get_main_table_name()]
 
-        # Add collection table
-        tables.append("congressional_directories_list")
-
-        # Add granule tables if enabled
-        if self.has_granules:
-            tables.extend([f"{self.granule_name}_list", self.granule_name])
+        # Add related tables
+        related_tables = self._get_related_tables_with_raw_data()
+        for suffix in related_tables:
+            tables.append(f"{self.data_type_name}_{suffix}")
 
         return tables
 
     async def _get_raw_data_by_ids(self, item_ids: list[str]) -> list[dict[str, Any]]:
-        """Get raw data by item IDs - overridden for Congressional Directories."""
+        """Override to use package-specific data retrieval."""
         return await self._get_raw_package_data_by_ids(item_ids)

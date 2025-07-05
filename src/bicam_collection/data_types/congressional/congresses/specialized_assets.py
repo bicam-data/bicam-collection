@@ -18,7 +18,7 @@ from dagster import (
 )
 
 from ....libs.data_type_router import get_global_registry
-from ..base import CongressionalBaseSpecializedAssets
+from ...abstract.base_specialized_assets import BaseSpecializedAssets
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-class CommitteesSpecializedAssets(CongressionalBaseSpecializedAssets):
+class CommitteesSpecializedAssets(BaseSpecializedAssets):
     """
     Committees-specific specialized assets that inherit from CongressionalBaseSpecializedAssets.
 
@@ -37,7 +37,7 @@ class CommitteesSpecializedAssets(CongressionalBaseSpecializedAssets):
     """
 
     def __init__(self):
-        super().__init__(data_type_name="committees")
+        super().__init__(data_type_name="committees", system_name="congressional")
 
     # =============================================================================
     # REQUIRED ABSTRACT METHOD IMPLEMENTATIONS
@@ -195,7 +195,9 @@ class CommitteesSpecializedAssets(CongressionalBaseSpecializedAssets):
 
         # Add asset generation information
         _, _, _, committees_table_assets = _create_core_committees_assets()
-        total_committees_assets = len(committees_table_assets) + 4  # Core assets + specialized
+        total_committees_assets = (
+            len(committees_table_assets) + 4
+        )  # Core assets + specialized
 
         pipeline_summary["asset_generation"] = {
             "total_committees_assets": total_committees_assets,

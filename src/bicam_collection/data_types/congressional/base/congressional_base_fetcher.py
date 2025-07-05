@@ -1,11 +1,11 @@
 """
 Congressional-specific base fetcher implementing the 3-phase pattern.
 
-This module provides Congressional-specific implementations including:
-- 3-phase processing pattern (list → full → related)
+This module provides Congressional-specific implementations for:
+- 3-phase processing pattern (list → full data → related data)
+- Congressional API patterns and response structures
 - Congressional schema defaults
-- Congressional progress tracking configuration
-- Congressional API patterns
+- Source-specific configuration
 """
 
 import asyncio
@@ -18,28 +18,31 @@ from typing import Any
 
 import asyncpg
 
-from ....libs.checkpoint import (
-    HierarchicalProgressTracker,
-    ProcessingPhase,
-    ProcessingStage,
-)
-from ....libs.run_tracking import RunMetadata, RunType
-from ...abstract import AbstractFetcher
+from ....libs.checkpoint import ProcessingPhase
+from ....libs.run_tracking import RunType
+from ...abstract.base_fetcher import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
 
-class CongressionalBaseFetcher(AbstractFetcher):
+class CongressionalBaseFetcher(BaseFetcher):
     """
-    Congressional-specific base fetcher.
+    Congressional-specific base fetcher implementing the sophisticated 3-phase pattern.
 
-    Implements the Congressional API 3-phase pattern:
-    1. fetch_list_data() → bulk endpoints
-    2. fetch_full_data() → individual item URLs
-    3. fetch_related_data() → related endpoints from full data
-
-    Provides Congressional-specific defaults for schemas and progress tracking.
+    This class inherits all sophisticated processing logic from AbstractFetcher
+    and implements Congressional-specific:
+    - API response parsing
+    - Schema configuration
+    - Data extraction patterns
+    - 3-phase processing workflow:
+      * Phase 1: List data (initial collection)
+      * Phase 2: Full data (complete item details)
+      * Phase 3: Related data (using data-type-specific "get" methods)
     """
+
+    # =============================================================================
+    # REQUIRED ABSTRACT METHOD IMPLEMENTATIONS
+    # =============================================================================
 
     def __init__(
         self,
@@ -52,1974 +55,521 @@ class CongressionalBaseFetcher(AbstractFetcher):
         super().__init__(
             client, db_pool, data_type_name, checkpoint_manager, run_manager
         )
-        (
-            self.expected_key,
-            self.id_field,
-            self.outer_api_field,
-        ) = self.get_main_id_configs()
+        self.data_type_name = data_type_name
+        # Load configuration to get proper id_field
+        self.config = None
+        if data_type_name:
+            try:
+                from ....libs.data_type_registry import get_global_registry
 
-        # Keep a reference to the full typed config for advanced look-ups in
-        # get_generic_related_data().  If the registry lookup fails we store
-        # None so attribute access elsewhere can be guarded.
-        try:
-            from bicam_collection.libs.data_type_registry import get_global_registry
+                registry = get_global_registry()
+                self.config = registry.get_data_type_config(data_type_name)
+                # Use the id_field from config, fallback to default pattern
+                self.id_field = (
+                    self.config.id_field if self.config else f"{data_type_name}_id"
+                )
+                logger.debug(
+                    f"Loaded config for {data_type_name}, id_field: {self.id_field}"
+                )
+            except Exception as e:
+                logger.warning(f"Could not load config for {data_type_name}: {e}")
+                self.id_field = f"{data_type_name}_id" if data_type_name else "id"
+        else:
+            self.id_field = "id"
 
-            self.main_config = get_global_registry().get_data_type_config(
-                data_type_name
-            )
-        except Exception:
-            self.main_config = None
+    def get_source_system_name(self) -> str:
+        """Get the source system name for progress tracking."""
+        return "congressional"
 
-    def setup_progress_tracker(self) -> HierarchicalProgressTracker | None:
-        """Congressional-specific progress tracker setup."""
-        if not self.checkpoint_manager or not self.data_type_name:
-            logger.warning("Cannot setup progress tracker - missing dependencies")
-            return None
+    def get_default_schema(self) -> str:
+        """Get the default schema for raw data storage."""
+        return "bicam_raw_congressional"
 
-        self.progress_tracker = HierarchicalProgressTracker.create_for_stage(
-            self.checkpoint_manager,
-            "congressional",  # Congressional-specific system name
-            self.data_type_name,
-            ProcessingStage.SCRAPING,
-        )
-        return self.progress_tracker
+    def get_run_type(self) -> RunType:
+        """Get the run type for tracking."""
+        return RunType.SCRAPER_CONGRESSIONAL
 
-    def get_main_id_configs(self) -> tuple[str, str, str]:
-        """
-        Get API / ID configuration from the new typed config system.
-        Returns (expected_key, id_field, outer_api_field).
-        """
-        # Use typed config via global registry (avoids direct config_manager dependency)
-        from bicam_collection.libs.data_type_registry import get_global_registry
-
-        try:
-            cfg = get_global_registry().get_data_type_config(self.data_type_name)
-
-            expected_key = cfg.api.expected_key
-            outer_api_field = cfg.api.outer_field
-            id_field = cfg.id_field
-
-            return expected_key, id_field, outer_api_field
-
-        except Exception as exc:
-            logger.error("Config lookup failed for %s: %s", self.data_type_name, exc)
-            # Fallback to old heuristic so the system still runs if config is missing
-            return self.data_type_name, f"{self.data_type_name}_id", self.data_type_name
-
-    # =============================================================================
-    # CONGRESSIONAL-SPECIFIC 3-PHASE PATTERN
-    # =============================================================================
-
-    async def fetch_list_data(
+    async def fetch_phase_1_data(
         self,
         from_date: str | None = None,
         to_date: str | None = None,
-        limit: int | None = 250,
-        offset: int | None = None,
+        limit: int | None = None,
         **kwargs,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         """
-        Phase 1: Fetch list data from Congressional bulk endpoints.
+        Phase 1: Fetch Congressional list data from API.
 
-        Must yield batches of items containing URLs for Phase 2.
-
-        Args:
-            from_date: Start date filter (YYYY-MM-DD)
-            to_date: End date filter (YYYY-MM-DD)
-            limit: Items per page
-            offset: Starting offset
-            **kwargs: Additional parameters
-
-        Yields:
-            Batches of item dictionaries with 'url' fields
+        Yields batches of items containing URLs for Phase 2 processing.
         """
+        logger.info("Starting Congressional Phase 1 data fetch")
 
-        async for batch in self.client.retrieve_data_list(
-            data_type=self.outer_api_field,
-            from_date=from_date,
-            to_date=to_date,
-            limit=limit,
-            offset=offset,
-            **kwargs,
-        ):
-            yield batch
+        try:
+            # Get the proper API configuration from the registry
+            if not self.config:
+                logger.error("No configuration loaded for data type")
+                return
 
-    async def fetch_list_data_with_client(
+            # Use the API configuration to get the correct endpoint and parameters
+            api_config = self.config.api
+            endpoint = api_config.api_endpoint or self.data_type_name
+
+            # Format dates for API
+            from_date_fmt = (
+                self.client._format_date_for_api(from_date) if from_date else None
+            )
+            to_date_fmt = self.client._format_date_for_api(to_date) if to_date else None
+
+            logger.debug(
+                f"Using endpoint: {endpoint} for data type: {self.data_type_name}"
+            )
+
+            # Use the correct method name from CongressionalAPIClient
+            async for batch in self.client.retrieve_data_list(
+                data_type=endpoint,
+                from_date=from_date_fmt,
+                to_date=to_date_fmt,
+                limit=limit,
+                **kwargs,
+            ):
+                if batch:
+                    # Extract the list of items using list_key from config
+                    list_key = api_config.list_key
+                    if list_key:
+                        if isinstance(list_key, list):
+                            # Try each key in the list until one works
+                            extracted_items = []
+                            for key in list_key:
+                                if key in batch:
+                                    extracted_items = batch[key]
+                                    break
+                            if not extracted_items:
+                                logger.warning(
+                                    f"None of the list keys {list_key} found in batch"
+                                )
+                                continue
+                        else:
+                            # Single key
+                            extracted_items = batch.get(list_key, [])
+
+                        if extracted_items:
+                            yield extracted_items
+                    else:
+                        # Fallback: assume batch is already the list of items
+                        yield batch
+
+        except Exception as e:
+            logger.error(f"Phase 1 fetch failed: {e}")
+            raise
+
+    async def fetch_phase_1_data_with_client(
         self,
         client,
         from_date: str | None = None,
         to_date: str | None = None,
-        limit: int | None = 250,
-        offset: int | None = None,
+        limit: int | None = None,
         **kwargs,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         """
-        Fetch list data using a specific client.
-
-        This method can be overridden by subclasses to customize list data fetching
-        while maintaining compatibility with parallel processing.
-
-        Args:
-            client: API client to use for the request
-            from_date: Start date filter (YYYY-MM-DD)
-            to_date: End date filter (YYYY-MM-DD)
-            limit: Items per page
-            offset: Starting offset
-            **kwargs: Additional parameters
-
-        Yields:
-            Batches of item dictionaries with 'url' fields
+        Phase 1: Fetch Congressional list data using a specific client.
         """
-        async for batch in client.retrieve_data_list(
-            data_type=self.outer_api_field,
-            from_date=from_date,
-            to_date=to_date,
-            limit=limit or 250,  # Always maximize API efficiency
-            offset=offset,
-            **kwargs,
-        ):
-            yield batch
+        logger.debug(f"Phase 1 fetch with client: {client}")
 
-    async def fetch_full_data(self, item_url: str) -> dict[str, Any] | None:
+        try:
+            # Get the proper API configuration from the registry
+            if not self.config:
+                logger.error("No configuration loaded for data type")
+                return
+
+            # Use the API configuration to get the correct endpoint and parameters
+            api_config = self.config.api
+            endpoint = api_config.api_endpoint or self.data_type_name
+
+            # Format dates for API
+            from_date_fmt = (
+                self.client._format_date_for_api(from_date) if from_date else None
+            )
+            to_date_fmt = self.client._format_date_for_api(to_date) if to_date else None
+
+            logger.debug(
+                f"Using endpoint: {endpoint} for data type: {self.data_type_name}"
+            )
+
+            # Use the correct method name from CongressionalAPIClient
+            async for batch in client.retrieve_data_list(
+                data_type=endpoint,
+                from_date=from_date_fmt,
+                to_date=to_date_fmt,
+                limit=limit,
+                **kwargs,
+            ):
+                if batch:
+                    # Extract the list of items using list_key from config
+                    list_key = api_config.list_key
+                    if list_key:
+                        if isinstance(list_key, list):
+                            # Try each key in the list until one works
+                            extracted_items = []
+                            for key in list_key:
+                                if key in batch:
+                                    extracted_items = batch[key]
+                                    break
+                            if not extracted_items:
+                                logger.warning(
+                                    f"None of the list keys {list_key} found in batch"
+                                )
+                                continue
+                        else:
+                            # Single key
+                            extracted_items = batch.get(list_key, [])
+
+                        if extracted_items:
+                            yield extracted_items
+                    else:
+                        # Fallback: assume batch is already the list of items
+                        yield batch
+
+        except Exception as e:
+            logger.error(f"Phase 1 fetch with client failed: {e}")
+            raise
+
+    async def fetch_phase_2_data(self, item_url: str) -> dict[str, Any] | None:
         """
-        Phase 2: Fetch complete item data from Congressional URL.
-
-        Args:
-            item_url: Individual item URL from Phase 1
-
-        Returns:
-            Complete item data or None on error
+        Phase 2: Fetch complete Congressional item data from individual URL.
         """
-        full_data = await self.fetch_full_data_with_client(item_url, self.client)
-        if full_data:
-            full_data[self.id_field] = self.extract_item_id(full_data)
-        return full_data
+        try:
+            # Use the correct method name from CongressionalAPIClient
+            full_data = await self.client.retrieve_full_data_from_url(item_url)
 
-    async def fetch_full_data_with_client(
+            if not full_data or not self.config:
+                return full_data
+
+            # Extract the full data item using full_key from config
+            api_config = self.config.api
+            full_key = api_config.full_key
+
+            if full_key and full_key in full_data:
+                return full_data[full_key]
+            else:
+                # Fallback: return the full response if no full_key or key not found
+                return full_data
+
+        except Exception as e:
+            logger.error(f"Phase 2 fetch failed for {item_url}: {e}")
+            return None
+
+    async def fetch_phase_2_data_with_client(
         self, item_url: str, client
     ) -> dict[str, Any] | None:
         """
-        Fetch complete item data using a specific client.
-
-        This method can be overridden by subclasses to customize full data fetching
-        while maintaining compatibility with parallel processing.
-
-        Args:
-            item_url: Individual item URL from Phase 1
-            client: API client to use for the request
-
-        Returns:
-            Complete item data or None on error
+        Phase 2: Fetch complete Congressional item data using a specific client.
         """
-        return await client.retrieve_full_data_from_url(
-            item_url, expected_key=self.expected_key
-        )
+        try:
+            # Use the correct method name from CongressionalAPIClient
+            full_data = await client.retrieve_full_data_from_url(item_url)
 
-    async def fetch_related_data_with_client(
-        self, url: str, expected_key_list: list[str], client
+            if not full_data or not self.config:
+                return full_data
+
+            # Extract the full data item using full_key from config
+            api_config = self.config.api
+            full_key = api_config.full_key
+
+            if full_key and full_key in full_data:
+                return full_data[full_key]
+            else:
+                # Fallback: return the full response if no full_key or key not found
+                return full_data
+
+        except Exception as e:
+            logger.error(f"Phase 2 fetch with client failed for {item_url}: {e}")
+            return None
+
+    async def fetch_phase_3_data(
+        self, item_data: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """
-        Fetch related data from a URL using a specific client.
+        Phase 3: Fetch Congressional related data using data-type-specific "get" methods.
 
-        This method can be overridden by subclasses to customize related data fetching
-        while maintaining compatibility with parallel processing.
-
-        Args:
-            url: URL to fetch related data from
-            expected_key_list: List of expected response keys
-            client: API client to use for the request
-
-        Returns:
-            List of related data items
+        This uses the fetcher's specific "get" methods (like get_actions, get_amendments, etc.)
+        to fetch related data for the Congressional item.
         """
-        return await client.retrieve_related_data_from_url(url, expected_key_list)
-
-    async def fetch_related_data(
-        self, full_data: dict[str, Any]
-    ) -> dict[str, list[dict[str, Any]]]:
-        """
-        Phase 3: Fetch related data (optional override).
-
-        Override this method to fetch related data for your data type.
-
-        Args:
-            full_data: Complete item data from Phase 2
-
-        Returns:
-            Dictionary mapping relation type to list of related records
-        """
-        related_data = {}
-
-        # Get all related data methods dynamically
-        related_methods = self.get_related_data_methods()
-
-        if not related_methods:
-            logger.warning(f"No related data methods found for {self.data_type_name}")
-            return related_data
-
-        # Get all related data concurrently
-        tasks = {}
-        for method_name in related_methods:
-            method = getattr(self, method_name)
-            field_name = method_name.replace(f"get_{self.data_type_name}_", "")
-            tasks[field_name] = method(full_data)
-
-        if tasks:
-            results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-
-            for field_name, result in zip(tasks.keys(), results, strict=False):
-                if isinstance(result, Exception):
-                    logger.error(f"Error fetching {field_name}: {result}")
-                    related_data[field_name] = []
-                else:
-                    related_data[field_name] = result or []
-
-        return related_data
-
-    def get_related_data_methods(self) -> list[str]:
-        """
-        Get list of related data method names for dynamic discovery.
-
-        Override to specify which related data methods to use.
-        Default discovers methods starting with f"get_{data_type_name}_"
-
-        Returns:
-            List of method names to call for related data
-        """
-        if not self.data_type_name:
-            return []
-
-        methods = []
-        for attr_name in dir(self):
-            if attr_name.startswith(f"get_{self.data_type_name}_") and callable(
-                getattr(self, attr_name)
-            ):
-                methods.append(attr_name)
-        return methods
-
-    # =============================================================================
-    # SETUP AND CONFIGURATION
-    # =============================================================================
-
-    def set_processing_resource(self, processing_resource) -> None:
-        """
-        Set the processing resource for accessing parallel API clients and other resources.
-
-        This method is called by the Dagster pipeline to provide access to:
-        - Parallel API client sessions
-        - Shared database pools
-        - Other shared resources
-
-        Args:
-            processing_resource: Resource providing parallel clients
-        """
-        self.processing_resource = processing_resource
-        if hasattr(processing_resource, "get_parallel_clients"):
-            logger.debug("Processing resource has parallel clients capability")
-        else:
-            logger.debug("Processing resource does not support parallel clients")
-
-    async def setup_run_tracking(
-        self, run_metadata: RunMetadata | None = None
-    ) -> str | None:
-        """Setup run tracking for this processing session."""
-        if not self.run_manager:
-            logger.warning("No run manager provided - run tracking disabled")
-            return None
-
         try:
-            if not run_metadata:
-                run_metadata = RunMetadata(
-                    run_id="",
-                    run_type=RunType.SCRAPER_CONGRESSIONAL,
-                    system_name=f"{self.data_type_name}_fetcher",
-                    description=f"Fetch {self.data_type_name} data from Congressional API",
-                    data_types=[self.data_type_name] if self.data_type_name else [],
+            related_data = []
+
+            # Get the item ID for related data fetching
+            item_id = self.extract_item_id(item_data)
+
+            # Check if this fetcher has specific "get" methods for related data
+            # Common Congressional related data methods include:
+            # - get_actions, get_amendments, get_committees, get_cosponsors, get_related_bills, etc.
+
+            related_methods = [
+                method
+                for method in dir(self)
+                if method.startswith("get_")
+                and callable(getattr(self, method))
+                and method
+                not in ["get_source_system_name", "get_default_schema", "get_run_type"]
+            ]
+
+            if related_methods:
+                logger.debug(
+                    f"Found {len(related_methods)} related data methods: {related_methods}"
                 )
 
-            self.current_run_id = self.run_manager.create_run(run_metadata)
-            await self.run_manager.start_run(self.current_run_id)
-            logger.info(f"Started run tracking with ID: {self.current_run_id}")
-            return self.current_run_id
-
-        except Exception as e:
-            logger.error(f"Failed to setup run tracking: {e}")
-            return None
-
-    # =============================================================================
-    # MAIN PROCESSING METHOD - CONGRESSIONAL 3-PHASE IMPLEMENTATION
-    # =============================================================================
-
-    async def process_items(
-        self,
-        from_date: str | None = None,
-        to_date: str | None = None,
-        limit: int | None = 250,
-        max_items: int | None = None,
-        batch_size: int = 50,
-        enable_parallelization: bool = False,
-        max_concurrent: int = 10,
-        redistribute_idle_sessions: bool = True,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """
-        Congressional-specific 3-phase processing implementation.
-
-        Args:
-            from_date: Start date filter (YYYY-MM-DD)
-            to_date: End date filter (YYYY-MM-DD)
-            limit: Items per page
-            max_items: Maximum total items to process
-            batch_size: Items per storage batch
-            enable_parallelization: Enable parallel processing
-            max_concurrent: Maximum concurrent operations
-            redistribute_idle_sessions: Use idle sessions for related data fetching
-            **kwargs: Additional parameters
-
-        Returns:
-            Processing results with statistics
-        """
-        logger.info(f"Starting {self.data_type_name} processing")
-        logger.info(f"Date range: {from_date} to {to_date}")
-        logger.info(f"Parallelization: {enable_parallelization}")
-        logger.info(f"Redistribute idle sessions: {redistribute_idle_sessions}")
-
-        # Setup progress tracking
-        self.setup_progress_tracker()
-
-        # Setup run tracking
-        await self.setup_run_tracking()
-
-        try:
-            if enable_parallelization:
-                return await self._process_with_parallelization(
-                    from_date,
-                    to_date,
-                    limit,
-                    max_items,
-                    batch_size,
-                    max_concurrent,
-                    redistribute_idle_sessions,
-                    **kwargs,
-                )
-            else:
-                return await self._process_sequentially(
-                    from_date, to_date, limit, max_items, batch_size, **kwargs
-                )
-
-        except Exception as e:
-            logger.error(f"Processing failed: {e}")
-            if self.run_manager and self.current_run_id:
-                await self.run_manager.fail_run(self.current_run_id, str(e))
-            raise
-
-        finally:
-            if self.run_manager and self.current_run_id:
-                await self.run_manager.complete_run(self.current_run_id)
-
-    async def _process_sequentially(
-        self,
-        from_date: str | None,
-        to_date: str | None,
-        limit: int | None,
-        max_items: int | None,
-        batch_size: int,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """Process items sequentially using a single API client."""
-        stats = {
-            "total_processed": 0,
-            "successful": 0,
-            "errors": 0,
-            "batches_stored": 0,
-            "start_time": datetime.now(UTC),
-            "latest_update_date": None,
-        }
-
-        batch_items = []
-        processed_count = 0
-        first_batch_processed = False
-
-        # Use the same pagination metadata analysis as parallel processing
-        # This ensures sequential processing handles date filters correctly
-        try:
-            pages_to_process, pagination_metadata = await self._get_pagination_metadata(
-                from_date, to_date, limit, **kwargs
-            )
-
-            if pages_to_process is not None:
-                # We have pagination metadata, use it to guide processing
-                if pages_to_process == 0:
-                    logger.info("No new items to process based on pagination analysis")
-                    stats["end_time"] = datetime.now(UTC)
-                    stats["duration"] = (
-                        stats["end_time"] - stats["start_time"]
-                    ).total_seconds()
-                    logger.info(
-                        f"Sequential processing completed (no new items): {stats}"
-                    )
-                    return stats
-
-                # Store pagination metadata in stats for tracking
-                stats["total_count"] = pagination_metadata.get("total_count")
-                stats["last_processed_count"] = pagination_metadata.get(
-                    "last_processed_count"
-                )
-                stats["incremental_count"] = pagination_metadata.get(
-                    "incremental_count"
-                )
-
-                logger.info(
-                    f"Sequential processing: {pagination_metadata.get('incremental_count')} items "
-                    f"across {pages_to_process} pages to process"
-                )
-
-                # Use the pagination metadata to guide fetching
-                # Start from the calculated offset and process the determined number of pages
-                page_size = pagination_metadata.get("page_size", limit or 250)
-                start_offset = pagination_metadata.get("start_offset", 0)
-
-                # Process pages sequentially using the calculated offsets
-                for page_num in range(pages_to_process):
-                    if max_items and processed_count >= max_items:
-                        break
-
-                    offset = start_offset + (page_num * page_size)
-
-                    async for list_batch in self.fetch_list_data(
-                        from_date=from_date,
-                        to_date=to_date,
-                        limit=page_size,
-                        offset=offset,
-                        single_page_only=True,
-                        **kwargs,
-                    ):
-                        # Capture total count from first response
-                        if not first_batch_processed and hasattr(
-                            self.client, "last_response_metadata"
-                        ):
-                            metadata = self.client.last_response_metadata
-                            if (
-                                metadata
-                                and isinstance(metadata, dict)
-                                and "pagination" in metadata
-                            ):
-                                pagination = metadata.get("pagination")
-                                if (
-                                    pagination
-                                    and isinstance(pagination, dict)
-                                    and "count" in pagination
-                                ):
-                                    total_count = pagination.get("count")
-                                    if total_count is not None and isinstance(
-                                        total_count, int
-                                    ):
-                                        # Update stats with actual total count if we don't have it
-                                        if (
-                                            "total_count" not in stats
-                                            or stats["total_count"] is None
-                                        ):
-                                            stats["total_count"] = total_count
-                                        logger.info(
-                                            f"Captured total count for sequential processing: {total_count}"
-                                        )
-                            first_batch_processed = True
-
-                        for list_item in list_batch:
-                            if max_items and processed_count >= max_items:
-                                break
-
-                            try:
-                                processed_item = await self._process_single_item(
-                                    list_item
-                                )
-                                batch_items.append(processed_item)
-                                stats["successful"] += 1
-
-                                # Track latest updateDate for incremental processing
-                                update_date = list_item.get(
-                                    "updateDate"
-                                ) or processed_item.get("full_data", {}).get(
-                                    "updateDate"
-                                )
-                                if update_date and (
-                                    not stats["latest_update_date"]
-                                    or update_date > stats["latest_update_date"]
-                                ):
-                                    stats["latest_update_date"] = update_date
-
-                            except Exception as e:
-                                logger.error(
-                                    f"Error processing item {list_item.get('url', 'UNKNOWN')}: {e}",
-                                    exc_info=True,
-                                )
-                                stats["errors"] += 1
-
-                            processed_count += 1
-                            stats["total_processed"] += 1
-
-                            # Store batch when full
-                            if len(batch_items) >= batch_size:
-                                await self._store_batch(batch_items)
-                                stats["batches_stored"] += 1
-                                batch_items.clear()
-
-                            if max_items and processed_count >= max_items:
-                                break
-
-                        if max_items and processed_count >= max_items:
-                            break
-
-                    if max_items and processed_count >= max_items:
-                        break
-
-            else:
-                # Fall back to simple iteration when pagination metadata is not available
-                logger.warning(
-                    "Pagination metadata not available, falling back to simple iteration"
-                )
-
-                async for list_batch in self.fetch_list_data(
-                    from_date=from_date, to_date=to_date, limit=limit, **kwargs
-                ):
-                    # Capture total count from first response
-                    if not first_batch_processed and hasattr(
-                        self.client, "last_response_metadata"
-                    ):
-                        metadata = self.client.last_response_metadata
-                        if (
-                            metadata
-                            and isinstance(metadata, dict)
-                            and "pagination" in metadata
-                        ):
-                            pagination = metadata.get("pagination")
-                            if (
-                                pagination
-                                and isinstance(pagination, dict)
-                                and "count" in pagination
-                            ):
-                                total_count = pagination.get("count")
-                                if total_count is not None and isinstance(
-                                    total_count, int
-                                ):
-                                    stats["total_count"] = total_count
-                                    logger.info(
-                                        f"Captured total count for sequential processing: {total_count}"
-                                    )
-                        first_batch_processed = True
-
-                    for list_item in list_batch:
-                        if max_items and processed_count >= max_items:
-                            break
-
-                        try:
-                            processed_item = await self._process_single_item(list_item)
-                            batch_items.append(processed_item)
-                            stats["successful"] += 1
-
-                            # Track latest updateDate for incremental processing
-                            update_date = list_item.get(
-                                "updateDate"
-                            ) or processed_item.get("full_data", {}).get("updateDate")
-                            if update_date and (
-                                not stats["latest_update_date"]
-                                or update_date > stats["latest_update_date"]
-                            ):
-                                stats["latest_update_date"] = update_date
-
-                        except Exception as e:
-                            logger.error(
-                                f"Error processing item {list_item.get('url', 'UNKNOWN')}: {e}",
-                                exc_info=True,
-                            )
-                            stats["errors"] += 1
-
-                        processed_count += 1
-                        stats["total_processed"] += 1
-
-                        # Store batch when full
-                        if len(batch_items) >= batch_size:
-                            await self._store_batch(batch_items)
-                            stats["batches_stored"] += 1
-                            batch_items.clear()
-
-                        if max_items and processed_count >= max_items:
-                            break
-
-                    if max_items and processed_count >= max_items:
-                        break
-
-        except Exception as e:
-            logger.error(f"Error in sequential processing pagination analysis: {e}")
-            logger.info("Falling back to simple iteration")
-
-            # Fall back to the original simple approach if pagination analysis fails
-            async for list_batch in self.fetch_list_data(
-                from_date=from_date, to_date=to_date, limit=limit, **kwargs
-            ):
-                for list_item in list_batch:
-                    if max_items and processed_count >= max_items:
-                        break
-
+                for method_name in related_methods:
                     try:
-                        processed_item = await self._process_single_item(list_item)
-                        batch_items.append(processed_item)
-                        stats["successful"] += 1
+                        method = getattr(self, method_name)
+                        # Call the method with the item data or ID
+                        related_result = await method(item_data)
 
-                        # Track latest updateDate for incremental processing
-                        update_date = list_item.get("updateDate") or processed_item.get(
-                            "full_data", {}
-                        ).get("updateDate")
-                        if update_date and (
-                            not stats["latest_update_date"]
-                            or update_date > stats["latest_update_date"]
-                        ):
-                            stats["latest_update_date"] = update_date
+                        if related_result:
+                            # Add metadata about the related data type
+                            related_entry = {
+                                "type": method_name,
+                                "parent_id": item_id,
+                                "data": related_result,
+                                "method": method_name,
+                            }
+                            related_data.append(related_entry)
 
                     except Exception as e:
                         logger.error(
-                            f"Error processing item {list_item.get('url', 'UNKNOWN')}: {e}",
-                            exc_info=True,
+                            f"Failed to fetch related data using {method_name}: {e}"
                         )
-                        stats["errors"] += 1
-
-                    processed_count += 1
-                    stats["total_processed"] += 1
-
-                    # Store batch when full
-                    if len(batch_items) >= batch_size:
-                        await self._store_batch(batch_items)
-                        stats["batches_stored"] += 1
-                        batch_items.clear()
-
-                    if max_items and processed_count >= max_items:
-                        break
-
-                if max_items and processed_count >= max_items:
-                    break
-
-        # Store remaining items
-        if batch_items:
-            await self._store_batch(batch_items)
-            stats["batches_stored"] += 1
-
-        stats["end_time"] = datetime.now(UTC)
-        stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
-
-        # Update last_processed_date if we processed items successfully
-        if stats.get("successful", 0) > 0:
-            await self._update_last_processed_tracking(stats)
-
-        logger.info(f"Sequential processing completed: {stats}")
-        return stats
-
-    async def _process_with_parallelization(
-        self,
-        from_date: str | None,
-        to_date: str | None,
-        limit: int | None,
-        max_items: int | None,
-        batch_size: int,
-        max_concurrent: int,
-        redistribute_idle_sessions: bool = True,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """Process items with parallelization using multiple API clients."""
-        logger.info("Using parallelization for processing")
-
-        # Get parallel API clients if available
-        processing_resource = getattr(self, "processing_resource", None)
-        if not processing_resource or not hasattr(
-            processing_resource, "get_api_clients_for_parallel_sessions"
-        ):
-            logger.warning(
-                "No parallel clients available, falling back to sequential processing"
-            )
-            return await self._process_sequentially(
-                from_date, to_date, limit, max_items, batch_size, **kwargs
-            )
-
-        api_clients = await processing_resource.get_api_clients_for_parallel_sessions(
-            self.data_type_name
-        )
-        if len(api_clients) <= 1:
-            logger.warning(
-                "Insufficient parallel clients, falling back to sequential processing"
-            )
-            return await self._process_sequentially(
-                from_date, to_date, limit, max_items, batch_size, **kwargs
-            )
-
-        logger.info(f"Using {len(api_clients)} parallel API clients")
-
-        # Use keyword arguments to avoid positional mismatches in downstream calls
-        return await self._process_with_concurrent_page_fetching(
-            api_clients=api_clients,
-            from_date=from_date,
-            to_date=to_date,
-            batch_size=batch_size,
-            max_concurrent=max_concurrent,
-            redistribute_idle_sessions=redistribute_idle_sessions,
-            limit=limit,
-            **kwargs,
-        )
-
-    async def _process_with_concurrent_page_fetching(
-        self,
-        api_clients: list,
-        from_date: str | None,
-        to_date: str | None,
-        batch_size: int,
-        max_concurrent: int,
-        redistribute_idle_sessions: bool = True,
-        limit: int | None = 250,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """Process with concurrent page fetching across multiple clients."""
-        stats = {
-            "total_processed": 0,
-            "successful": 0,
-            "errors": 0,
-            "batches_stored": 0,
-            "start_time": datetime.now(UTC),
-            "redistribution_used": False,
-            "latest_update_date": None,
-            "total_count": None,
-        }
-
-        # Get pagination metadata for optimal distribution
-        try:
-            pages_to_process, pagination_metadata = await self._get_pagination_metadata(
-                from_date, to_date, limit, **kwargs
-            )
-            if pages_to_process is None:
-                logger.warning(
-                    "Could not determine pagination metadata, using simple distribution"
-                )
-                return await self._process_with_simple_distribution(
-                    api_clients, from_date, to_date, limit, batch_size, None, **kwargs
-                )
-
-            if pages_to_process == 0:
-                logger.info("No new items to process based on last_processed_count")
-                stats["end_time"] = datetime.now(UTC)
-                stats["duration"] = (
-                    stats["end_time"] - stats["start_time"]
-                ).total_seconds()
-                logger.info(f"Processing completed (no new items): {stats}")
-                return stats
-
-            logger.info(
-                f"Incremental items to process: {pagination_metadata.get('incremental_count')} "
-                f"across {pages_to_process} pages"
-            )
-
-            # Store pagination metadata in stats
-            stats["total_count"] = pagination_metadata.get("total_count")
-            stats["last_processed_count"] = pagination_metadata.get(
-                "last_processed_count"
-            )
-            stats["incremental_count"] = pagination_metadata.get("incremental_count")
-
-            # Check if we have more sessions than pages and should redistribute
-            if (
-                redistribute_idle_sessions
-                and pages_to_process < len(api_clients)
-                and pages_to_process > 0
-            ):
-                logger.info(
-                    f"Redistributing idle sessions: {pages_to_process} pages vs {len(api_clients)} sessions"
-                )
-                stats["redistribution_used"] = True
-                return await self._process_with_redistribution_strategy(
-                    api_clients,
-                    from_date,
-                    to_date,
-                    limit,
-                    pages_to_process,
-                    batch_size,
-                    max_concurrent,
-                    pagination_metadata,
-                    **kwargs,
-                )
-
-            # Standard interleaved distribution with incremental offsets
-            page_size = pagination_metadata.get("page_size", limit or 250)
-            start_offset = pagination_metadata.get("start_offset", 0)
-            offset_assignments = self._calculate_interleaved_offsets(
-                len(api_clients), pages_to_process, page_size, start_offset
-            )
-
-            # Process with assigned offsets
-            tasks = []
-            for session_id, (client, assigned_offsets) in enumerate(
-                zip(api_clients, offset_assignments, strict=False)
-            ):
-                task = self._process_assigned_offsets(
-                    client,
-                    from_date,
-                    to_date,
-                    limit,
-                    assigned_offsets,
-                    batch_size,
-                    max_concurrent,
-                    session_id,
-                    **kwargs,
-                )
-                tasks.append(task)
-
-            # Execute all sessions concurrently
-            session_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Aggregate results
-            for result in session_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Session failed: {result}")
-                    stats["errors"] += 1
-                elif isinstance(result, dict):
-                    stats["total_processed"] += result.get("total_processed", 0)
-                    stats["successful"] += result.get("successful", 0)
-                    stats["errors"] += result.get("errors", 0)
-                    stats["batches_stored"] += result.get("batches_stored", 0)
-
-                    # Track latest updateDate across all sessions
-                    session_latest = result.get("latest_update_date")
-                    if session_latest and (
-                        not stats["latest_update_date"]
-                        or session_latest > stats["latest_update_date"]
-                    ):
-                        stats["latest_update_date"] = session_latest
-
-        except Exception as e:
-            logger.error(f"Error in concurrent processing: {e}")
-            logger.info("Falling back to simple distribution")
-            return await self._process_with_simple_distribution(
-                api_clients, from_date, to_date, limit, batch_size, None, **kwargs
-            )
-
-        stats["end_time"] = datetime.now(UTC)
-        stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
-
-        # Update last_processed_date if we processed items successfully
-        if stats.get("successful", 0) > 0:
-            await self._update_last_processed_tracking(stats)
-
-        logger.info(f"Parallel processing completed: {stats}")
-        return stats
-
-    async def _process_with_redistribution_strategy(
-        self,
-        api_clients: list,
-        from_date: str | None,
-        to_date: str | None,
-        limit: int | None,
-        pages_to_process: int,
-        batch_size: int,
-        max_concurrent: int,
-        pagination_metadata: dict[str, Any],
-        **kwargs,
-    ) -> dict[str, Any]:
-        """
-        Process with redistribution strategy for idle sessions.
-
-        Strategy:
-        1. Use only enough sessions for page fetching (Phase 1 & 2)
-        2. Collect all full_data items
-        3. Redistribute all sessions for parallel related data fetching (Phase 3)
-        """
-        logger.info("Using redistribution strategy for idle sessions")
-
-        stats = {
-            "total_processed": 0,
-            "successful": 0,
-            "errors": 0,
-            "batches_stored": 0,
-            "start_time": datetime.now(UTC),
-            "phase_1_2_sessions": pages_to_process,
-            "phase_3_sessions": len(api_clients),
-            "latest_update_date": None,
-            # Preserve pagination metadata for tracking
-            "total_count": pagination_metadata.get("total_count"),
-            "last_processed_count": pagination_metadata.get("last_processed_count"),
-            "incremental_count": pagination_metadata.get("incremental_count"),
-        }
-
-        # Phase 1 & 2: Use only required sessions for page fetching
-        active_clients = api_clients[:pages_to_process]
-        idle_clients = api_clients[pages_to_process:]
-
-        logger.info(f"Phase 1&2: Using {len(active_clients)} active sessions")
-        logger.info(f"Phase 3: Will redistribute {len(api_clients)} total sessions")
-
-        # Collect all items from Phase 1 & 2
-        all_items = []
-
-        page_size = pagination_metadata.get("page_size", limit or 250)
-        start_offset = pagination_metadata.get("start_offset", 0)
-        offset_assignments = self._calculate_interleaved_offsets(
-            len(active_clients), pages_to_process, page_size, start_offset
-        )
-
-        # Process pages to get list and full data
-        tasks = []
-        for session_id, (client, assigned_offsets) in enumerate(
-            zip(active_clients, offset_assignments, strict=False)
-        ):
-            task = self._collect_items_phases_1_2(
-                client,
-                from_date,
-                to_date,
-                limit,
-                assigned_offsets,
-                session_id,
-                **kwargs,
-            )
-            tasks.append(task)
-
-        # Execute Phase 1 & 2 concurrently
-        session_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Collect all items
-        for result in session_results:
-            if isinstance(result, Exception):
-                logger.error(f"Phase 1&2 session failed: {result}")
-                stats["errors"] += 1
-            elif isinstance(result, dict) and "items" in result:
-                all_items.extend(result["items"])
-                stats["total_processed"] += result.get("total_processed", 0)
-
-                # Track latest updateDate across sessions
-                session_latest = result.get("latest_update_date")
-                if session_latest and (
-                    not stats["latest_update_date"]
-                    or session_latest > stats["latest_update_date"]
-                ):
-                    stats["latest_update_date"] = session_latest
-
-        logger.info(f"Collected {len(all_items)} items from Phase 1&2")
-
-        if not all_items:
-            logger.warning("No items collected from Phase 1&2")
-            return stats
-
-        # Phase 3: Redistribute all sessions for related data fetching
-        logger.info(
-            f"Phase 3: Redistributing related data across {len(idle_clients)} sessions"
-        )
-
-        phase_3_stats = await self._process_related_data_with_redistribution(
-            api_clients,
-            all_items,
-            batch_size,
-            max_concurrent,
-        )
-
-        # Combine stats
-        stats["successful"] += phase_3_stats.get("successful", 0)
-        stats["errors"] += phase_3_stats.get("errors", 0)
-        stats["batches_stored"] += phase_3_stats.get("batches_stored", 0)
-
-        stats["end_time"] = datetime.now(UTC)
-        stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
-
-        # Update last_processed_date if we processed items successfully
-        if stats.get("successful", 0) > 0:
-            await self._update_last_processed_tracking(stats)
-
-        logger.info(f"Redistribution strategy completed: {stats}")
-        return stats
-
-    async def _collect_items_phases_1_2(
-        self,
-        client,
-        from_date: str | None,
-        to_date: str | None,
-        limit: int | None,
-        assigned_offsets: list[int],
-        session_id: int,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """
-        Collect items from Phase 1 (list) and Phase 2 (full data) with immediate storage.
-        Now stores list_data and full_data immediately as they're processed.
-        """
-        stats = {
-            "total_processed": 0,
-            "items": [],
-            "session_id": session_id,
-            "latest_update_date": None,
-        }
-
-        logger.info(
-            f"Phase 1&2 Session {session_id}: Processing {len(assigned_offsets)} pages with immediate storage"
-        )
-
-        for offset in assigned_offsets:
-            try:
-                async for list_batch in self.fetch_list_data_with_client(
-                    client,
-                    from_date=from_date,
-                    to_date=to_date,
-                    limit=limit,
-                    offset=offset,
-                    single_page_only=True,
-                    **kwargs,
-                ):
-                    for list_item in list_batch:
-                        try:
-                            # Defensive check: ensure list_item is a dictionary
-                            if not isinstance(list_item, dict):
-                                logger.warning(
-                                    f"Session {session_id}: Skipping non-dict item: {type(list_item)} - {list_item}"
-                                )
-                                continue
-
-                            # Extract preliminary item ID for checkpoint tracking
-                            preliminary_item_id = self._extract_preliminary_item_id(
-                                list_item
-                            )
-
-                            # Attach preliminary ID so downstream storage has proper source_doc_id
-                            if (
-                                preliminary_item_id
-                                and preliminary_item_id != "ID_ERROR"
-                            ):
-                                list_item[self.id_field] = preliminary_item_id
-
-                            # Phase 1: Store list data immediately if not already stored
-                            phase_1_stored = False
-                            if self.progress_tracker:
-                                phase_1_stored = self.progress_tracker.should_skip_item(
-                                    preliminary_item_id,
-                                    ProcessingPhase.MAIN_ITEMS,
-                                    field_name="list_data",
-                                )
-
-                            if not phase_1_stored:
-                                batch_id = str(uuid.uuid4())
-                                await self.store_list_data(list_item, batch_id)
-
-                                if self.progress_tracker:
-                                    self.progress_tracker.increment_processed(
-                                        preliminary_item_id,
-                                        ProcessingPhase.MAIN_ITEMS,
-                                        field_name="list_data",
-                                    )
-                                logger.debug(
-                                    f"Session {session_id}: Stored list data for {preliminary_item_id}"
-                                )
-                            else:
-                                logger.debug(
-                                    f"Session {session_id}: Skipping list data for already processed {preliminary_item_id}"
-                                )
-
-                            # Phase 2: Fetch and store full data immediately if not already stored
-                            item_url = list_item.get("url")
-                            if not item_url:
-                                logger.warning(
-                                    f"Session {session_id}: Item missing URL field"
-                                )
-                                continue
-
-                            phase_2_stored = False
-                            actual_item_id = preliminary_item_id
-                            full_data = None
-
-                            if self.progress_tracker:
-                                phase_2_stored = self.progress_tracker.should_skip_item(
-                                    preliminary_item_id,
-                                    ProcessingPhase.MAIN_ITEMS,
-                                    field_name="full_data",
-                                )
-
-                            if not phase_2_stored:
-                                full_data = await self.fetch_full_data_with_client(
-                                    item_url, client
-                                )
-
-                                if full_data:
-                                    if isinstance(
-                                        full_data, list
-                                    ):  # committeeprints endpoint has a strange response structure
-                                        full_data = full_data[0]
-                                    actual_item_id = self.extract_item_id(full_data)
-                                    full_data[self.id_field] = actual_item_id
-
-                                batch_id = str(uuid.uuid4())
-                                await self.store_full_data(full_data, batch_id)
-
-                                if self.progress_tracker:
-                                    self.progress_tracker.increment_processed(
-                                        actual_item_id,
-                                        ProcessingPhase.MAIN_ITEMS,
-                                        field_name="full_data",
-                                    )
-                                logger.debug(
-                                    f"Session {session_id}: Stored full data for {actual_item_id}"
-                                )
-                            else:
-                                logger.debug(
-                                    f"Session {session_id}: Skipping full data for already processed {preliminary_item_id}"
-                                )
-                                # Still need full_data for Phase 3, so fetch without storing
-                                full_data = await self.fetch_full_data_with_client(
-                                    item_url, client
-                                )
-
-                                if full_data:
-                                    if isinstance(
-                                        full_data, list
-                                    ):  # committeeprints endpoint has a strange response structure
-                                        full_data = full_data[0]
-                                    actual_item_id = self.extract_item_id(full_data)
-                                    full_data[self.id_field] = actual_item_id
-
-                            # Extract updateDate for incremental tracking
-                            update_date = list_item.get("updateDate") or (
-                                full_data or {}
-                            ).get("updateDate")
-                            if update_date and (
-                                not stats["latest_update_date"]
-                                or update_date > stats["latest_update_date"]
-                            ):
-                                stats["latest_update_date"] = update_date
-
-                            # Collect item data for Phase 3 (without related data yet)
-                            item_data = {
-                                self.id_field: actual_item_id,
-                                "list_data": list_item,
-                                "full_data": full_data or {},
-                                "processed_at": datetime.now(UTC).isoformat(),
-                                "phases_completed": {
-                                    "list_data": True,  # We just stored it or it was already stored
-                                    "full_data": full_data is not None,
-                                    "related_data": False,  # Will be processed in Phase 3
-                                },
-                            }
-
-                            stats["items"].append(item_data)
-                            stats["total_processed"] += 1
-
-                        except Exception as e:
-                            logger.error(
-                                f"Session {session_id} error processing item: {e}",
-                                exc_info=True,
-                            )
-            except Exception as e:
-                logger.error(
-                    f"Session {session_id} error processing page offset {offset}: {e}"
-                )
-                stats["errors"] += 1
-
-        logger.info(
-            f"Phase 1&2 Session {session_id}: Processed {len(stats['items'])} items with immediate storage"
-        )
-        return stats
-
-    async def _process_related_data_with_redistribution(
-        self,
-        api_clients: list,
-        all_items: list[dict[str, Any]],
-        batch_size: int,
-        max_concurrent: int,
-    ) -> dict[str, Any]:
-        """
-        Process related data (Phase 3) with redistribution across all available sessions.
-        """
-        stats = {
-            "successful": 0,
-            "errors": 0,
-            "batches_stored": 0,
-        }
-
-        if not all_items:
-            return stats
-
-        # Distribute items across all available sessions
-        items_per_session = len(all_items) // len(api_clients)
-        remainder = len(all_items) % len(api_clients)
-
-        item_assignments = []
-        start_idx = 0
-
-        for i in range(len(api_clients)):
-            # Distribute remainder across first sessions
-            session_count = items_per_session + (1 if i < remainder else 0)
-            end_idx = start_idx + session_count
-            item_assignments.append(all_items[start_idx:end_idx])
-            start_idx = end_idx
-
-        logger.info(
-            f"Related data distribution: {[len(assignment) for assignment in item_assignments]}"
-        )
-
-        # Process related data in parallel across all sessions
-        tasks = []
-        for session_id, (client, assigned_items) in enumerate(
-            zip(api_clients, item_assignments, strict=False)
-        ):
-            if assigned_items:  # Only create tasks for sessions with items
-                task = self._process_related_data_for_session(
-                    client,
-                    assigned_items,
-                    batch_size,
-                    max_concurrent,
-                    session_id,
-                )
-                tasks.append(task)
-
-        # Execute all related data sessions concurrently
-        if tasks:
-            session_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Aggregate results
-            for result in session_results:
-                if isinstance(result, Exception):
-                    logger.error(f"Related data session failed: {result}")
-                    stats["errors"] += 1
-                elif isinstance(result, dict):
-                    stats["successful"] += result.get("successful", 0)
-                    stats["errors"] += result.get("errors", 0)
-                    stats["batches_stored"] += result.get("batches_stored", 0)
-
-        return stats
-
-    async def _process_related_data_for_session(
-        self,
-        client,
-        assigned_items: list[dict[str, Any]],
-        batch_size: int,
-        max_concurrent: int,
-        session_id: int,
-    ) -> dict[str, Any]:
-        """
-        Process related data for items assigned to a specific session with immediate storage.
-        """
-        stats = {
-            "successful": 0,
-            "errors": 0,
-            "batches_stored": 0,
-            "session_id": session_id,
-        }
-
-        logger.info(
-            f"Related data Session {session_id}: Processing {len(assigned_items)} items with immediate storage"
-        )
-
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def process_item_related_data(item_data: dict[str, Any]):
-            async with semaphore:
-                try:
-                    item_id = item_data.get(self.id_field, "UNKNOWN")
-
-                    # Check if related data is already processed
-                    phase_3_stored = False
-                    if self.progress_tracker:
-                        phase_3_stored = self.progress_tracker.should_skip_item(
-                            item_id, ProcessingPhase.RELATED_ENTITIES
-                        )
-
-                    if phase_3_stored:
-                        logger.debug(
-                            f"Session {session_id}: Skipping related data for already processed {item_id}"
-                        )
-                        return True
-
-                    # Create a temporary fetcher instance with this session's client
-                    # to fetch related data using the same interface
-                    temp_fetcher = type(self)(
-                        client=client,
-                        db_pool=self.db_pool,  # Need DB for storing
-                        checkpoint_manager=None,
-                        run_manager=None,
-                    )
-
-                    # Phase 3: Fetch related data using the specific client
-                    related_data = await temp_fetcher.fetch_related_data(
-                        item_data["full_data"]
-                    )
-
-                    # Store related data immediately
-                    batch_id = str(uuid.uuid4())
-                    await self.store_related_data(related_data, item_id, batch_id)
-
-                    # Mark as processed in checkpoint
-                    if self.progress_tracker:
-                        self.progress_tracker.increment_processed(
-                            item_id, ProcessingPhase.RELATED_ENTITIES
-                        )
-
-                    logger.debug(
-                        f"Session {session_id}: Stored related data for {item_id}"
-                    )
-                    return True
-
-                except Exception as e:
-                    logger.error(
-                        f"Related data Session {session_id} error processing item {item_data.get(self.id_field, 'UNKNOWN')}: {e}"
-                    )
-                    raise
-
-        # Process all items concurrently within this session
-        tasks = [process_item_related_data(item) for item in assigned_items]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Handle results
-        for result in results:
-            if isinstance(result, Exception):
-                stats["errors"] += 1
-            else:
-                stats["successful"] += 1
-
-        # Note: No batch storage needed since we store immediately
-        stats["batches_stored"] = stats["successful"]  # Each item stored individually
-
-        logger.info(f"Related data Session {session_id} completed: {stats}")
-        return stats
-
-    async def _get_pagination_metadata(
-        self,
-        from_date: str | None,
-        to_date: str | None,
-        limit: int | None,
-        **kwargs,
-    ) -> tuple[int | None, dict[str, Any]]:
-        """
-        Get pagination metadata for optimal parallel distribution with incremental support.
-
-        Returns:
-            Tuple of (pages_to_process, metadata_dict) where:
-            - pages_to_process: Number of pages that actually need processing (accounting for last_processed_count)
-            - metadata_dict: Contains total_count, last_processed_count, incremental_count, start_offset
-        """
-        try:
-            # Step 1: Get the TRUE total count (without date filters) if we have date filters
-            true_total_count = None
-            if from_date or to_date:
-                async for _first_batch in self.fetch_list_data(
-                    from_date=None,  # No date filters
-                    to_date=None,  # No date filters
-                    limit=0,  # Just get metadata, no actual items
-                    offset=0,
-                    **kwargs,
-                ):
-                    if hasattr(self.client, "last_response_metadata"):
-                        metadata = self.client.last_response_metadata
-                        if (
-                            metadata
-                            and isinstance(metadata, dict)
-                            and "pagination" in metadata
-                        ):
-                            pagination = metadata.get("pagination")
-                            if (
-                                pagination
-                                and isinstance(pagination, dict)
-                                and "count" in pagination
-                            ):
-                                true_total_count = pagination.get("count")
-                                if true_total_count is not None and isinstance(
-                                    true_total_count, int
-                                ):
-                                    break
-                    break
-
-            # Step 2: Get the filtered count and pagination info (with date filters if present)
-            # Fetch first page to get pagination info
-            async for _first_batch in self.fetch_list_data(
-                from_date=from_date,
-                to_date=to_date,
-                limit=limit or 250,
-                offset=0,
-                **kwargs,
-            ):
-                if hasattr(self.client, "last_response_metadata"):
-                    metadata = self.client.last_response_metadata
-                    if (
-                        metadata
-                        and isinstance(metadata, dict)
-                        and "pagination" in metadata
-                    ):
-                        pagination = metadata.get("pagination")
-                        if (
-                            pagination
-                            and isinstance(pagination, dict)
-                            and "count" in pagination
-                        ):
-                            filtered_count = pagination.get("count")
-                            if filtered_count is not None and isinstance(
-                                filtered_count, int
-                            ):
-                                page_size = limit or 250
-
-                                # Determine which total count to use for tracking
-                                # If we have date filters, use the true total count for tracking
-                                # Otherwise, use the filtered count (which is the same as total count)
-                                total_count_for_tracking = (
-                                    true_total_count
-                                    if (from_date or to_date)
-                                    else filtered_count
-                                )
-
-                                # Get last processed count for incremental processing
-                                last_processed_count = 0
-                                try:
-                                    if hasattr(
-                                        self.client, "access_last_processed_count"
-                                    ):
-                                        last_count = await self.client.access_last_processed_count(
-                                            self.data_type_name
-                                        )
-                                        if last_count is not None:
-                                            last_processed_count = last_count
-                                except Exception as e:
-                                    logger.debug(
-                                        f"Could not get last processed count: {e}"
-                                    )
-
-                                # For incremental processing, we use the filtered count to determine pages
-                                # But we track against the true total count
-                                incremental_count = filtered_count  # This is what we'll actually process
-                                start_offset = (
-                                    0  # When using date filters, we start from offset 0
-                                )
-
-                                if incremental_count == 0:
-                                    logger.info(
-                                        "No new items to process (filtered count is 0)"
-                                    )
-                                    return 0, {
-                                        "total_count": total_count_for_tracking,
-                                        "last_processed_count": last_processed_count,
-                                        "incremental_count": 0,
-                                        "start_offset": start_offset,
-                                        "page_size": page_size,
-                                    }
-
-                                # Calculate pages needed for the filtered items
-                                incremental_pages = (
-                                    incremental_count + page_size - 1
-                                ) // page_size
-
-                                metadata_dict = {
-                                    "total_count": total_count_for_tracking,  # True total for tracking
-                                    "last_processed_count": last_processed_count,
-                                    "incremental_count": incremental_count,  # Filtered count for processing
-                                    "start_offset": start_offset,
-                                    "page_size": page_size,
-                                    "incremental_pages": incremental_pages,
-                                }
-
-                                return incremental_pages, metadata_dict
-                break
-
-        except Exception as e:
-            logger.warning(f"Could not get pagination metadata: {e}")
-
-        return None, {}
-
-    def _calculate_interleaved_offsets(
-        self, num_sessions: int, total_pages: int, page_size: int, start_offset: int = 0
-    ) -> list[list[int]]:
-        """
-        Calculate interleaved offset assignments for load balancing with incremental support.
-
-        Args:
-            num_sessions: Number of parallel sessions
-            total_pages: Number of pages to process (incremental pages, not total pages)
-            page_size: Items per page
-            start_offset: Starting offset (based on last_processed_count)
-        """
-        assignments = [[] for _ in range(num_sessions)]
-
-        for page_num in range(total_pages):
-            session_id = page_num % num_sessions
-            # Calculate offset starting from the incremental position
-            offset = start_offset + (page_num * page_size)
-            assignments[session_id].append(offset)
-
-        logger.debug(
-            f"Calculated incremental offsets: start_offset={start_offset}, "
-            f"pages={total_pages}, assignments={[(i, len(a)) for i, a in enumerate(assignments)]}"
-        )
-
-        return assignments
-
-    async def _process_with_simple_distribution(
-        self,
-        api_clients: list,
-        from_date: str | None,
-        to_date: str | None,
-        limit: int | None,
-        batch_size: int,
-        total_pages: int | None,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """Simple distribution when pagination metadata is unavailable."""
-        stats = {
-            "total_processed": 0,
-            "successful": 0,
-            "errors": 0,
-            "batches_stored": 0,
-            "start_time": datetime.now(UTC),
-            "latest_update_date": None,
-        }
-
-        # For simple distribution, use first client only to avoid duplication
-        # This is a fallback when we can't determine proper pagination
-        client = api_clients[0]
-
-        batch_items = []
-        processed_count = 0
-        first_batch_processed = False
-
-        async for list_batch in self.fetch_list_data_with_client(
-            client,
-            from_date=from_date,
-            to_date=to_date,
-            limit=limit,
-            **kwargs,
-        ):
-            if not list_batch:
-                logger.warning("Received empty batch from API")
-                continue
-
-            # Capture total count from first response
-            if not first_batch_processed and hasattr(client, "last_response_metadata"):
-                metadata = client.last_response_metadata
-                if metadata and isinstance(metadata, dict) and "pagination" in metadata:
-                    pagination = metadata.get("pagination")
-                    if (
-                        pagination
-                        and isinstance(pagination, dict)
-                        and "count" in pagination
-                    ):
-                        total_count = pagination.get("count")
-                        if total_count is not None and isinstance(total_count, int):
-                            stats["total_count"] = total_count
-                            logger.info(
-                                f"Captured total count for simple distribution: {total_count}"
-                            )
-                first_batch_processed = True
-
-            for list_item in list_batch:
-                try:
-                    if not list_item or not isinstance(list_item, dict):
-                        logger.warning(f"Skipping invalid list item: {type(list_item)}")
-                        stats["errors"] += 1
                         continue
 
-                    processed_item = await self._process_single_item_with_client(
-                        list_item, client
-                    )
-                    batch_items.append(processed_item)
-                    stats["successful"] += 1
+            return related_data
 
-                    # Track latest updateDate for incremental processing
-                    update_date = list_item.get("updateDate") or processed_item.get(
-                        "full_data", {}
-                    ).get("updateDate")
-                    if update_date and (
-                        not stats["latest_update_date"]
-                        or update_date > stats["latest_update_date"]
-                    ):
-                        stats["latest_update_date"] = update_date
+        except Exception as e:
+            logger.error(f"Phase 3 fetch failed: {e}")
+            return []
 
-                except Exception as e:
-                    logger.error(
-                        f"Error processing item {list_item.get('url', 'UNKNOWN') if isinstance(list_item, dict) else 'INVALID_ITEM'}: {e}",
-                        exc_info=True,
-                    )
-                    stats["errors"] += 1
+    async def fetch_phase_3_data_with_client(
+        self, item_data: dict[str, Any], client
+    ) -> list[dict[str, Any]]:
+        """
+        Phase 3: Fetch Congressional related data using a specific client.
 
-                processed_count += 1
-                stats["total_processed"] += 1
+        Note: The signature is different from the abstract method to match Congressional patterns.
+        """
+        try:
+            related_data = []
 
-                # Store batch when full
-                if len(batch_items) >= batch_size:
-                    await self._store_batch(batch_items)
-                    stats["batches_stored"] += 1
-                    batch_items.clear()
+            # Get the item ID for related data fetching
+            item_id = self.extract_item_id(item_data)
 
-        # Store remaining items
-        if batch_items:
-            await self._store_batch(batch_items)
-            stats["batches_stored"] += 1
+            # Check if this fetcher has specific "get" methods for related data
+            related_methods = [
+                method
+                for method in dir(self)
+                if method.startswith("get_")
+                and callable(getattr(self, method))
+                and method
+                not in ["get_source_system_name", "get_default_schema", "get_run_type"]
+            ]
 
-        stats["end_time"] = datetime.now(UTC)
-        stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
-
-        # Update last_processed_date if we processed items successfully
-        if stats.get("successful", 0) > 0:
-            await self._update_last_processed_tracking(stats)
-
-        logger.info(f"Simple distribution completed: {stats}")
-        return stats
-
-    async def _process_assigned_offsets(
-        self,
-        client,
-        from_date: str | None,
-        to_date: str | None,
-        limit: int | None,
-        assigned_offsets: list[int],
-        batch_size: int,
-        max_concurrent: int,
-        session_id: int,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """Process assigned offsets for a specific client session."""
-        stats = {
-            "total_processed": 0,
-            "successful": 0,
-            "errors": 0,
-            "batches_stored": 0,
-            "session_id": session_id,
-        }
-
-        logger.info(f"Session {session_id}: Processing {len(assigned_offsets)} pages")
-
-        batch_items = []
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def process_page_offset(offset: int):
-            async with semaphore:
-                try:
-                    async for list_batch in self.fetch_list_data_with_client(
-                        client,
-                        from_date=from_date,
-                        to_date=to_date,
-                        limit=limit,
-                        offset=offset,
-                        single_page_only=True,
-                        **kwargs,
-                    ):
-                        for list_item in list_batch:
-                            try:
-                                # Defensive check: ensure list_item is a dictionary
-                                if not isinstance(list_item, dict):
-                                    logger.warning(
-                                        f"Session {session_id}: Skipping non-dict item: {type(list_item)} - {list_item}"
-                                    )
-                                    continue
-
-                                processed_item = (
-                                    await self._process_single_item_with_client(
-                                        list_item, client
-                                    )
-                                )
-                                batch_items.append(processed_item)
-                                stats["successful"] += 1
-                            except Exception as e:
-                                logger.error(
-                                    f"Session {session_id} error processing item: {e}",
-                                    exc_info=True,
-                                )
-                                stats["errors"] += 1
-
-                            stats["total_processed"] += 1
-
-                            # Store batch when full (with lock for thread safety)
-                            if len(batch_items) >= batch_size:
-                                await self._store_batch(batch_items[:batch_size])
-                                stats["batches_stored"] += 1
-                                del batch_items[:batch_size]
-                except Exception as e:
-                    logger.error(
-                        f"Session {session_id} error processing page offset {offset}: {e}"
-                    )
-                    stats["errors"] += 1
-
-        # Process all assigned offsets concurrently
-        tasks = [process_page_offset(offset) for offset in assigned_offsets]
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Store remaining items
-        if batch_items:
-            await self._store_batch(batch_items)
-            stats["batches_stored"] += 1
-
-        logger.info(f"Session {session_id} completed: {stats}")
-        return stats
-
-    async def _process_single_item(self, list_item: dict[str, Any]) -> dict[str, Any]:
-        """Process a single item through all phases using the default client."""
-        return await self._process_single_item_with_client(list_item, self.client)
-
-    async def _process_single_item_with_client(
-        self, list_item: dict[str, Any], client
-    ) -> dict[str, Any]:
-        """Process a single item through all phases using a specific client with phase-specific checkpointing."""
-        # Defensive check: ensure list_item is a dictionary
-        if not isinstance(list_item, dict):
-            raise ValueError(f"Expected dict but got {type(list_item)}: {list_item}")
-
-        if not list_item or not isinstance(list_item, dict):
-            raise ValueError(f"Invalid list item: {type(list_item)}")
-
-        item_url = list_item.get("url")
-        if not item_url:
-            raise ValueError(
-                f"Item missing URL field. Item keys: {list(list_item.keys())}"
-            )
-
-        # Extract item ID early for checkpoint tracking
-        # We'll get the proper ID after fetching full data, but need a preliminary ID for tracking
-        preliminary_item_id = self._extract_preliminary_item_id(list_item)
-        list_item[self.id_field] = preliminary_item_id
-
-        # Phase 1: Check if list data is already stored and store if needed
-        phase_1_complete = False
-        if self.progress_tracker:
-            phase_1_complete = self.progress_tracker.should_skip_item(
-                preliminary_item_id, ProcessingPhase.MAIN_ITEMS, field_name="list_data"
-            )
-
-        if not phase_1_complete:
-            # Store list data immediately
-            batch_id = str(uuid.uuid4())
-            await self.store_list_data(list_item, batch_id)
-
-            if self.progress_tracker:
-                self.progress_tracker.set_processing_phase(
-                    ProcessingPhase.MAIN_ITEMS, current_field="list_data"
+            if related_methods:
+                logger.debug(
+                    f"Found {len(related_methods)} related data methods: {related_methods}"
                 )
+
+                for method_name in related_methods:
+                    try:
+                        method = getattr(self, method_name)
+                        # Call the method with the item data, using the specific client
+                        # Some methods might accept a client parameter
+                        try:
+                            related_result = await method(item_data, client=client)
+                        except TypeError:
+                            # If method doesn't accept client parameter, call without it
+                            related_result = await method(item_data)
+
+                        if related_result:
+                            # Add metadata about the related data type
+                            related_entry = {
+                                "type": method_name,
+                                "parent_id": item_id,
+                                "data": related_result,
+                                "method": method_name,
+                            }
+                            related_data.append(related_entry)
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to fetch related data using {method_name}: {e}"
+                        )
+                        continue
+
+            return related_data
+
+        except Exception as e:
+            logger.error(f"Phase 3 fetch with client failed: {e}")
+            return []
+
+    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+        """Extract standardized ID from Congressional item data."""
+        return (
+            item_data.get("number")
+            or item_data.get("id")
+            or item_data.get("congress", {}).get("number", "unknown")
+        )
+
+    def _extract_preliminary_item_id(self, list_item: dict[str, Any]) -> str:
+        """Extract preliminary ID from Congressional list item data."""
+        return (
+            list_item.get("number")
+            or list_item.get("id")
+            or f"item_{hash(str(list_item))}"
+        )
+
+    async def store_phase_1_data(
+        self, data: dict[str, Any], batch_id: str | None = None
+    ) -> None:
+        """Store Phase 1 Congressional list data with checkpointing."""
+        if not self.db_pool:
+            return
+
+        # Extract preliminary item ID for checkpoint tracking
+        preliminary_item_id = self._extract_preliminary_item_id(data)
+
+        # Check if this item is already processed
+        if (
+            hasattr(self, "progress_tracker")
+            and self.progress_tracker
+            and self.progress_tracker.should_skip_item(
+                preliminary_item_id, ProcessingPhase.PHASE_1, field_name="list_data"
+            )
+        ):
+            logger.debug(
+                f"Skipping already processed list data for {preliminary_item_id}"
+            )
+            return
+
+        try:
+            await self.store_raw_data(
+                schema=self.get_default_schema(),
+                table=f"{self.data_type_name}_list_raw",
+                items=[data],
+                batch_id=batch_id,
+            )
+
+            # Mark as processed in checkpoint
+            if hasattr(self, "progress_tracker") and self.progress_tracker:
                 self.progress_tracker.increment_processed(
                     preliminary_item_id,
-                    ProcessingPhase.MAIN_ITEMS,
+                    ProcessingPhase.PHASE_1,
                     field_name="list_data",
                 )
 
-            logger.debug(f"Stored list data for item {preliminary_item_id}")
-        else:
-            logger.debug(
-                f"Skipping list data storage for already processed item {preliminary_item_id}"
-            )
+        except Exception as e:
+            logger.error(f"Failed to store Phase 1 data: {e}")
 
-        # Phase 2: Check if full data is already processed and fetch if needed
-        phase_2_complete = False
-        full_data = None
-        actual_item_id = preliminary_item_id  # Will be updated after fetching full data
+    async def store_phase_2_data(
+        self, data: dict[str, Any], batch_id: str | None = None
+    ) -> None:
+        """Store Phase 2 Congressional full data with checkpointing."""
+        if not self.db_pool:
+            return
 
-        if self.progress_tracker:
-            phase_2_complete = self.progress_tracker.should_skip_item(
-                preliminary_item_id, ProcessingPhase.MAIN_ITEMS, field_name="full_data"
-            )
+        # Extract item ID for checkpoint tracking
+        item_id = self.extract_item_id(data)
 
-        if not phase_2_complete:
-            if self.progress_tracker:
-                self.progress_tracker.set_processing_phase(
-                    ProcessingPhase.MAIN_ITEMS, current_field="full_data"
-                )
-
-            full_data = await self.fetch_full_data_with_client(item_url, client)
-            if not full_data:
-                raise ValueError(f"Failed to fetch full data from {item_url}")
-            if isinstance(full_data, list):
-                full_data = full_data[0]
-            # Now we have the actual item ID
-            actual_item_id = self.extract_item_id(full_data)
-            full_data[self.id_field] = actual_item_id
-
-            # Store full data immediately
-            batch_id = str(uuid.uuid4())
-            await self.store_full_data(full_data, batch_id)
-
-            if self.progress_tracker:
-                self.progress_tracker.increment_processed(
-                    actual_item_id, ProcessingPhase.MAIN_ITEMS, field_name="full_data"
-                )
-
-            logger.debug(f"Stored full data for item {actual_item_id}")
-        else:
-            logger.debug(
-                f"Skipping full data processing for already processed item {preliminary_item_id}"
-            )
-            # Still need full_data for Phase 3, so fetch without storing
-            full_data = await self.fetch_full_data_with_client(item_url, client)
-
-            if full_data:
-                if isinstance(
-                    full_data, list
-                ):  # committeeprints endpoint has a strange response structure
-                    full_data = full_data[0]
-                actual_item_id = self.extract_item_id(full_data)
-                full_data[self.id_field] = actual_item_id
-
-        # Phase 3: Check if related data is already processed and fetch if needed
-        phase_3_complete = False
-        related_data = {}
-
-        if self.progress_tracker:
-            phase_3_complete = self.progress_tracker.should_skip_item(
-                actual_item_id, ProcessingPhase.RELATED_ENTITIES
-            )
-
-        if not phase_3_complete and full_data:
-            if self.progress_tracker:
-                self.progress_tracker.set_processing_phase(
-                    ProcessingPhase.RELATED_ENTITIES, current_field="related_data"
-                )
-
-            related_data = await self.fetch_related_data(full_data)
-
-            # Store related data immediately
-            batch_id = str(uuid.uuid4())
-            await self.store_related_data(related_data, actual_item_id, batch_id)
-
-            if self.progress_tracker:
-                self.progress_tracker.increment_processed(
-                    actual_item_id, ProcessingPhase.RELATED_ENTITIES
-                )
-
-            logger.debug(f"Stored related data for item {actual_item_id}")
-        else:
-            logger.debug(
-                f"Skipping related data processing for already processed item {actual_item_id}"
-            )
-
-        # Combine all data for return (even if some phases were skipped)
-        return {
-            self.id_field: actual_item_id,
-            "list_data": list_item,
-            "full_data": full_data or {},
-            "related_data": related_data,
-            "processed_at": datetime.now(UTC).isoformat(),
-            "phases_completed": {
-                "list_data": phase_1_complete or True,  # True if we just processed it
-                "full_data": phase_2_complete or (full_data is not None),
-                "related_data": phase_3_complete or bool(related_data),
-            },
-        }
-
-    async def _store_batch(self, batch_items: list[dict[str, Any]]) -> int:
-        """
-        Store a batch of processed items.
-
-        NOTE: With phase-specific processing, individual items are stored
-        incrementally during processing. This method is primarily for
-        backward compatibility or when batch storage is explicitly needed.
-        """
-        if not batch_items or not self.db_pool:
-            return 0
-
-        batch_id = str(uuid.uuid4())
-        stored_count = 0
+        # Check if this item is already processed
+        if hasattr(self, "progress_tracker") and self.progress_tracker and self.progress_tracker.should_skip_item(
+                item_id, ProcessingPhase.PHASE_2, field_name="full_data"
+            ):
+                logger.debug(f"Skipping already processed full data for {item_id}")
+                return
 
         try:
-            for item in batch_items:
-                # Check if this item was already stored via phase-specific processing
-                phases_completed = item.get("phases_completed", {})
-
-                # If list & full are already stored, avoid re-inserting them; related_data
-                # may legitimately be empty for some data types (e.g. members)
-                if phases_completed.get("list_data") and phases_completed.get(
-                    "full_data"
-                ):
-                    logger.debug(
-                        f"Skipping batch storage for already processed item {item.get(self.id_field)}"
-                    )
-                    continue
-                else:
-                    # Fallback to complete item storage if phases weren't individually stored
-                    if item.get("list_data"):
-                        await self.store_list_data(item["list_data"], batch_id)
-                        stored_count += 1
-                    if item.get("full_data"):
-                        await self.store_full_data(item["full_data"], batch_id)
-                        stored_count += 1
-                    if item.get("related_data"):
-                        await self.store_related_data(
-                            item["related_data"], item[self.id_field], batch_id
-                        )
-                        stored_count += 1
-
-            logger.debug(f"Stored batch {batch_id}: {stored_count} items")
-
-        except Exception as e:
-            logger.error(f"Error storing batch {batch_id}: {e}")
-            raise
-
-        return stored_count
-
-    # =============================================================================
-    # STORAGE METHODS - CONGRESSIONAL DEFAULTS
-    # =============================================================================
-
-    async def store_list_data(
-        self,
-        list_data: dict[str, Any],
-        batch_id: str | None = None,
-        schema: str = "bicam_raw_congressional",
-        table_suffix: str = "list_raw",
-    ) -> None:
-        """Store list data with Congressional defaults."""
-        table_name = f"{self.data_type_name}_{table_suffix}"
-        await self.store_raw_data(
-            schema=schema,
-            table=table_name,
-            items=[list_data],
-            url_field="url",
-            batch_id=batch_id,
-        )
-
-    async def store_full_data(
-        self,
-        full_data: dict[str, Any],
-        batch_id: str | None = None,
-        schema: str = "bicam_raw_congressional",
-        table_suffix: str = "raw",
-    ) -> None:
-        """Store full data with Congressional defaults."""
-        table_name = f"{self.data_type_name}_{table_suffix}"
-
-        # Extract item ID for the record
-        item_id = self.extract_item_id(full_data)
-        full_data_with_id = {
-            **full_data,
-            self.id_field: item_id,
-            "batch_id": batch_id,
-        }
-
-        await self.store_raw_data(
-            schema=schema,
-            table=table_name,
-            items=[full_data_with_id],
-            url_field="url",
-            batch_id=batch_id,
-        )
-
-    async def store_related_data(
-        self,
-        related_data: dict[str, list[dict[str, Any]]],
-        item_id: str,
-        batch_id: str | None = None,
-        schema: str = "bicam_raw_congressional",
-    ) -> None:
-        """Store related data with Congressional defaults."""
-        for relation_type, items in related_data.items():
-            if not items:
-                continue
-
-            table_name = f"{self.data_type_name}_{relation_type}_raw"
-
-            # Add parent item ID to each related item
-            items_with_parent = []
-            for item in items:
-                item_with_parent = {
-                    **item,
-                    self.id_field: item_id,
-                    "batch_id": batch_id,
-                }
-                items_with_parent.append(item_with_parent)
-
             await self.store_raw_data(
-                schema=schema,
-                table=table_name,
-                items=items_with_parent,
-                url_field="url",
+                schema=self.get_default_schema(),
+                table=f"{self.data_type_name}_raw",
+                items=[data],
                 batch_id=batch_id,
             )
+
+            # Mark as processed in checkpoint
+            if hasattr(self, "progress_tracker") and self.progress_tracker:
+                self.progress_tracker.increment_processed(
+                    item_id,
+                    ProcessingPhase.PHASE_2,
+                    field_name="full_data",
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to store Phase 2 data: {e}")
+
+    async def store_phase_3_data(
+        self, data: list[dict[str, Any]], parent_id: str, batch_id: str | None = None
+    ) -> None:
+        """Store Phase 3 Congressional related data in separate tables by data type with checkpointing."""
+        if not self.db_pool or not data:
+            return
+
+        # Check if this item's related data is already processed
+        if (
+            hasattr(self, "progress_tracker")
+            and self.progress_tracker
+            and self.progress_tracker.should_skip_item(
+                parent_id, ProcessingPhase.PHASE_3
+            )
+        ):
+            logger.debug(f"Skipping already processed related data for {parent_id}")
+            return
+
+        try:
+            # Group related data by type and store in separate tables
+            for related_item in data:
+                method_name = related_item.get("type", "unknown")
+                related_data = related_item.get("data", [])
+
+                if related_data:
+                    # Extract the related table name from the method name
+                    # Method names are like "get_bills_actions" -> we want "actions"
+                    # or "get_actions" -> we want "actions"
+                    if method_name.startswith("get_"):
+                        # Remove "get_" prefix
+                        related_table_name = method_name[4:]
+                        # If it still has the data_type prefix (e.g., "bills_actions"), remove it
+                        if related_table_name.startswith(f"{self.data_type_name}_"):
+                            related_table_name = related_table_name[
+                                len(f"{self.data_type_name}_") :
+                            ]
+                    else:
+                        related_table_name = method_name
+
+                    # Create table name: {main_data_type}_{related_table_name}_raw
+                    # e.g., bills_actions_raw, bills_amendments_raw, etc.
+                    table_name = f"{self.data_type_name}_{related_table_name}_raw"
+
+                    # Add parent reference to each data item
+                    for item in related_data:
+                        if isinstance(item, dict):
+                            item["parent_id"] = parent_id
+                            item["data_type"] = related_table_name
+
+                    # Store with parent's source_doc_id for related data
+                    await self.store_raw_data(
+                        schema=self.get_default_schema(),
+                        table=table_name,
+                        items=related_data,
+                        batch_id=batch_id,
+                        parent_source_doc_id=parent_id,  # Pass parent's source_doc_id
+                    )
+
+                    logger.debug(f"Stored {len(related_data)} items in {table_name}")
+
+            # Mark as processed in checkpoint
+            if hasattr(self, "progress_tracker") and self.progress_tracker:
+                self.progress_tracker.increment_processed(
+                    parent_id,
+                    ProcessingPhase.PHASE_3,
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to store Phase 3 data: {e}")
 
     async def store_raw_data(
         self,
@@ -2029,6 +579,7 @@ class CongressionalBaseFetcher(AbstractFetcher):
         url_field: str = "url",
         batch_id: str | None = None,
         conn: asyncpg.Connection | None = None,
+        parent_source_doc_id: str | None = None,
         **kwargs,
     ) -> None:
         """Store raw data with Congressional schema defaults."""
@@ -2037,12 +588,18 @@ class CongressionalBaseFetcher(AbstractFetcher):
 
         if conn:
             await self._execute_store_raw_data(
-                conn, schema, table, items, url_field, batch_id
+                conn, schema, table, items, url_field, batch_id, parent_source_doc_id
             )
         else:
             async with self.db_pool.acquire() as conn:
                 await self._execute_store_raw_data(
-                    conn, schema, table, items, url_field, batch_id
+                    conn,
+                    schema,
+                    table,
+                    items,
+                    url_field,
+                    batch_id,
+                    parent_source_doc_id,
                 )
 
     async def _execute_store_raw_data(
@@ -2053,6 +610,7 @@ class CongressionalBaseFetcher(AbstractFetcher):
         items: list[dict[str, Any]],
         url_field: str,
         batch_id: str | None,
+        parent_source_doc_id: str | None = None,
     ) -> None:
         """Execute raw data storage with proper error handling."""
         if not items:
@@ -2068,8 +626,16 @@ class CongressionalBaseFetcher(AbstractFetcher):
         # Prepare data for storage
         prepared_items = []
         for item in items:
-            # Extract source document ID
-            source_doc_id = item.get(self.id_field)
+            # Extract source document ID using the appropriate method based on table type
+            if table.endswith("_list_raw"):
+                # Phase 1 data: use preliminary ID extraction
+                source_doc_id = self._extract_preliminary_item_id(item)
+            elif parent_source_doc_id is not None:
+                # Phase 3 related data: use parent's source_doc_id
+                source_doc_id = parent_source_doc_id
+            else:
+                # Phase 2 data: use proper item ID extraction
+                source_doc_id = self.extract_item_id(item)
 
             # Extract URL properly
             item_url = item.get(url_field)
@@ -2095,25 +661,41 @@ class CongressionalBaseFetcher(AbstractFetcher):
 
         # Insert data
         try:
-            # Create table if needed
-            columns_ddl = """
-                    id_uuid TEXT PRIMARY KEY,
-                    url TEXT,
-                    batch_id TEXT,
-                    scraped_at TIMESTAMPTZ,
-                    payload JSONB,
-                    endpoint TEXT,
-                    source_doc_id TEXT,
-                    etl_batch_id TEXT
-            """
-            if include_run_id:
-                columns_ddl += ",\n                    run_id TEXT"
-
-            await conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS {schema}.{table} (
-                    {columns_ddl}
+            # Check if table exists first to avoid constraint violations
+            table_exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = $1 AND table_name = $2
                 );
-            """)
+            """,
+                schema,
+                table,
+            )
+
+            if not table_exists:
+                # Create table if needed
+                columns_ddl = """
+                        id_uuid TEXT PRIMARY KEY,
+                        url TEXT,
+                        batch_id TEXT,
+                        scraped_at TIMESTAMPTZ,
+                        payload JSONB,
+                        endpoint TEXT,
+                        source_doc_id TEXT,
+                        etl_batch_id TEXT
+                """
+                if include_run_id:
+                    columns_ddl += ",\n                        run_id TEXT"
+
+                await conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                        {columns_ddl}
+                    );
+                """)
+                logger.debug(f"Created table {schema}.{table}")
+            else:
+                logger.debug(f"Table {schema}.{table} already exists")
 
             # Build dynamic insert statement
             base_cols = [
@@ -2187,161 +769,531 @@ class CongressionalBaseFetcher(AbstractFetcher):
         return json.dumps(obj, **kwargs)
 
     # =============================================================================
-    # HELPER METHODS
+    # CONGRESSIONAL-SPECIFIC OVERRIDES
     # =============================================================================
 
-    async def _update_last_processed_tracking(self, stats: dict[str, Any]) -> None:
-        """Update the last_processed_date and total_count in the congressional_last_processed_dates table."""
-
-        if (
-            not hasattr(self, "client")
-            or not hasattr(self.client, "db_pool")
-            or not self.client.db_pool
-        ):
-            return
-
-        latest_date = stats.get("latest_update_date")
-
-        # Get the current total count from pagination metadata
-        # This represents "what was the total count in the API when we processed"
-        current_total_count = stats.get("total_count")  # From pagination metadata
-        last_processed_count = stats.get(
-            "last_processed_count", 0
-        )  # What was already processed before this run
-        successful_items = stats.get(
-            "successful", 0
-        )  # What we just processed successfully
-
-        # The total count to store is the current total count from the API
-        # This represents the total available when we last processed
-        if current_total_count is not None and successful_items > 0:
-            # Store the current API total count
-            new_total_count = current_total_count
-        else:
-            # No items processed successfully or no total count available
-            new_total_count = None
-
-        if latest_date:
-            try:
-                success = await self.client.update_last_processed_date(
-                    self.data_type_name, latest_date, new_total_count
-                )
-                if success:
-                    if new_total_count is not None:
-                        logger.info(
-                            f"Updated last_processed_date for {self.data_type_name} to {latest_date} "
-                            f"with NEW total count {new_total_count} (was {last_processed_count}, processed {successful_items} new items)"
-                        )
-                    else:
-                        logger.info(
-                            f"Updated last_processed_date for {self.data_type_name} to {latest_date} (no total count)"
-                        )
-                else:
-                    logger.error(
-                        f"Failed to update last_processed_date for {self.data_type_name}"
-                    )
-            except Exception as e:
-                logger.error(
-                    f"Exception updating last_processed_date for {self.data_type_name}: {e}"
-                )
-        else:
-            logger.warning(
-                "No latest_update_date found in stats, not updating last_processed_date"
-            )
-
-    def get_incomplete_items_for_resume(
-        self, available_item_ids: list[str]
-    ) -> dict[str, list[str]]:
+    def _extract_pagination_info(
+        self, page_data: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """
-        Identify items that need specific phases of processing for resume operations.
+        Extract pagination info from Congressional API response.
 
-        Args:
-            available_item_ids: List of item IDs that are available for processing
+        Congressional API typically includes pagination metadata in the response.
+        """
+        if not page_data or not isinstance(page_data, list):
+            return {"total_count": 0, "count_per_page": 0}
+
+        # Check if first item contains pagination metadata
+        first_item = page_data[0] if page_data else {}
+
+        # Congressional API pattern: check for pagination in metadata
+        if "pagination" in first_item:
+            pagination = first_item["pagination"]
+            return {
+                "total_count": pagination.get("count", len(page_data)),
+                "count_per_page": pagination.get("per_page", len(page_data)),
+            }
+
+        # Fallback to batch size
+        return {
+            "total_count": len(page_data),
+            "count_per_page": len(page_data),
+        }
+
+    def _extract_latest_date_from_batch(
+        self, batch: list[dict[str, Any]]
+    ) -> str | None:
+        """
+        Extract the latest date from a batch of Congressional items.
+
+        Congressional data typically uses 'updateDate' or 'lastModifiedDate' fields.
+        """
+        dates = []
+        for item in batch:
+            date_str = (
+                item.get("updateDate")
+                or item.get("lastModifiedDate")
+                or item.get("date")
+            )
+            if date_str:
+                dates.append(date_str)
+
+        if dates:
+            return max(dates)
+        return None
+
+    async def _get_pagination_metadata(
+        self,
+        from_date: str | None,
+        to_date: str | None,
+        limit: int | None,
+        **kwargs,
+    ) -> tuple[int | None, dict[str, Any]]:
+        """
+        Get pagination metadata for optimal parallel distribution.
 
         Returns:
-            Dictionary mapping phase names to lists of item IDs that need that phase:
-            {
-                "list_data": ["item1", "item2"],  # Items missing list data
-                "full_data": ["item3", "item4"],  # Items missing full data
-                "related_data": ["item5", "item6"]  # Items missing related data
-            }
+            Tuple of (pages_to_process, metadata_dict)
         """
-        if not self.progress_tracker:
-            # If no progress tracker, assume all items need all phases
-            return {
-                "list_data": available_item_ids.copy(),
-                "full_data": available_item_ids.copy(),
-                "related_data": available_item_ids.copy(),
-            }
-
-        incomplete_phases = {"list_data": [], "full_data": [], "related_data": []}
-
-        for item_id in available_item_ids:
-            # Check each phase for this item
-            if not self.progress_tracker.should_skip_item(
-                item_id, ProcessingPhase.MAIN_ITEMS, field_name="list_data"
+        try:
+            # Fetch first page to get pagination info
+            async for _first_batch in self.fetch_phase_1_data(
+                from_date=from_date,
+                to_date=to_date,
+                limit=limit or 250,
+                **kwargs,
             ):
-                incomplete_phases["list_data"].append(item_id)
+                if hasattr(self.client, "last_response_metadata"):
+                    metadata = self.client.last_response_metadata
+                    if (
+                        metadata
+                        and isinstance(metadata, dict)
+                        and "pagination" in metadata
+                    ):
+                        pagination = metadata.get("pagination")
+                        if (
+                            pagination
+                            and isinstance(pagination, dict)
+                            and "count" in pagination
+                        ):
+                            total_count = pagination.get("count")
+                            if total_count is not None and isinstance(total_count, int):
+                                page_size = limit or 250
+                                total_pages = (total_count + page_size - 1) // page_size
 
-            if not self.progress_tracker.should_skip_item(
-                item_id, ProcessingPhase.MAIN_ITEMS, field_name="full_data"
-            ):
-                incomplete_phases["full_data"].append(item_id)
+                                metadata_dict = {
+                                    "total_count": total_count,
+                                    "page_size": page_size,
+                                    "total_pages": total_pages,
+                                }
 
-            if not self.progress_tracker.should_skip_item(
-                item_id, ProcessingPhase.RELATED_ENTITIES
-            ):
-                incomplete_phases["related_data"].append(item_id)
+                                return total_pages, metadata_dict
+                break
 
-        return incomplete_phases
+        except Exception as e:
+            logger.warning(f"Could not get pagination metadata: {e}")
 
-    def log_resume_status(self, incomplete_phases: dict[str, list[str]]) -> None:
+        return None, {}
+
+    def _calculate_interleaved_offsets(
+        self, num_sessions: int, total_pages: int, page_size: int, start_offset: int = 0
+    ) -> list[list[int]]:
         """
-        Log the resume status showing what phases need processing.
+        Calculate interleaved offset assignments for load balancing.
 
         Args:
-            incomplete_phases: Dictionary from get_incomplete_items_for_resume()
+            num_sessions: Number of parallel sessions
+            total_pages: Number of pages to process
+            page_size: Items per page
+            start_offset: Starting offset
         """
-        total_list = len(incomplete_phases["list_data"])
-        total_full = len(incomplete_phases["full_data"])
-        total_related = len(incomplete_phases["related_data"])
+        assignments = [[] for _ in range(num_sessions)]
 
-        logger.info(f"Resume status for {self.data_type_name}:")
-        logger.info(f"  Items needing list data processing: {total_list}")
-        logger.info(f"  Items needing full data processing: {total_full}")
-        logger.info(f"  Items needing related data processing: {total_related}")
+        for page_num in range(total_pages):
+            session_id = page_num % num_sessions
+            # Calculate offset starting from the start position
+            offset = start_offset + (page_num * page_size)
+            assignments[session_id].append(offset)
 
-        if total_list == 0 and total_full == 0 and total_related == 0:
-            logger.info("  All items are fully processed!")
-        else:
-            logger.info(
-                f"  Resume will process {max(total_list, total_full, total_related)} items with missing phases"
+        logger.debug(
+            f"Calculated offsets: start_offset={start_offset}, "
+            f"pages={total_pages}, assignments={[(i, len(a)) for i, a in enumerate(assignments)]}"
+        )
+
+        return assignments
+
+    # =============================================================================
+    # CONGRESSIONAL-SPECIFIC PARALLEL PROCESSING
+    # =============================================================================
+
+    async def _execute_redistribution_strategy(
+        self,
+        api_clients: list,
+        distribution_strategy: dict,
+        from_date: str | None,
+        to_date: str | None,
+        limit: int | None,
+        batch_size: int,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """
+        Execute redistribution strategy for Congressional 3-phase processing.
+
+        Congressional redistribution strategy:
+        1. Use all sessions for concurrent page processing (Phase 1 & 2)
+        2. Each session processes its assigned pages completely (list + full + related)
+        3. This maximizes API utilization and ensures all sessions are active
+
+        This approach is more efficient than the abstract fetcher's redistribution
+        because it keeps all sessions busy throughout the entire process.
+        """
+        logger.info("Executing Congressional redistribution strategy")
+
+        # Setup progress tracker for checkpointing
+        self.setup_progress_tracker()
+
+        stats = {
+            "total_processed": 0,
+            "successful": 0,
+            "errors": 0,
+            "redistribution_used": True,
+            "phase1_clients": len(api_clients),
+            "phase2_clients": len(api_clients),
+            "phase3_clients": len(api_clients),
+            "phase2_processed": 0,
+            "phase3_processed": 0,
+        }
+
+        try:
+            # Get pagination metadata for optimal distribution
+            pages_to_process, pagination_metadata = await self._get_pagination_metadata(
+                from_date, to_date, limit, **kwargs
             )
+
+            if pages_to_process is None or pages_to_process == 0:
+                logger.info("No pages to process")
+                return stats
+
+            # Calculate offset assignments for all sessions
+            page_size = pagination_metadata.get("page_size", limit or 250)
+            start_offset = pagination_metadata.get("start_offset", 0)
+            offset_assignments = self._calculate_interleaved_offsets(
+                len(api_clients), pages_to_process, page_size, start_offset
+            )
+
+            logger.info(
+                f"Using all {len(api_clients)} sessions for concurrent page processing"
+            )
+
+            # Each session processes its assigned pages completely (list + full + related)
+            async def process_session_pages(client, assigned_offsets, session_id):
+                session_stats = {
+                    "total_processed": 0,
+                    "successful": 0,
+                    "errors": 0,
+                    "phase2_processed": 0,
+                    "phase3_processed": 0,
+                    "session_id": session_id,
+                }
+
+                logger.info(
+                    f"Session {session_id}: Processing {len(assigned_offsets)} pages"
+                )
+
+                for offset in assigned_offsets:
+                    try:
+                        # Get list data for this page
+                        async for batch in self.fetch_phase_1_data_with_client(
+                            client, from_date, to_date, limit, offset=offset, **kwargs
+                        ):
+                            if not batch:
+                                continue
+
+                            # Process each item in this page completely (list + full + related)
+                            for list_item in batch:
+                                try:
+                                    # Phase 1: Store list data
+                                    await self.store_phase_1_data(list_item)
+                                    session_stats["total_processed"] += 1
+
+                                    # Phase 2: Get and store full data
+                                    url = list_item.get("url")
+                                    if url:
+                                        detailed_data = (
+                                            await self.fetch_phase_2_data_with_client(
+                                                url, client
+                                            )
+                                        )
+                                        if detailed_data:
+                                            await self.store_phase_2_data(detailed_data)
+                                            session_stats["phase2_processed"] += 1
+
+                                            # Phase 3: Get and store related data immediately
+                                            related_data = await self.fetch_phase_3_data_with_client(
+                                                detailed_data, client
+                                            )
+                                            if related_data:
+                                                item_id = self.extract_item_id(
+                                                    detailed_data
+                                                )
+                                                await self.store_phase_3_data(
+                                                    related_data, item_id
+                                                )
+                                                session_stats["phase3_processed"] += 1
+
+                                            session_stats["successful"] += 1
+
+                                except Exception as e:
+                                    logger.error(
+                                        f"Session {session_id} error processing item: {e}"
+                                    )
+                                    session_stats["errors"] += 1
+
+                    except Exception as e:
+                        logger.error(
+                            f"Session {session_id} error processing offset {offset}: {e}"
+                        )
+                        session_stats["errors"] += 1
+
+                logger.info(f"Session {session_id} completed: {session_stats}")
+                return session_stats
+
+            # Process all sessions concurrently
+            tasks = []
+            for session_id, (client, assigned_offsets) in enumerate(
+                zip(api_clients, offset_assignments, strict=False)
+            ):
+                task = process_session_pages(client, assigned_offsets, session_id)
+                tasks.append(task)
+
+            # Execute all sessions concurrently
+            session_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Aggregate results from all sessions
+            for result in session_results:
+                if isinstance(result, Exception):
+                    logger.error(f"Session failed: {result}")
+                    stats["errors"] += 1
+                elif isinstance(result, dict):
+                    stats["total_processed"] += result.get("total_processed", 0)
+                    stats["successful"] += result.get("successful", 0)
+                    stats["errors"] += result.get("errors", 0)
+                    stats["phase2_processed"] += result.get("phase2_processed", 0)
+                    stats["phase3_processed"] += result.get("phase3_processed", 0)
+
+            logger.info(f"Congressional redistribution completed: {stats}")
+            return stats
+
+        except Exception as e:
+            logger.error(f"Congressional redistribution failed: {e}")
+            stats["error"] = str(e)
+            return stats
+
+    async def _execute_standard_parallel_processing(
+        self,
+        api_clients: list,
+        from_date: str | None,
+        to_date: str | None,
+        limit: int | None,
+        batch_size: int,
+        max_concurrent: int,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """
+        Execute standard parallel processing for Congressional 3-phase data.
+
+        Process all phases for each batch to avoid memory issues with large datasets.
+        """
+        logger.info("Executing Congressional standard parallel processing")
+
+        # Setup progress tracker for checkpointing
+        self.setup_progress_tracker()
+
+        stats = {
+            "total_processed": 0,
+            "successful": 0,
+            "errors": 0,
+            "clients_used": len(api_clients),
+            "phase2_processed": 0,
+            "phase3_processed": 0,
+        }
+
+        try:
+            semaphore = asyncio.Semaphore(max_concurrent)
+
+            async def process_detailed_item(item, client):
+                async with semaphore:
+                    try:
+                        # Phase 2: Get detailed data
+                        url = item.get("url")
+                        if not url:
+                            return {"phase2": 0, "phase3": 0}
+
+                        detailed_data = await self.fetch_phase_2_data_with_client(
+                            url, client
+                        )
+                        if not detailed_data:
+                            return {"phase2": 0, "phase3": 0}
+
+                        await self.store_phase_2_data(detailed_data)
+                        phase2_success = 1
+
+                        # Phase 3: Get related data using "get" methods
+                        related_data = await self.fetch_phase_3_data_with_client(
+                            detailed_data, client
+                        )
+                        if related_data:
+                            item_id = self.extract_item_id(detailed_data)
+                            await self.store_phase_3_data(related_data, item_id)
+                            phase3_success = 1
+                        else:
+                            phase3_success = 0
+
+                        return {"phase2": phase2_success, "phase3": phase3_success}
+
+                    except Exception as e:
+                        logger.error(f"Error processing detailed item: {e}")
+                        return {"phase2": 0, "phase3": 0}
+
+            # Process each client's batches immediately with all phases
+            async def process_client_batches(client):
+                client_stats = {"total": 0, "phase2": 0, "phase3": 0, "errors": 0}
+
+                async for batch in self.fetch_phase_1_data_with_client(
+                    client, from_date, to_date, limit, **kwargs
+                ):
+                    if not batch:
+                        continue
+
+                    # Store Phase 1 data for this batch
+                    for item in batch:
+                        await self.store_phase_1_data(item)
+                        client_stats["total"] += 1
+
+                    # Immediately process Phase 2 & 3 for this batch
+                    logger.info(
+                        f"Processing Phase 2 & 3 for batch of {len(batch)} items"
+                    )
+
+                    # Process items in this batch with controlled concurrency
+                    batch_tasks = []
+                    for item in batch:
+                        batch_tasks.append(process_detailed_item(item, client))
+
+                    batch_results = await asyncio.gather(
+                        *batch_tasks, return_exceptions=True
+                    )
+
+                    # Count results for this batch
+                    for result in batch_results:
+                        if isinstance(result, dict):
+                            client_stats["phase2"] += result.get("phase2", 0)
+                            client_stats["phase3"] += result.get("phase3", 0)
+                        else:
+                            client_stats["errors"] += 1
+
+                return client_stats
+
+            # Process all clients concurrently
+            client_tasks = [process_client_batches(client) for client in api_clients]
+            client_results = await asyncio.gather(*client_tasks, return_exceptions=True)
+
+            # Aggregate results from all clients
+            for result in client_results:
+                if isinstance(result, dict):
+                    stats["total_processed"] += result.get("total", 0)
+                    stats["phase2_processed"] += result.get("phase2", 0)
+                    stats["phase3_processed"] += result.get("phase3", 0)
+                    stats["errors"] += result.get("errors", 0)
+                    stats["successful"] += result.get("phase2", 0) + result.get(
+                        "phase3", 0
+                    )
+                else:
+                    logger.error(f"Client processing failed: {result}")
+                    stats["errors"] += 1
+
+            logger.info(
+                f"Congressional standard parallel processing completed: {stats}"
+            )
+            return stats
+
+        except Exception as e:
+            logger.error(f"Congressional standard parallel processing failed: {e}")
+            stats["error"] = str(e)
+            return stats
+
+    def _calculate_distribution_strategy(
+        self,
+        api_clients: list,
+        pages_to_process: int,
+        redistribute_idle_sessions: bool,
+    ) -> dict[str, Any]:
+        """
+        Calculate optimal distribution strategy for Congressional 3-phase processing.
+
+        Congressional redistribution strategy:
+        - Always use redistribution when enabled, regardless of page-to-client ratio
+        - Use all clients for concurrent page processing (Phase 1 & 2)
+        - Redistribute all clients for related data processing (Phase 3)
+        - This maximizes API utilization across all phases
+        """
+        num_clients = len(api_clients)
+
+        if redistribute_idle_sessions:
+            # Congressional redistribution: Use all clients for all phases
+            # This is more efficient than the abstract fetcher's approach
+            strategy = {
+                "type": "redistribution",
+                "use_redistribution": True,
+                "clients_for_phase1": num_clients,  # All clients for page processing
+                "clients_for_redistribution": num_clients,  # All clients for related data
+                "pages_per_client": max(1, pages_to_process // num_clients),
+            }
+        else:
+            # Standard distribution (no redistribution)
+            pages_per_client = max(1, pages_to_process // num_clients)
+            strategy = {
+                "type": "standard",
+                "use_redistribution": False,
+                "clients_for_phase1": num_clients,
+                "clients_for_redistribution": 0,
+                "pages_per_client": pages_per_client,
+            }
+
+        return strategy
 
     async def get_generic_related_data(
         self,
         full_data: dict[str, Any],
+        related_table_name: str = None,
         field_name: str = None,
-        expected_key: str | list[str] = None,
+        list_key: str | list[str] = None,
     ) -> list[dict[str, Any]]:
         """
         Generic method to fetch related data from URLs in full_data.
 
         Args:
             full_data: Complete item data containing URL fields
-            field_name: Field name containing the URL (e.g., "actions", "amendments")
-            expected_key: Expected response key or list of keys
+            related_table_name: Name of the related table (e.g., "actions") - will be combined with data_type_name
+            field_name: Field name containing the URL (e.g., "actions", "amendments") - overrides config
+            list_key: Expected response key or list of keys - overrides config
 
         Returns:
             List of related data items
         """
-        # Use the field_name and expected_key from method parameters
-        # If not provided, use sensible defaults from the main config
-        if not field_name:
-            field_name = self.main_config.api.outer_field
+        # Try to get configuration from the related table if specified
+        related_config = None
+        if related_table_name:
+            try:
+                from ....libs.data_type_registry import get_global_registry
 
-        if not expected_key:
-            expected_key = self.main_config.api.expected_key
+                registry = get_global_registry()
+                # Construct the full related table name: {data_type_name}_{related_table_name}
+                full_related_table_name = f"{self.data_type_name}_{related_table_name}"
+                related_config = registry.get_related_table_config(
+                    self.data_type_name, full_related_table_name
+                )
+            except Exception as e:
+                logger.debug(
+                    f"Could not load config for related table {full_related_table_name}: {e}"
+                )
+
+        # Use provided parameters or fall back to config values
+        if not field_name:
+            if related_config and related_config.api.api_endpoint:
+                field_name = related_config.api.api_endpoint
+            else:
+                field_name = (
+                    self.config.api.api_endpoint if self.config else self.data_type_name
+                )
+
+        if not list_key:
+            if related_config and related_config.api.list_key:
+                list_key = related_config.api.list_key
+            else:
+                list_key = (
+                    self.config.api.list_key if self.config else self.data_type_name
+                )
 
         if field_name not in full_data:
             return []
@@ -2352,13 +1304,9 @@ class CongressionalBaseFetcher(AbstractFetcher):
 
         url = field_data["url"]
         try:
-            # Ensure expected_key is passed as a list
-            expected_key_list = (
-                [expected_key] if isinstance(expected_key, str) else expected_key
-            )
-            return await self.fetch_related_data_with_client(
-                url, expected_key_list, self.client
-            )
+            # Ensure list_key is passed as a list
+            list_key_list = [list_key] if isinstance(list_key, str) else list_key
+            return await self.client.retrieve_related_data_from_url(url, list_key_list)
         except Exception as e:
             logger.error(f"Error fetching {field_name} from {url}: {e}")
             return []

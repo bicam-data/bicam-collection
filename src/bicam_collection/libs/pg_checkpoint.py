@@ -216,7 +216,7 @@ class PostgresCheckpointManager:  # noqa: D101 – external API mirrors sqlite v
         scraper_type: str,
         data_type: str,
         item_id: str,
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> None:
@@ -239,7 +239,7 @@ class PostgresCheckpointManager:  # noqa: D101 – external API mirrors sqlite v
         scraper_type: str,
         data_type: str,
         item_id: str,
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> bool:
@@ -266,7 +266,7 @@ class PostgresCheckpointManager:  # noqa: D101 – external API mirrors sqlite v
         item_id: str,
         error_message: str,
         error_details: str = "",
-        phase: ProcessingPhase = ProcessingPhase.MAIN_ITEMS,
+        phase: ProcessingPhase = ProcessingPhase.PHASE_1,
         field_name: str = "",
         relation_type: str = "",
     ) -> None:
@@ -311,9 +311,7 @@ class PostgresCheckpointManager:  # noqa: D101 – external API mirrors sqlite v
             created_at=r["created_at"].isoformat(),
             updated_at=r["updated_at"].isoformat(),
             processing_state=ProcessingState(
-                phase=ProcessingPhase(
-                    ps.get("phase", ProcessingPhase.MAIN_ITEMS.value)
-                ),
+                phase=ProcessingPhase(ps.get("phase", ProcessingPhase.PHASE_1.value)),
                 item_index=ps.get("item_index", 0),
                 item_total=ps.get("item_total", 0),
                 field_index=ps.get("field_index", 0),
@@ -345,7 +343,7 @@ class PostgresCheckpointManager:  # noqa: D101 – external API mirrors sqlite v
         # Fresh processing_state json
         fresh_state = json.dumps(
             {
-                "phase": ProcessingPhase.MAIN_ITEMS.value,
+                "phase": ProcessingPhase.PHASE_1.value,
                 "item_index": 0,
                 "item_total": 0,
                 "field_index": 0,
@@ -401,6 +399,16 @@ class PostgresCheckpointManager:  # noqa: D101 – external API mirrors sqlite v
         self, data_type: str, stage_name: str | None = None
     ) -> list[CheckpointData]:
         """Get checkpoints for a specific data type, optionally filtered by stage."""
+        # Get the data source (scraper_type) for this data type
+        from .data_type_router import get_global_registry
+
+        try:
+            registry = get_global_registry()
+            scraper_type = registry.get_data_source(data_type)
+        except Exception as e:
+            logger.warning(f"Could not determine scraper_type for {data_type}: {e}")
+            scraper_type = "congressional"  # Default fallback
+
         if stage_name:
             # Based on the HierarchicalProgressTracker.create_for_stage method:
             # - scraping: data_type = "bills"
@@ -418,10 +426,10 @@ class PostgresCheckpointManager:  # noqa: D101 – external API mirrors sqlite v
             rows = self._execute(
                 f"""
                 SELECT * FROM {self.schema}.checkpoints
-                WHERE data_type = %s
+                WHERE scraper_type = %s AND data_type = %s
                 ORDER BY created_at DESC
                 """,
-                (target_data_type,),
+                (scraper_type, target_data_type),
                 fetch=True,
             )
         else:
@@ -430,11 +438,10 @@ class PostgresCheckpointManager:  # noqa: D101 – external API mirrors sqlite v
             rows = self._execute(
                 f"""
                 SELECT * FROM {self.schema}.checkpoints 
-                WHERE data_type = %s 
-                   OR data_type LIKE %s
+                WHERE scraper_type = %s AND (data_type = %s OR data_type LIKE %s)
                 ORDER BY created_at DESC
                 """,
-                (data_type, f"{data_type}_%"),
+                (scraper_type, data_type, f"{data_type}_%"),
                 fetch=True,
             )
 

@@ -9,14 +9,13 @@ GovInfo-specific implementations including:
 - GovInfo API patterns
 """
 
-from .govinfo_base_cleaner import GovInfoBaseCleaner
-from .govinfo_base_database_normalizer import GovInfoBaseDatabaseNormalizer
+# Import shared base classes from abstract module
+from ...abstract import BaseCleaner, BaseDatabaseNormalizer, BaseSpecializedAssets
 from .govinfo_base_fetcher import GovInfoBaseFetcher
-from .govinfo_base_specialized_assets import GovInfoBaseSpecializedAssets
 
 __all__ = [
     "GovInfoBaseFetcher",
-    "GovInfoBaseDatabaseNormalizer",
-    "GovInfoBaseCleaner",
-    "GovInfoBaseSpecializedAssets",
+    "BaseDatabaseNormalizer",
+    "BaseCleaner",
+    "BaseSpecializedAssets",
 ]

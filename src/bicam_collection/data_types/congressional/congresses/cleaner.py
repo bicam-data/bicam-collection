@@ -21,17 +21,14 @@ PERFORMANCE FEATURES:
 import logging
 from typing import Any
 
-import asyncpg
-
-from ....libs.run_tracking import RunManager
-from ..base import CongressionalBaseCleaner
+from ...abstract.base_cleaner import BaseCleaner
 
 logger = logging.getLogger(__name__)
 
 
-class CongressesCleaner(CongressionalBaseCleaner):
+class CongressesCleaner(BaseCleaner):
     """
-    Congresses-specific cleaner that extends CongressionalBaseCleaner with congresses-specific cleaning logic.
+    Congresses-specifi   cleaner that extends BaseCleaner with congresses-specific cleaning logic.
 
     Provides specialized cleaning methods for all congresses-related data types
     and handles multi-table processing for complex relationships.
@@ -39,34 +36,26 @@ class CongressesCleaner(CongressionalBaseCleaner):
 
     def __init__(
         self,
-        config_path: str | None = None,
-        db_pool: asyncpg.Pool | None = None,
-        checkpoint_manager=None,
-        run_manager: RunManager | None = None,
         data_type_name: str = "congresses",
+        system_name: str = "congressional",
         staging_schema: str = "bicam_staging_congressional",
         production_schema: str = "bicam_congressional",
+        **kwargs,
     ):
         """
         Initialize congresses cleaner using base class.
 
         Args:
-            config_path: Path to configuration file
-            db_pool: Database connection pool
-            checkpoint_manager: Checkpoint manager for progress tracking
-            run_manager: Run manager for run tracking
             data_type_name: Data type name (defaults to "congresses")
             staging_schema: Source staging schema name
             production_schema: Target production schema name
         """
         super().__init__(
-            config_path=config_path,
-            db_pool=db_pool,
-            checkpoint_manager=checkpoint_manager,
-            run_manager=run_manager,
             data_type_name=data_type_name,
             staging_schema=staging_schema,
             production_schema=production_schema,
+            system_name=system_name,
+            **kwargs,
         )
 
         # Map data types that span or alias multiple staging tables.
@@ -164,7 +153,6 @@ class CongressesCleaner(CongressionalBaseCleaner):
             "end_date": self.standardize_date(cleaned.get("enddate")),
         }
         return filtered_cleaned
-
 
     # =============================================================================
     # CONGRESS-SPECIFIC POST-PROCESSING METHODS

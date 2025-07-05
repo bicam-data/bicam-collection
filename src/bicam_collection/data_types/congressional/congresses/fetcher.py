@@ -86,13 +86,16 @@ class CongressesFetcher(CongressionalBaseFetcher):
         """
         Fetch list data using a specific client.
         """
+        # Use the new configuration structure
+        api_config = self.config.api if self.config else None
+        endpoint = api_config.api_endpoint if api_config else "congress"
+
         async for batch in client.retrieve_data_list(
-            data_type=self.outer_api_field,
+            data_type=endpoint,
             from_date=from_date,
             to_date=to_date,
             limit=limit or 250,  # Always maximize API efficiency
             offset=offset,
-            abnormal_key="congresses",
             **kwargs,
         ):
             yield batch
@@ -101,6 +104,8 @@ class CongressesFetcher(CongressionalBaseFetcher):
         self, item_url: str, client: CongressionalAPIClient
     ) -> dict[str, Any] | None:
         """Fetch complete congress data from Congressional URL."""
-        return await client.retrieve_full_data_from_url(
-            item_url, expected_key="congress"
-        )
+        # Use the new configuration structure
+        api_config = self.config.api if self.config else None
+        full_key = api_config.full_key if api_config else "congress"
+
+        return await client.retrieve_full_data_from_url(item_url, full_key=full_key)

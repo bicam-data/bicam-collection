@@ -71,6 +71,15 @@ class DataTypeSchema(BaseModel):
         default_factory=list, description="Related entity fields"
     )
 
+    # API configuration
+    api_endpoint: str | None = Field(None, description="API endpoint for requests")
+    list_key: str | list[str] | None = Field(
+        None, description="Key(s) to access list of items in response"
+    )
+    full_key: str | None = Field(
+        None, description="Key to access full data item in response"
+    )
+
     # Processing configuration
     batch_size: int = Field(1000, description="Batch size for processing")
     retry_attempts: int = Field(3, description="Number of retry attempts")
@@ -246,6 +255,10 @@ class ScrapingSchema(BaseModel):
                 id_fields=dt_config.get("id_fields", []),
                 nested_fields=nested_fields,
                 related_fields=related_fields,
+                # API configuration - extract from nested api section if present
+                api_endpoint=dt_config.get("api", {}).get("api_endpoint"),
+                list_key=dt_config.get("api", {}).get("list_key"),
+                full_key=dt_config.get("api", {}).get("full_key"),
             )
             data_types.append(data_type)
 
@@ -300,8 +313,9 @@ class SchemaManager:
 
             # Columns - also sorted for determinism
             dt_od["id_fields"] = sorted(dt.id_fields)
-            dt_od["expected_key"] = dt.expected_key
-            dt_od["outer_api_field"] = dt.outer_api_field
+            dt_od["list_key"] = dt.list_key
+            dt_od["full_key"] = dt.full_key
+            dt_od["api_endpoint"] = dt.api_endpoint
             dt_od["fields"] = [
                 f.model_dump(mode="json")
                 for f in sorted(dt.fields, key=lambda x: x.name)

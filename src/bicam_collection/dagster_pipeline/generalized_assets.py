@@ -408,9 +408,9 @@ def create_staging_data_asset(data_type: str):
             try:
                 # Initialize normalizer
                 normalizer_class = registry.get_normalizer_class(data_type)
-                config_path = registry.get_config_file(data_type)
                 normalizer = normalizer_class(
-                    config_path=config_path,
+                    data_type_name=data_type,
+                    system_name=data_source,
                     db_pool=db_pool,
                     checkpoint_manager=checkpoint_manager,
                     run_manager=run_manager,
@@ -599,9 +599,9 @@ def create_production_data_asset(data_type: str):
             try:
                 # Initialize cleaner
                 cleaner_class = registry.get_cleaner_class(data_type)
-                config_path = registry.get_config_file(data_type)
                 cleaner = cleaner_class(
-                    config_path=config_path,
+                    data_type_name=data_type,
+                    system_name=data_source,
                     db_pool=db_pool,
                     checkpoint_manager=checkpoint_manager,
                     run_manager=run_manager,
@@ -950,8 +950,12 @@ async def _get_item_ids_from_staging_data(
             # Query the staging data table for unique IDs
             staging_table = f"bicam_staging_{data_source}.{data_type}"
 
-            # Use data_type specific ID field (e.g., bill_id, amendment_id, etc.)
-            id_field = f"{data_type.rstrip('s')}_id"  # bills -> bill_id, amendments -> amendment_id
+            # Get the proper ID field from the data type config
+            from bicam_collection.libs.data_type_registry import get_global_registry
+
+            registry = get_global_registry()
+            config = registry.get_data_type_config(data_type)
+            id_field = config.id_field
 
             rows = await conn.fetch(f"""
                 SELECT DISTINCT {id_field}

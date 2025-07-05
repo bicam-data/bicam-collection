@@ -2,8 +2,9 @@
   description: Congressional congresses main data
 
   api:
-    expected_key: congresses
-    outer_field: congress
+    list_key: congresses
+    full_key: congress
+    api_endpoint: congress
     page_size: 250
     retry_attempts: 3
 
