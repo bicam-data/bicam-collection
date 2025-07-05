@@ -418,6 +418,7 @@ class OptimizedParallelProcessor:
                         try:
                             # Phase 1: Store list data
                             await fetcher.store_phase_1_data(item)
+                            print(f"Item: {item}")
 
                             # Phase 2: Get and store full data
                             url = item.get("url")
@@ -451,7 +452,7 @@ class OptimizedParallelProcessor:
                             processed += 1
 
                         except Exception as e:
-                            logger.error(f"Error processing item: {e}")
+                            logger.error(f"Error processing item: {e}", exc_info=True)
                             worker_stats["errors"] += 1
 
                     # Check if we should switch keys preemptively
