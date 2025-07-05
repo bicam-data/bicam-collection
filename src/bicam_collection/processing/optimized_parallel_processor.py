@@ -417,7 +417,6 @@ class OptimizedParallelProcessor:
                     for item in batch:
                         try:
                             # Phase 1: Store list data
-                            print(f"Item: {item}")
                             await fetcher.store_phase_1_data(item)
 
                             # Phase 2: Get and store full data
