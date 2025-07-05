@@ -95,10 +95,11 @@ class CongressionalBaseFetcher(BaseFetcher):
             limit=limit if not kwargs.get("pagination_request") else 0,
             **kwargs,
         ):
-            if batch:
-                yield batch
-            else:
-                yield self._extract_list_items(batch)
+            yield (
+                batch
+                if kwargs.get("pagination_request")
+                else self._extract_list_items(batch)
+            )
 
     async def fetch_phase_1_data_with_client(
         self, client, **kwargs
