@@ -530,7 +530,6 @@ class CongressionalBaseFetcher(BaseFetcher):
                 pagination_request=True,
                 **kwargs,
             ):
-                print(f"Page: {page}")
                 first_page = page
                 break
 
