@@ -846,7 +846,7 @@ class OptimizedFetcherStorage:
                             f"PHASE 3 STORAGE: Item {i}.{j} - record_data is not a dict: {type(record_data)}"
                         )
 
-                logger.info(
+                logger.debug(
                     f"PHASE 3 STORAGE: Item {i} - Processed {len(item_data)} records for type '{item_type}'"
                 )
             else:

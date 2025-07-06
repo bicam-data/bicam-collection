@@ -679,7 +679,7 @@ class OptimizedParallelProcessor:
                     offset += (
                         batch_processed  # Use actual processed count, not batch_size
                     )
-                    logger.debug(
+                    logger.info(
                         f"Worker {worker_id} updated offset: {old_offset} -> {offset} (processed {batch_processed} items)"
                     )
 
