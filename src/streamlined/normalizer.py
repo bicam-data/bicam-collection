@@ -89,7 +89,7 @@ class StreamlinedNormalizer:
         self.normalizer_storage = OptimizedNormalizerStorage(
             storage_manager=storage_manager,
             target_schema=target_schema,
-            data_type=data_type
+            data_type=data_type,
         )
 
         # Create staging checkpoint helper
@@ -190,13 +190,19 @@ class StreamlinedNormalizer:
                     try:
                         # Try to get config for the related data type
                         related_data_type = f"{data_type}_{related_table}"
-                        related_config = self.registry.get_data_type_config(related_data_type)
+                        related_config = self.registry.get_data_type_config(
+                            related_data_type
+                        )
                     except Exception:
                         # If no specific config, check if it's in the main config
                         pass
 
                     # Skip if no raw table exists for this related table
-                    if related_config and hasattr(related_config, 'create_raw') and not related_config.create_raw:
+                    if (
+                        related_config
+                        and hasattr(related_config, "create_raw")
+                        and not related_config.create_raw
+                    ):
                         logger.info(
                             f"Skipping {related_table} - no raw table (create_raw: False)"
                         )
@@ -242,23 +248,23 @@ class StreamlinedNormalizer:
                     staging_checkpoint.mark_table_processed(table_name)
                     results["tables_processed"] += 1
 
-            # Phase 3: Extract lists from main and related tables
-            logger.info("Extracting lists to separate tables")
+            # Phase 3: Clean up JSON columns that were already extracted in Phase 1
+            logger.info(
+                "Cleaning up JSON columns that were already extracted in Phase 1"
+            )
 
-            extract_stats = await self._extract_all_lists(
+            cleanup_stats = await self._cleanup_extracted_json_columns(
                 db_pool,
                 data_type,
                 target_schema,
                 config,
                 staging_checkpoint,
                 extract_checkpoint,
-                batch_size,
-                max_concurrent,
                 rerun,
             )
 
-            results["lists_extracted"] = extract_stats["lists_extracted"]
-            results["errors"] += extract_stats["errors"]
+            results["lists_extracted"] = cleanup_stats["columns_cleaned"]
+            results["errors"] += cleanup_stats["errors"]
 
             # Update final checkpoint state
             jsonb_checkpoint.processed_items = results["main_records_processed"]
@@ -309,7 +315,7 @@ class StreamlinedNormalizer:
                     )
                     """,
                     schema,
-                    table_name.lower()
+                    table_name.lower(),
                 )
                 return result
         except Exception as e:
@@ -536,7 +542,9 @@ class StreamlinedNormalizer:
                 checkpoint.total_items = count_result
                 staging_checkpoint.save_checkpoint(checkpoint)
         except Exception as e:
-            logger.error(f"Could not count records in {source_schema}.{source_table}: {e}")
+            logger.error(
+                f"Could not count records in {source_schema}.{source_table}: {e}"
+            )
             return stats
 
         # Process in batches with offset for resume
@@ -554,7 +562,9 @@ class StreamlinedNormalizer:
                 async with db_pool.acquire() as conn:
                     rows = await conn.fetch(query)
             except Exception as e:
-                logger.error(f"Could not fetch records from {source_schema}.{source_table}: {e}")
+                logger.error(
+                    f"Could not fetch records from {source_schema}.{source_table}: {e}"
+                )
                 stats["errors"] += 1
                 break
 
@@ -648,7 +658,9 @@ class StreamlinedNormalizer:
         if main_table_exists:
             tables_to_process.append(config.table_name)
         else:
-            logger.warning(f"Main table {target_schema}.{config.table_name} does not exist")
+            logger.warning(
+                f"Main table {target_schema}.{config.table_name} does not exist"
+            )
 
         # Process related tables (only those that actually exist in staging)
         if hasattr(config, "related_tables") and config.related_tables:
@@ -657,7 +669,9 @@ class StreamlinedNormalizer:
                 if await self._check_table_exists(db_pool, target_schema, table_name):
                     tables_to_process.append(table_name)
                 else:
-                    logger.info(f"Skipping list extraction for {table_name} - table does not exist in staging")
+                    logger.info(
+                        f"Skipping list extraction for {table_name} - table does not exist in staging"
+                    )
 
         for table_name in tables_to_process:
             # Get columns that are JSON arrays
@@ -666,7 +680,31 @@ class StreamlinedNormalizer:
             )
 
             for column_name in list_columns:
-                # Check if already extracted
+                # Create target table name for this list
+                target_table = f"{table_name}_{column_name}"
+
+                # Check if the target list table already exists and has data
+                # This indicates lists were already extracted in Phase 1
+                list_table_exists = await self._check_table_exists(
+                    db_pool, target_schema, target_table
+                )
+
+                if list_table_exists:
+                    # Check if table has data
+                    async with db_pool.acquire() as conn:
+                        count = await conn.fetchval(
+                            f"SELECT COUNT(*) FROM {target_schema}.{target_table}"
+                        )
+
+                    if count > 0:
+                        logger.info(
+                            f"List table {target_schema}.{target_table} already exists with {count} records, skipping extraction"
+                        )
+                        # Mark as extracted to prevent future runs
+                        staging_checkpoint.mark_list_extracted(table_name, column_name)
+                        continue
+
+                # Check if already extracted via checkpoint
                 if not rerun and staging_checkpoint.should_skip_list_extraction(
                     table_name, column_name
                 ):
@@ -708,9 +746,110 @@ class StreamlinedNormalizer:
 
         return stats
 
-    async def _check_table_exists(
-        self, db_pool, schema: str, table_name: str
-    ) -> bool:
+    async def _cleanup_extracted_json_columns(
+        self,
+        db_pool,
+        data_type: str,
+        target_schema: str,
+        config,
+        staging_checkpoint,
+        checkpoint,
+        rerun: bool,
+    ) -> dict[str, Any]:
+        """Clean up JSON columns that were already extracted to separate tables."""
+        stats = {"columns_cleaned": 0, "errors": 0}
+
+        # Get all tables to process
+        tables_to_process = []
+
+        # Always process the main table if it exists
+        main_table_exists = await self._check_table_exists(
+            db_pool, target_schema, config.table_name
+        )
+        if main_table_exists:
+            tables_to_process.append(config.table_name)
+        else:
+            logger.warning(
+                f"Main table {target_schema}.{config.table_name} does not exist"
+            )
+
+        # Process related tables (only those that actually exist in staging)
+        if hasattr(config, "related_tables") and config.related_tables:
+            for rt in config.related_tables:
+                table_name = f"{data_type}_{rt}"
+                if await self._check_table_exists(db_pool, target_schema, table_name):
+                    tables_to_process.append(table_name)
+                else:
+                    logger.info(
+                        f"Skipping cleanup for {table_name} - table does not exist in staging"
+                    )
+
+        for table_name in tables_to_process:
+            # Get columns that are JSON arrays
+            list_columns = await self._get_list_columns(
+                db_pool, target_schema, table_name
+            )
+
+            for column_name in list_columns:
+                # Create target table name for this list
+                target_table = f"{table_name}_{column_name}"
+
+                # Check if the target list table exists and has data
+                list_table_exists = await self._check_table_exists(
+                    db_pool, target_schema, target_table
+                )
+
+                if list_table_exists:
+                    # Check if table has data
+                    async with db_pool.acquire() as conn:
+                        count = await conn.fetchval(
+                            f"SELECT COUNT(*) FROM {target_schema}.{target_table}"
+                        )
+
+                    if count > 0:
+                        logger.info(
+                            f"List table {target_schema}.{target_table} exists with {count} records, cleaning up JSON column {table_name}.{column_name}"
+                        )
+
+                        # Drop the JSON column since it's been extracted
+                        try:
+                            async with db_pool.acquire() as conn:
+                                await conn.execute(
+                                    f"ALTER TABLE {target_schema}.{table_name} DROP COLUMN IF EXISTS {column_name}"
+                                )
+
+                            stats["columns_cleaned"] += 1
+                            logger.info(
+                                f"Dropped JSON column {table_name}.{column_name}"
+                            )
+
+                            # Mark as cleaned up
+                            staging_checkpoint.mark_list_extracted(
+                                table_name, column_name
+                            )
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error dropping column {table_name}.{column_name}: {e}"
+                            )
+                            stats["errors"] += 1
+                    else:
+                        logger.info(
+                            f"List table {target_schema}.{target_table} exists but is empty, skipping cleanup"
+                        )
+                else:
+                    logger.info(
+                        f"List table {target_schema}.{target_table} does not exist, skipping cleanup"
+                    )
+
+                # Update checkpoint
+                checkpoint.current_table = table_name
+                checkpoint.current_field = column_name
+                staging_checkpoint.save_checkpoint(checkpoint)
+
+        return stats
+
+    async def _check_table_exists(self, db_pool, schema: str, table_name: str) -> bool:
         """Check if a table exists in the database."""
         try:
             async with db_pool.acquire() as conn:
@@ -722,7 +861,7 @@ class StreamlinedNormalizer:
                     )
                     """,
                     schema,
-                    table_name.lower()
+                    table_name.lower(),
                 )
                 return result
         except Exception as e:

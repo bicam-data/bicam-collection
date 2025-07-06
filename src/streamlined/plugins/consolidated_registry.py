@@ -13,7 +13,7 @@ This replaces the complex 3-layer system with a single, focused registry.
 import dataclasses
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -261,14 +261,14 @@ class ConsolidatedRegistry:
             self._normalizer_plugins[data_type] = plugin
         return plugin
 
-    def get_custom_logic_plugin(self, data_type: str) -> Any | None:
+    def get_custom_logic_plugin(self, data_type: str, stage: Literal["fetching", "cleaning"]) -> Any | None:
         """Get or create custom logic plugin for data type."""
         self._ensure_initialized()
 
         if data_type in self._custom_logic_plugins:
             return self._custom_logic_plugins[data_type]
 
-        plugin = self._create_custom_logic_plugin(data_type)
+        plugin = self._create_custom_logic_plugin(data_type, stage)
         if plugin:
             self._custom_logic_plugins[data_type] = plugin
         return plugin
@@ -330,12 +330,18 @@ class ConsolidatedRegistry:
             logger.warning(f"Error creating normalizer plugin for {data_type}: {e}")
             return None
 
-    def _create_custom_logic_plugin(self, data_type: str) -> Any | None:
+    def _create_custom_logic_plugin(self, data_type: str, stage: Literal["fetching", "cleaning"]) -> Any | None:
         """Create custom logic plugin for data type."""
         if data_type not in self._data_types:
             return None
 
         data_source = self._data_types[data_type]["data_source"]
+        if stage == "fetching":
+            logic_class_name = f"{data_type.title()}FetcherLogic"
+        elif stage == "cleaning":
+            logic_class_name = f"{data_type.title()}CleanerLogic"
+        else:
+            raise ValueError(f"Unknown stage: {stage}")
 
         try:
             # Try to import the specific custom logic class for this data type
@@ -346,8 +352,7 @@ class ConsolidatedRegistry:
 
                 module = importlib.import_module(module_path)
 
-                # Look for the FetcherLogic class (e.g., BillsFetcherLogic)
-                logic_class_name = f"{data_type.title()}FetcherLogic"
+                # Look for the custom logic class (e.g., BillsFetcherLogic)
                 if hasattr(module, logic_class_name):
                     logic_class = getattr(module, logic_class_name)
                     return logic_class()

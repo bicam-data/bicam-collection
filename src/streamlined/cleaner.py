@@ -16,6 +16,7 @@ from .libs.hierarchical_checkpoint_system import (
     ProcessingStage,
 )
 from .plugins.consolidated_registry import get_consolidated_registry
+from .processing.optimized_storage_manager import OptimizedCleanerStorage
 from .resources.coordinator import ResourceCoordinator
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class StreamlinedCleaner:
         max_workers: int = None,
         rerun: bool = False,
         resume: bool = True,
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Clean data for a specific data type using plugin system with checkpoint support.
@@ -87,7 +88,9 @@ class StreamlinedCleaner:
         # Get custom logic plugin for this data type
         custom_logic = self._get_custom_logic_plugin(data_type)
         if not custom_logic:
-            logger.warning(f"No custom logic plugin found for {data_type}, using generic cleaning")
+            logger.warning(
+                f"No custom logic plugin found for {data_type}, using generic cleaning"
+            )
 
         # Get data type configuration
         try:
@@ -105,10 +108,11 @@ class StreamlinedCleaner:
             }
 
         # Initialize cleaner storage adapter
-        cleaner_storage = storage_manager.get_cleaner_storage(
+        cleaner_storage = OptimizedCleanerStorage(
+            storage_manager=storage_manager,
             staging_schema=staging_schema,
             production_schema=production_schema,
-            data_type=data_type
+            data_type=data_type,
         )
 
         # Setup cleaning checkpoint
@@ -136,7 +140,9 @@ class StreamlinedCleaner:
 
         try:
             # Get tables to process from custom logic or config
-            tables_to_process = self._get_tables_to_process(data_type, custom_logic, config)
+            tables_to_process = self._get_tables_to_process(
+                data_type, custom_logic, config
+            )
 
             if not tables_to_process:
                 logger.warning(f"No tables found to process for {data_type}")
@@ -144,7 +150,9 @@ class StreamlinedCleaner:
                 results["duration"] = time.time() - start_time
                 return results
 
-            logger.info(f"Found {len(tables_to_process)} tables to process for {data_type}")
+            logger.info(
+                f"Found {len(tables_to_process)} tables to process for {data_type}"
+            )
 
             # Process each table (potentially in parallel)
             table_results = await self._process_tables(
@@ -157,7 +165,7 @@ class StreamlinedCleaner:
                 rerun,
                 resume,
                 cleaner_storage,
-                config
+                config,
             )
 
             # Aggregate results
@@ -196,13 +204,15 @@ class StreamlinedCleaner:
         if data_type in self._custom_logic_cache:
             return self._custom_logic_cache[data_type]
 
-        plugin = self.plugin_registry.get_custom_logic_plugin(data_type)
+        plugin = self.plugin_registry.get_custom_logic_plugin(data_type, "cleaning")
         if plugin:
             self._custom_logic_cache[data_type] = plugin
 
         return plugin
 
-    def _get_tables_to_process(self, data_type: str, custom_logic: Any, config: Any) -> list[str]:
+    def _get_tables_to_process(
+        self, data_type: str, custom_logic: Any, config: Any
+    ) -> list[str]:
         """Get list of tables to process for this data type."""
         tables = []
 
@@ -240,7 +250,7 @@ class StreamlinedCleaner:
         rerun: bool,
         resume: bool,
         cleaner_storage: Any,
-        config: Any
+        config: Any,
     ) -> dict[str, dict[str, Any]]:
         """Process multiple tables potentially in parallel."""
         if max_workers is None:
@@ -251,8 +261,15 @@ class StreamlinedCleaner:
         async def process_table_with_semaphore(table):
             async with semaphore:
                 return await self._process_single_table(
-                    table, data_type, custom_logic, cleaning_checkpoint,
-                    chunk_size, rerun, resume, cleaner_storage, config
+                    table,
+                    data_type,
+                    custom_logic,
+                    cleaning_checkpoint,
+                    chunk_size,
+                    rerun,
+                    resume,
+                    cleaner_storage,
+                    config,
                 )
 
         # Process all tables
@@ -261,12 +278,21 @@ class StreamlinedCleaner:
             # Skip if already processed (unless rerun)
             if not rerun and resume and cleaning_checkpoint.should_skip_table(table):
                 logger.info(f"Skipping already processed table {table}")
-                tasks.append((table, {"success": True, "records_processed": 0, "skipped": True}))
+                tasks.append(
+                    (table, {"success": True, "records_processed": 0, "skipped": True})
+                )
             else:
                 tasks.append(process_table_with_semaphore(table))
 
         # Wait for all tasks
-        results = await asyncio.gather(*[t if asyncio.iscoroutine(t) else asyncio.create_task(asyncio.coroutine(lambda t=t: t)()) for t in tasks])
+        results = await asyncio.gather(
+            *[
+                t
+                if asyncio.iscoroutine(t)
+                else asyncio.create_task(asyncio.coroutine(lambda t=t: t)())
+                for t in tasks
+            ]
+        )
 
         # Convert to dict
         return dict(results) if all(isinstance(r, tuple) for r in results) else {}
@@ -281,7 +307,7 @@ class StreamlinedCleaner:
         rerun: bool,
         resume: bool,
         cleaner_storage: Any,
-        config: Any
+        config: Any,
     ) -> tuple[str, dict[str, Any]]:
         """Process a single table with streaming and checkpoints."""
         logger.info(f"Processing table {table} for data type {data_type}")
@@ -291,7 +317,7 @@ class StreamlinedCleaner:
             "chunks_processed": 0,
             "errors": 0,
             "start_time": time.time(),
-            "success": False
+            "success": False,
         }
 
         try:
@@ -300,17 +326,27 @@ class StreamlinedCleaner:
             start_offset = checkpoint_data["last_offset"] if checkpoint_data else 0
 
             # Use optimized storage for streaming
-            order_by = config.schema.id_fields[0] if config and config.schema.id_fields else None
+            order_by = (
+                config.schema.id_fields[0]
+                if config and config.schema.id_fields
+                else None
+            )
 
             async for chunk in cleaner_storage.stream_staging_data(
                 table_name=table,
                 batch_size=chunk_size,
                 order_by=order_by,
-                checkpoint_offset=start_offset if resume else 0
+                checkpoint_offset=start_offset if resume else 0,
             ):
                 # Process chunk of records
                 chunk_result = await self._process_chunk(
-                    chunk, table, data_type, custom_logic, rerun, cleaner_storage, config
+                    chunk,
+                    table,
+                    data_type,
+                    custom_logic,
+                    rerun,
+                    cleaner_storage,
+                    config,
                 )
 
                 stats["records_processed"] += chunk_result.get("records_processed", 0)
@@ -322,7 +358,7 @@ class StreamlinedCleaner:
                     checkpoint = cleaning_checkpoint.cm.get_or_create_checkpoint(
                         ProcessingStage.CLEANING,
                         CleaningPhase.APPLY_RULES.value,
-                        data_type
+                        data_type,
                     )
                     checkpoint.processed_items = stats["records_processed"]
                     checkpoint.current_table = table
@@ -344,7 +380,7 @@ class StreamlinedCleaner:
                 CleaningPhase.APPLY_RULES.value,
                 data_type,
                 table,
-                str(e)
+                str(e),
             )
 
         stats["duration"] = time.time() - stats["start_time"]
@@ -360,7 +396,7 @@ class StreamlinedCleaner:
         custom_logic: Any,
         rerun: bool,
         cleaner_storage: Any,
-        config: Any
+        config: Any,
     ) -> dict[str, Any]:
         """Process a chunk of records."""
         stats = {"records_processed": 0, "errors": 0}
@@ -385,7 +421,9 @@ class StreamlinedCleaner:
                 stats["records_processed"] += 1
 
             except Exception as e:
-                logger.error(f"Error cleaning record {record.get('id', 'UNKNOWN')}: {e}")
+                logger.error(
+                    f"Error cleaning record {record.get('id', 'UNKNOWN')}: {e}"
+                )
                 stats["errors"] += 1
 
         # Store cleaned records using optimized bulk insert
@@ -394,28 +432,26 @@ class StreamlinedCleaner:
                 for target_table, cleaned_records in records_by_table.items():
                     # Get primary keys from config if available
                     primary_keys = []
-                    if config and hasattr(config.schema, 'id_fields'):
+                    if config and hasattr(config.schema, "id_fields"):
                         primary_keys = config.schema.id_fields
-
+                    # logger.info(f"Storing chunk: target_table: {target_table}, cleaned_records: {cleaned_records}")
                     stored_count = await cleaner_storage.bulk_insert_production(
                         table_name=target_table,
                         records=cleaned_records,
                         upsert=rerun,
-                        primary_keys=primary_keys
+                        primary_keys=primary_keys,
                     )
-                    logger.debug(f"Stored {stored_count} cleaned records in {target_table}")
+                    logger.debug(
+                        f"Stored {stored_count} cleaned records in {target_table}"
+                    )
             except Exception as e:
-                logger.error(f"Error storing chunk: {e}")
+                logger.error(f"Error storing chunk: {e}", exc_info=True)
                 stats["errors"] += len(chunk)
 
         return stats
 
     async def _clean_single_record(
-        self,
-        record: dict[str, Any],
-        table: str,
-        data_type: str,
-        custom_logic: Any
+        self, record: dict[str, Any], table: str, data_type: str, custom_logic: Any
     ) -> tuple[dict[str, Any], str]:
         """Clean a single record using custom logic."""
         # Clear any previous override
@@ -423,36 +459,30 @@ class StreamlinedCleaner:
 
         # Try custom logic first
         if custom_logic:
-            # Look for specific cleaning method
-            method_name = f"_clean_{table}_singular"
-            if hasattr(custom_logic, method_name):
-                # Call the custom cleaning method
-                cleaned_data = await getattr(custom_logic, method_name)(record)
+            # Look for specific cleaning method - try both table-specific and data-type-specific
+            method_names = [
+                f"_clean_{table}_singular",
+                f"_clean_{data_type}_singular",
+            ]
 
-                # Check if custom logic set a target table override
-                if hasattr(custom_logic, "_target_table_override"):
-                    self._target_table_override = custom_logic._target_table_override
+            for method_name in method_names:
+                if hasattr(custom_logic, method_name):
+                    # Call the custom cleaning method
+                    cleaned_data = await getattr(custom_logic, method_name)(record)
 
-                target_table = self._target_table_override or table
-                return cleaned_data, target_table
+                    # Check if custom logic set a target table override
+                    if hasattr(custom_logic, "_target_table_override"):
+                        self._target_table_override = (
+                            custom_logic._target_table_override
+                        )
 
-        # Fallback to generic cleaning
-        cleaned_data = self._clean_generic(record)
+                    target_table = self._target_table_override or table
+                    return cleaned_data, target_table
+
+        # Fallback to generic cleaning - just return the record as-is for now
+        # This ensures we don't lose data even without custom logic
+        cleaned_data = record.copy()
         return cleaned_data, table
-
-    def _clean_generic(self, record: dict[str, Any]) -> dict[str, Any]:
-        """Generic record cleaning."""
-        cleaned = record.copy()
-
-        # Basic cleaning operations
-        for key, value in cleaned.items():
-            if isinstance(value, str):
-                # Clean whitespace
-                cleaned[key] = value.strip() if value else None
-            elif value == "":
-                cleaned[key] = None
-
-        return cleaned
 
     async def _run_post_processing(
         self,
@@ -460,7 +490,7 @@ class StreamlinedCleaner:
         custom_logic: Any,
         cleaning_checkpoint: CleaningCheckpoint,
         rerun: bool,
-        resume: bool
+        resume: bool,
     ) -> dict[str, Any]:
         """Run post-processing operations."""
         if not custom_logic:
@@ -471,7 +501,11 @@ class StreamlinedCleaner:
             return {"status": "skipped", "reason": "no post-processing method"}
 
         # Check if already processed
-        if not rerun and resume and cleaning_checkpoint.should_skip_table(f"{data_type}_post_process"):
+        if (
+            not rerun
+            and resume
+            and cleaning_checkpoint.should_skip_table(f"{data_type}_post_process")
+        ):
             return {"status": "skipped", "reason": "already processed"}
 
         try:
@@ -513,7 +547,7 @@ class StreamlinedCleaner:
                 "data_type": data_type,
                 "cleaning_progress": cleaning_progress,
                 "checkpoint_available": bool(cleaning_progress),
-                "status": "ready"
+                "status": "ready",
             }
         except Exception as e:
             logger.error(f"Failed to get cleaning status: {e}")

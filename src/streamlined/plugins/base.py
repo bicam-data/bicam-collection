@@ -6,10 +6,17 @@ base classes with shared functionality. These protocols ensure consistency acros
 different data sources while allowing for custom implementations.
 """
 
+import html
 import logging
+import re
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
+from dateutil.parser import parse as parse_date
+
 logger = logging.getLogger(__name__)
+
+
 
 
 @runtime_checkable
@@ -76,6 +83,214 @@ class NormalizerPlugin(Protocol):
         """Extract list data from normalized tables."""
         ...
 
+
+
+class BaseCleaningUtilities:
+    """Static utility methods for data cleaning operations."""
+
+    @staticmethod
+    def standardize_date(date_value: Any) -> datetime | None:
+        """
+        Standardize date values to consistent timezone-aware datetime objects.
+
+        Args:
+            date_value: Raw date value in various formats
+
+        Returns:
+            Standardized timezone-aware datetime object (UTC) or None if invalid
+        """
+        if not date_value or date_value in ["", "null", "None"]:
+            return None
+
+        if isinstance(date_value, datetime):
+            # Ensure existing datetime objects are timezone-aware
+            if date_value.tzinfo is None:
+                # Assume timezone-naive datetime is in UTC
+                return date_value.replace(tzinfo=UTC)
+            return date_value
+
+        if isinstance(date_value, str):
+            try:
+                parsed_date = parse_date(date_value)
+                # Ensure parsed datetime is timezone-aware
+                if parsed_date.tzinfo is None:
+                    # Assume timezone-naive datetime is in UTC
+                    return parsed_date.replace(tzinfo=UTC)
+                return parsed_date
+            except Exception:
+                logger.warning(f"Could not parse date: {date_value}")
+                return None
+
+        return None
+
+    @staticmethod
+    def clean_long_text(text: str | None) -> str | None:
+        """
+        Clean and normalize long text fields, including HTML content.
+
+        Args:
+            text: Raw text to clean (may contain HTML)
+
+        Returns:
+            Cleaned text or None
+        """
+        if not text:
+            return None
+
+        # Store original for fallback
+        original_text = text
+
+        try:
+            # First, handle HTML content if present
+            if "<" in text and ">" in text:
+                # Remove DOCTYPE declarations and XML namespaces
+                cleaned = re.sub(r"<!DOCTYPE[^>]*>", "", text, flags=re.IGNORECASE)
+                cleaned = re.sub(r"<\?xml[^>]*\?>", "", cleaned, flags=re.IGNORECASE)
+
+                # Convert HTML paragraph and line break tags to newlines for structure preservation
+                cleaned = re.sub(r"</p>", "\n\n", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"<br\s*/?>", "\n", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"</div>", "\n", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"</section>", "\n\n", cleaned, flags=re.IGNORECASE)
+
+                # Remove all remaining HTML tags
+                cleaned = re.sub(r"<[^>]+>", "", cleaned)
+
+                # Decode HTML entities (like &nbsp;, &lt;, &gt;, etc.)
+                cleaned = html.unescape(cleaned)
+            else:
+                cleaned = text
+
+            # Remove common artifacts
+            cleaned = cleaned.replace("\x00", "")  # Null bytes
+            cleaned = cleaned.replace("\ufffd", "")  # Unicode replacement character
+            cleaned = cleaned.replace("\u00ad", "")  # Soft hyphens
+
+            # Normalize line endings
+            cleaned = cleaned.replace("\r\n", "\n")
+            cleaned = cleaned.replace("\r", "\n")
+
+            # Clean up excessive whitespace while preserving paragraph structure
+            # First normalize multiple newlines (preserve double newlines for paragraphs)
+            cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+            # Remove spaces at the beginning/end of lines
+            cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+            cleaned = re.sub(r"\n[ \t]+", "\n", cleaned)
+
+            # Replace multiple spaces/tabs with single space
+            cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+
+            # Clean up any remaining excessive whitespace
+            cleaned = cleaned.strip()
+
+            # Remove common legislative document artifacts
+            cleaned = re.sub(r"\[\[Page\s+[^\]]+\]\]", "", cleaned)  # Page markers
+            cleaned = re.sub(r"¿+", "", cleaned)  # Strange characters sometimes in congressional docs
+
+            # Final whitespace cleanup
+            cleaned = re.sub(r"\n\s*\n\s*\n", "\n\n", cleaned)  # Normalize paragraph breaks
+
+            return cleaned if cleaned else None
+
+        except Exception as e:
+            # If cleaning fails for any reason, fall back to basic cleaning
+            logger.warning(f"Advanced text cleaning failed, using basic cleaning: {e}")
+            basic_cleaned = re.sub(r"\s+", " ", original_text.strip())
+            basic_cleaned = basic_cleaned.replace("\x00", "")
+            return basic_cleaned if basic_cleaned else None
+
+    @staticmethod
+    def standardize_chamber(chamber: str | None) -> str | None:
+        """
+        Standardize chamber values to consistent format.
+
+        Args:
+            chamber: Raw chamber value
+
+        Returns:
+            Standardized chamber value
+        """
+        if not chamber:
+            return None
+
+        chamber_lower = chamber.lower().strip()
+
+        if chamber_lower in ["house", "h", "house of representatives"]:
+            return "house"
+        elif chamber_lower in ["senate", "s"]:
+            return "senate"
+        elif chamber_lower in ["joint", "both"]:
+            return "joint"
+        elif chamber_lower in ["nochamber", "no chamber"]:
+            return "nochamber"
+        else:
+            return chamber  # Return original if not recognized
+
+    @staticmethod
+    def safe_int(
+        value: Any, default: int | None = None
+    ) -> int | float | None:
+        """
+        Safely convert value to integer.
+
+        Args:
+            value: Value to convert
+            default: Default value if conversion fails
+
+        Returns:
+            Integer value or default
+        """
+        if value is None or value == "":
+            return default
+
+        try:
+            if isinstance(value, str):
+                # Remove common non-numeric characters
+                cleaned = re.sub(r"[^\d-]", "", value)
+                if cleaned:
+                    return int(cleaned)
+            else:
+                return int(value)
+        except (ValueError, TypeError):
+            pass
+
+        return default
+
+    @staticmethod
+    def safe_float(value: Any, default: float | None = None) -> float | None:
+        """
+        Safely convert value to float.
+
+        Args:
+            value: Value to convert
+            default: Default value if conversion fails
+
+        Returns:
+            Float value or default
+        """
+        if value is None or value == "":
+            return default
+
+        try:
+            if isinstance(value, str):
+                # Remove common non-numeric characters except decimal point
+                cleaned = re.sub(r"[^\d.-]", "", value)
+                if cleaned:
+                    return float(cleaned)
+            else:
+                return float(value)
+        except (ValueError, TypeError):
+            pass
+
+        return default
+
+# Convenience functions that can be imported directly
+standardize_date = BaseCleaningUtilities.standardize_date
+clean_long_text = BaseCleaningUtilities.clean_long_text
+standardize_chamber = BaseCleaningUtilities.standardize_chamber
+safe_int = BaseCleaningUtilities.safe_int
+safe_float = BaseCleaningUtilities.safe_float
 
 # =============================================================================
 # BASE IMPLEMENTATION CLASSES

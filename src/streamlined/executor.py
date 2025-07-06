@@ -237,16 +237,17 @@ class StreamlinedExecutor:
         logger.info(f"Executing production phase for {data_type}")
 
         # Use streamlined cleaner with plugin system
-        results = await self.cleaner.clean_data_type(
-            data_type=data_type, **kwargs
-        )
+        results = await self.cleaner.clean_data_type(data_type=data_type, **kwargs)
 
         return {
             "phase": "production",
-            "items_cleaned": results.get("items_cleaned", 0),
-            "items_validated": results.get("items_validated", 0),
+            "items_cleaned": results.get("total_records_processed", 0),
+            "items_validated": results.get(
+                "total_records_processed", 0
+            ),  # Same as cleaned for now
             "duration": results.get("duration", 0),
-            "status": "completed",
+            "status": results.get("status", "completed"),
+            "errors": results.get("total_errors", 0),
         }
 
     async def get_execution_status(self, data_type: str) -> dict[str, Any]:

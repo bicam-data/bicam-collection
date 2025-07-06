@@ -12,7 +12,13 @@ The plugin system automatically wraps existing implementations:
 All existing custom methods are preserved with no code changes required.
 """
 
-from .base import CleanerPlugin, FetcherPlugin, NormalizerPlugin
+from .base import (
+    BaseCleaningUtilities,
+    CleanerPlugin,
+    CongressionalBaseFetcherLogic,
+    FetcherPlugin,
+    NormalizerPlugin,
+)
 from .congressional import (
     CongressionalFetcherPlugin,
 )
@@ -24,6 +30,8 @@ from .govinfo import (
 )
 
 __all__ = [
+    "BaseCleaningUtilities",
+    "CongressionalBaseFetcherLogic",
     "FetcherPlugin",
     "CleanerPlugin",
     "NormalizerPlugin",

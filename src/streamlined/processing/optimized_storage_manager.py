@@ -10,6 +10,7 @@ This module provides efficient batched storage with:
 """
 
 import asyncio
+import contextlib
 import hashlib
 import io
 import json
@@ -26,12 +27,13 @@ import asyncpg
 from asyncpg.pool import Pool
 
 from ..libs.hierarchical_checkpoint_system import (
+    CleaningPhase,
+    FetchingPhase,
     HierarchicalCheckpointManager,
     ProcessingStage,
     StagingCheckpoint,
     StagingPhase,
 )
-import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -914,8 +916,29 @@ class OptimizedFetcherStorage:
         item_id: str,
         total_processed: int,
     ):
-        """Save checkpoint using SQLite."""
-        self.storage.save_checkpoint(data_type, phase, offset, item_id, total_processed)
+        """Save checkpoint using hierarchical system."""
+        # Map old phase names to new hierarchical phases
+        if phase == "list_items":
+            stage = ProcessingStage.FETCHING
+            phase_name = FetchingPhase.LIST_ITEMS.value
+        elif phase == "full_data":
+            stage = ProcessingStage.FETCHING
+            phase_name = FetchingPhase.FULL_DATA.value
+        elif phase == "related_data":
+            stage = ProcessingStage.FETCHING
+            phase_name = FetchingPhase.RELATED_DATA.value
+        else:
+            # Default to fetching stage for unknown phases
+            stage = ProcessingStage.FETCHING
+            phase_name = phase
+
+        checkpoint = self.storage.checkpoint_manager.get_or_create_checkpoint(
+            stage, phase_name, data_type
+        )
+        checkpoint.current_offset = offset
+        checkpoint.current_item_id = item_id
+        checkpoint.processed_items = total_processed
+        self.storage.checkpoint_manager.save_checkpoint(checkpoint)
 
 
 class OptimizedNormalizerStorage:
@@ -1213,7 +1236,7 @@ class OptimizedNormalizerStorage:
             for col in missing_columns:
                 try:
                     alter_sql = f"""
-                        ALTER TABLE {self.target_schema}.{table_name} 
+                        ALTER TABLE {self.target_schema}.{table_name}
                         ADD COLUMN {col} TEXT
                     """
                     await conn.execute(alter_sql)
@@ -1250,7 +1273,7 @@ class OptimizedNormalizerStorage:
                     row_values.append("\\N")  # PostgreSQL NULL
                 elif isinstance(value, bool):
                     row_values.append(str(value).lower())
-                elif isinstance(value, (dict, list)):
+                elif isinstance(value, dict | list):
                     # JSON encode complex types
                     json_str = json.dumps(value)
                     # Escape special characters
@@ -1365,11 +1388,10 @@ class OptimizedNormalizerStorage:
         return total_stats
 
 
-
 class OptimizedCleanerStorage:
     """
     Storage adapter for StreamlinedCleaner with production table support.
-    
+
     Handles:
     - Streaming data from staging tables
     - Bulk inserts to production tables
@@ -1382,11 +1404,11 @@ class OptimizedCleanerStorage:
         storage_manager: "OptimizedStorageManager",
         staging_schema: str = "bicam_staging_congressional",
         production_schema: str = "bicam_congressional",
-        data_type: str = None
+        data_type: str = None,
     ):
         """
         Initialize the cleaner storage adapter.
-        
+
         Args:
             storage_manager: The underlying optimized storage manager
             staging_schema: Source schema for staging data
@@ -1413,18 +1435,18 @@ class OptimizedCleanerStorage:
         batch_size: int = 1000,
         order_by: str = None,
         where_clause: str = None,
-        checkpoint_offset: int = 0
+        checkpoint_offset: int = 0,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         """
         Stream data from staging table in batches.
-        
+
         Args:
             table_name: Staging table to read from
             batch_size: Number of records per batch
             order_by: Column to order by (auto-detected if None)
             where_clause: Optional WHERE clause
             checkpoint_offset: Starting offset for resume
-            
+
         Yields:
             Batches of records as dictionaries
         """
@@ -1438,11 +1460,13 @@ class OptimizedCleanerStorage:
                 )
                 """,
                 self.staging_schema,
-                table_name
+                table_name,
             )
 
             if not exists:
-                logger.warning(f"Table {self.staging_schema}.{table_name} does not exist")
+                logger.warning(
+                    f"Table {self.staging_schema}.{table_name} does not exist"
+                )
                 return
 
             # Auto-detect order column if not specified
@@ -1455,7 +1479,7 @@ class OptimizedCleanerStorage:
                     ORDER BY ordinal_position
                     """,
                     self.staging_schema,
-                    table_name
+                    table_name,
                 )
 
                 column_names = [col["column_name"] for col in columns]
@@ -1493,21 +1517,28 @@ class OptimizedCleanerStorage:
                     records_yielded += len(batch)
                     offset += len(batch)
 
-                    # Update checkpoint periodically
+                    # Update checkpoint periodically using hierarchical system
                     if self.data_type and records_yielded % 10000 == 0:
-                        self.storage.save_checkpoint(
-                            self.data_type,
-                            f"cleaning_{table_name}",
-                            offset,
-                            batch[-1].get("id", ""),
-                            records_yielded
+                        checkpoint = (
+                            self.storage.checkpoint_manager.get_or_create_checkpoint(
+                                ProcessingStage.CLEANING,
+                                CleaningPhase.APPLY_RULES.value,
+                                self.data_type,
+                            )
                         )
+                        checkpoint.current_offset = offset
+                        checkpoint.current_item_id = batch[-1].get(self.id_field, "")
+                        checkpoint.processed_items = records_yielded
+                        checkpoint.current_table = table_name
+                        self.storage.checkpoint_manager.save_checkpoint(checkpoint)
 
                     if len(batch) < batch_size:
                         break
 
                 except Exception as e:
-                    logger.error(f"Error streaming {table_name} at offset {offset}: {e}")
+                    logger.error(
+                        f"Error streaming {table_name} at offset {offset}: {e}"
+                    )
                     raise
 
     async def bulk_insert_production(
@@ -1515,7 +1546,7 @@ class OptimizedCleanerStorage:
         table_name: str,
         records: list[dict[str, Any]],
         upsert: bool = False,
-        primary_keys: list[str] = None
+        primary_keys: list[str] = None,
     ) -> int:
         """
         Bulk insert cleaned records to production table.
@@ -1535,7 +1566,7 @@ class OptimizedCleanerStorage:
         async with self.storage.pg_pool.acquire() as conn:
             # Ensure production schema and table exist
             await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self.production_schema}")
-            await self._ensure_production_table(conn, table_name, records[0])
+            await self._ensure_production_table(conn, table_name)
 
             # Use COPY for bulk insert
             if upsert and primary_keys:
@@ -1547,12 +1578,7 @@ class OptimizedCleanerStorage:
                 # Direct COPY for simple inserts
                 return await self._bulk_copy_production(conn, table_name, records)
 
-    async def _ensure_production_table(
-        self,
-        conn: asyncpg.Connection,
-        table_name: str,
-        sample_record: dict[str, Any]
-    ):
+    async def _ensure_production_table(self, conn: asyncpg.Connection, table_name: str):
         """Ensure production table exists with proper schema."""
         cache_key = f"{self.production_schema}.{table_name}"
 
@@ -1570,124 +1596,39 @@ class OptimizedCleanerStorage:
             )
             """,
             self.production_schema,
-            table_name
+            table_name,
         )
 
         if not exists:
-            # Create table based on sample record
-            columns = []
-            for key, value in sample_record.items():
-                # Infer PostgreSQL type from Python type
-                if isinstance(value, bool):
-                    col_type = "BOOLEAN"
-                elif isinstance(value, int):
-                    col_type = "BIGINT"
-                elif isinstance(value, float):
-                    col_type = "DOUBLE PRECISION"
-                elif isinstance(value, dict) or isinstance(value, list):
-                    col_type = "JSONB"
-                else:
-                    col_type = "TEXT"
-
-                columns.append(f"{key} {col_type}")
-
-            create_sql = f"""
-                CREATE TABLE IF NOT EXISTS {self.production_schema}.{table_name} (
-                    {", ".join(columns)}
-                )
-            """
-
-            await conn.execute(create_sql)
-            logger.info(f"Created production table {self.production_schema}.{table_name}")
+            raise Exception(
+                f"Table {self.production_schema}.{table_name} does not exist"
+            )
 
         # Cache existence
         async with self._cache_lock:
             self._prod_schema_cache[cache_key] = True
 
     async def _bulk_copy_production(
-        self,
-        conn: asyncpg.Connection,
-        table_name: str,
-        records: list[dict[str, Any]]
+        self, conn: asyncpg.Connection, table_name: str, records: list[dict[str, Any]]
     ) -> int:
         """Use COPY for fast bulk inserts to production."""
         if not records:
             return 0
 
-        # Get all unique columns
-        all_columns = set()
-        for record in records:
-            all_columns.update(record.keys())
+        # Get all unique columns (optimized)
+        all_columns = set().union(*(record.keys() for record in records))
         columns = sorted(all_columns)
 
-        # Prepare data for COPY
-        output = io.StringIO()
+        # Fast direct conversion to tuples using list comprehension
+        records_data = [tuple(record.get(col) for col in columns) for record in records]
 
-        for record in records:
-            row_values = []
-            for col in columns:
-                value = record.get(col)
-                if value is None:
-                    row_values.append("\\N")
-                elif isinstance(value, bool):
-                    row_values.append("t" if value else "f")
-                elif isinstance(value, (dict, list)):
-                    json_str = json.dumps(value)
-                    # Escape for COPY
-                    json_str = (
-                        json_str.replace("\\", "\\\\")
-                        .replace("\t", "\\t")
-                        .replace("\n", "\\n")
-                        .replace("\r", "\\r")
-                    )
-                    row_values.append(json_str)
-                else:
-                    str_value = str(value)
-                    # Escape for COPY
-                    str_value = (
-                        str_value.replace("\\", "\\\\")
-                        .replace("\t", "\\t")
-                        .replace("\n", "\\n")
-                        .replace("\r", "\\r")
-                    )
-                    row_values.append(str_value)
-
-            output.write("\t".join(row_values) + "\n")
-
-        # Convert to records for copy_records_to_table
-        output.seek(0)
-        records_data = []
-
-        for line in output:
-            if line.strip():
-                values = line.rstrip("\n").split("\t")
-                # Convert back from COPY format
-                processed_values = []
-                for v in values:
-                    if v == "\\N":
-                        processed_values.append(None)
-                    elif v in ("t", "f"):
-                        processed_values.append(v == "t")
-                    else:
-                        # Unescape
-                        v = (
-                            v.replace("\\t", "\t")
-                            .replace("\\n", "\n")
-                            .replace("\\r", "\r")
-                            .replace("\\\\", "\\")
-                        )
-                        processed_values.append(v)
-
-                records_data.append(tuple(processed_values))
-
-        if records_data:
-            await conn.copy_records_to_table(
-                table_name,
-                records=records_data,
-                columns=columns,
-                schema_name=self.production_schema,
-                timeout=300.0
-            )
+        await conn.copy_records_to_table(
+            table_name,
+            records=records_data,
+            columns=columns,
+            schema_name=self.production_schema,
+            timeout=300.0,
+        )
 
         return len(records)
 
@@ -1696,7 +1637,7 @@ class OptimizedCleanerStorage:
         conn: asyncpg.Connection,
         table_name: str,
         records: list[dict[str, Any]],
-        primary_keys: list[str]
+        primary_keys: list[str],
     ) -> int:
         """Perform bulk UPSERT using temporary table."""
         if not records:
@@ -1707,8 +1648,8 @@ class OptimizedCleanerStorage:
         try:
             # Create temp table
             await conn.execute(f"""
-                CREATE TEMP TABLE {temp_table} 
-                AS SELECT * FROM {self.production_schema}.{table_name} 
+                CREATE TEMP TABLE {temp_table}
+                AS SELECT * FROM {self.production_schema}.{table_name}
                 WHERE FALSE
             """)
 
@@ -1773,7 +1714,7 @@ class OptimizedCleanerStorage:
                 )
                 """,
                 self.production_schema,
-                table_name
+                table_name,
             )
 
             if not exists:
@@ -1783,36 +1724,22 @@ class OptimizedCleanerStorage:
             return await conn.fetchval(query)
 
     def get_cleaning_checkpoint(self, table_name: str) -> dict[str, Any] | None:
-        """Get cleaning checkpoint for a specific table."""
+        """Get cleaning checkpoint for a specific table using hierarchical system."""
         if self.data_type:
-            return self.storage.get_checkpoint(
+            # Use hierarchical checkpoint system instead of old simple one
+            checkpoint = self.storage.checkpoint_manager.get_or_create_checkpoint(
+                ProcessingStage.CLEANING,
+                CleaningPhase.APPLY_RULES.value,
                 self.data_type,
-                f"cleaning_{table_name}"
             )
+
+            # Return in the format expected by the cleaner
+            return {
+                "last_offset": checkpoint.current_offset,
+                "last_item_id": checkpoint.current_item_id,
+                "records_processed": checkpoint.processed_items,
+                "timestamp": checkpoint.updated_at.timestamp()
+                if checkpoint.updated_at
+                else None,
+            }
         return None
-
-
-# Add this method to the existing OptimizedStorageManager class
-def get_cleaner_storage(
-    self,
-    staging_schema: str,
-    production_schema: str,
-    data_type: str = None
-) -> OptimizedCleanerStorage:
-    """
-    Get a storage adapter for cleaning operations.
-
-    Args:
-        staging_schema: Source schema
-        production_schema: Target schema
-        data_type: Data type for checkpointing
-
-    Returns:
-        OptimizedCleanerStorage instance
-    """
-    return OptimizedCleanerStorage(
-        self,
-        staging_schema=staging_schema,
-        production_schema=production_schema,
-        data_type=data_type
-    )
