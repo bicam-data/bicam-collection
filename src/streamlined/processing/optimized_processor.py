@@ -501,6 +501,10 @@ class OptimizedParallelProcessor:
             batch_size = min(limit, remaining_records)
             estimated_requests = max(1, batch_size // limit)  # Pages needed
 
+            logger.info(
+                f"Worker {worker_id} processing chunk [{chunk.start_offset}, {chunk.end_offset}] at offset {offset}, batch_size={batch_size}, remaining={remaining_records}"
+            )
+
             # CRITICAL FIX: Keep trying to get a key instead of giving up
             api_key = None
             key_wait_attempts = 0
@@ -524,8 +528,9 @@ class OptimizedParallelProcessor:
                         await asyncio.sleep(wait_time)
                     else:
                         logger.error(
-                            f"Worker {worker_id} failed to get API key after "
-                            f"{max_key_wait_attempts} attempts, abandoning chunk"
+                            f"*** CRITICAL: Worker {worker_id} failed to get API key after "
+                            f"{max_key_wait_attempts} attempts, abandoning chunk [{chunk.start_offset}, {chunk.end_offset}] "
+                            f"at offset {offset}. Processed {processed} items so far."
                         )
                         worker_stats["errors"] += 1
                         return processed  # Return what we've processed so far
@@ -670,7 +675,13 @@ class OptimizedParallelProcessor:
                     await self.key_pool.checkin_key(api_key.key, requests_made)
 
                     # Update offset to next page within chunk range
-                    offset += batch_size
+                    old_offset = offset
+                    offset += (
+                        batch_processed  # Use actual processed count, not batch_size
+                    )
+                    logger.debug(
+                        f"Worker {worker_id} updated offset: {old_offset} -> {offset} (processed {batch_processed} items)"
+                    )
 
                 except Exception as e:
                     logger.error(f"Worker {worker_id} batch processing error: {e}")
@@ -683,9 +694,10 @@ class OptimizedParallelProcessor:
 
                     if rate_limited:
                         logger.info(
-                            f"Worker {worker_id} hit rate limit, will get new key"
+                            f"Worker {worker_id} hit rate limit, will get new key and continue chunk"
                         )
                         # Continue with next iteration to get a new key
+                        # Don't increment offset on rate limit - retry the same batch
                         continue
                     else:
                         # Non-rate-limit error
@@ -705,6 +717,9 @@ class OptimizedParallelProcessor:
                                 2**consecutive_failures
                             )  # Exponential backoff
 
+        logger.info(
+            f"*** SUCCESS: Worker {worker_id} completed chunk [{chunk.start_offset}, {chunk.end_offset}] - processed {processed} items"
+        )
         return processed
 
     async def _report_status(self, work_queue: AdaptiveWorkQueue, interval: int = 30):
