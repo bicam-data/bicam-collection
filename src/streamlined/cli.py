@@ -1,0 +1,890 @@
+"""
+Streamlined Architecture CLI
+
+This module provides a command-line interface for the streamlined architecture,
+allowing direct execution of data processing pipelines without the complex
+8-layer architecture.
+"""
+
+import argparse
+import asyncio
+import logging
+import sys
+
+from .executor import StreamlinedExecutor, execute_streamlined_pipeline
+from .plugins.consolidated_registry import get_consolidated_registry
+from .resources.config import StreamlinedConfig
+from .resources.coordinator import ResourceCoordinator
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """Create argument parser for the streamlined CLI."""
+    parser = argparse.ArgumentParser(
+        description="Streamlined Architecture CLI for Bicam Collection",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s process bills --phases raw staging production
+  %(prog)s process nominations --phases raw --from-date 2024-01-01 --limit 100
+  %(prog)s list-types
+  %(prog)s test-plugins bills
+  %(prog)s status bills
+  %(prog)s list-checkpoints bills
+  %(prog)s clear-checkpoints bills --phases list_items full_data
+  %(prog)s resume-from-checkpoint bills
+        """,
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Process command
+    process_parser = subparsers.add_parser(
+        "process", help="Process data for a specific type"
+    )
+    process_parser.add_argument(
+        "data_type", help="Data type to process (e.g., bills, nominations)"
+    )
+    process_parser.add_argument(
+        "--phases",
+        nargs="+",
+        default=["raw", "staging", "production"],
+        help="Phases to execute (default: raw staging production)",
+    )
+    process_parser.add_argument(
+        "--from-date", help="Start date for data fetching (YYYY-MM-DD)"
+    )
+    process_parser.add_argument(
+        "--to-date", help="End date for data fetching (YYYY-MM-DD)"
+    )
+    process_parser.add_argument(
+        "--limit", type=int, help="Maximum number of items to process"
+    )
+    process_parser.add_argument(
+        "--batch-size", type=int, default=100, help="Batch size for processing"
+    )
+    process_parser.add_argument(
+        "--no-validate", action="store_true", help="Skip validation during cleaning"
+    )
+    process_parser.add_argument(
+        "--no-resume", action="store_true", help="Don't resume from checkpoints"
+    )
+
+    # Parallelization options
+    process_parser.add_argument(
+        "--enable-parallelization",
+        action="store_true",
+        default=True,
+        help="Enable parallel processing (default: True)",
+    )
+    process_parser.add_argument(
+        "--disable-parallelization",
+        action="store_true",
+        help="Disable parallel processing",
+    )
+
+    # Incremental processing options
+    process_parser.add_argument(
+        "--enable-incremental",
+        action="store_true",
+        default=True,
+        help="Enable incremental processing (default: True)",
+    )
+    process_parser.add_argument(
+        "--disable-incremental",
+        action="store_true",
+        help="Disable incremental processing",
+    )
+    process_parser.add_argument(
+        "--fallback-days",
+        type=int,
+        default=30,
+        help="Days to fall back when no previous data found (default: 30)",
+    )
+
+    # List types command
+    list_parser = subparsers.add_parser("list-types", help="List supported data types")
+
+    # Test plugins command
+    test_parser = subparsers.add_parser("test-plugins", help="Test plugin integration")
+    test_parser.add_argument(
+        "data_type", nargs="?", help="Data type to test (optional)"
+    )
+
+    # Status command
+    status_parser = subparsers.add_parser("status", help="Get execution status")
+    status_parser.add_argument("data_type", help="Data type to check status for")
+
+    # Plugin info command
+    info_parser = subparsers.add_parser("plugin-info", help="Get plugin information")
+    info_parser.add_argument("data_type", help="Data type to get plugin info for")
+
+    # Configuration command
+    config_parser = subparsers.add_parser("config", help="Show configuration")
+    config_parser.add_argument(
+        "--validate", action="store_true", help="Validate configuration"
+    )
+
+    # =============================================================================
+    # CHECKPOINT MANAGEMENT COMMANDS
+    # =============================================================================
+
+    # List checkpoints command
+    list_checkpoints_parser = subparsers.add_parser(
+        "list-checkpoints", help="List checkpoints for a data type"
+    )
+    list_checkpoints_parser.add_argument(
+        "data_type", help="Data type to list checkpoints for"
+    )
+    list_checkpoints_parser.add_argument(
+        "--detailed", action="store_true", help="Show detailed checkpoint information"
+    )
+
+    # Clear checkpoints command
+    clear_checkpoints_parser = subparsers.add_parser(
+        "clear-checkpoints", help="Clear checkpoints for a data type"
+    )
+    clear_checkpoints_parser.add_argument(
+        "data_type", help="Data type to clear checkpoints for"
+    )
+    clear_checkpoints_parser.add_argument(
+        "--phases",
+        nargs="+",
+        choices=["list_items", "full_data", "related_data"],
+        help="Specific phases to clear (default: all phases)",
+    )
+    clear_checkpoints_parser.add_argument(
+        "--confirm", action="store_true", help="Skip confirmation prompt"
+    )
+
+    # Resume from checkpoint command
+    resume_parser = subparsers.add_parser(
+        "resume-from-checkpoint", help="Resume processing from checkpoint"
+    )
+    resume_parser.add_argument("data_type", help="Data type to resume processing for")
+    resume_parser.add_argument(
+        "--from-date", help="Start date for data fetching (YYYY-MM-DD)"
+    )
+    resume_parser.add_argument(
+        "--to-date", help="End date for data fetching (YYYY-MM-DD)"
+    )
+    resume_parser.add_argument(
+        "--limit", type=int, help="Maximum number of items to process"
+    )
+    resume_parser.add_argument(
+        "--batch-size", type=int, default=100, help="Batch size for processing"
+    )
+
+    # Checkpoint stats command
+    checkpoint_stats_parser = subparsers.add_parser(
+        "checkpoint-stats", help="Show checkpoint statistics"
+    )
+    checkpoint_stats_parser.add_argument(
+        "data_type", help="Data type to show checkpoint stats for"
+    )
+
+    # Retry failed items command
+    retry_parser = subparsers.add_parser(
+        "retry-failed", help="Retry failed items from checkpoints"
+    )
+    retry_parser.add_argument("data_type", help="Data type to retry failed items for")
+    retry_parser.add_argument(
+        "--max-retries", type=int, default=3, help="Maximum retry attempts (default: 3)"
+    )
+
+    return parser
+
+
+async def command_process(args) -> int:
+    """Process data for a specific type."""
+    logger.info(f"Processing {args.data_type} with phases: {args.phases}")
+
+    try:
+        # Create configuration and coordinator
+        config = StreamlinedConfig.from_env()
+
+        # Enable parallelization if we have multiple API keys
+        # OptimizedParallelProcessor works best with ALL keys in a dynamic pool
+        if len(config.api.keys) > 2:
+            logger.info(
+                f"Enabling parallelization with {len(config.api.keys)} API keys for OptimizedParallelProcessor"
+            )
+            # Enable parallelization with minimal config (OptimizedParallelProcessor ignores sessions)
+            config.parallelization.enabled = True
+            config.parallelization.fetcher = {
+                "congressional": {
+                    "num_sessions": 1,  # Ignored by OptimizedParallelProcessor
+                    "keys_per_session": len(config.api.keys),  # All keys
+                },
+            }
+
+        coordinator = ResourceCoordinator(config)
+
+        # Build kwargs for processing
+        kwargs = {}
+        if args.batch_size:
+            kwargs["batch_size"] = args.batch_size
+        if args.no_validate:
+            kwargs["validate"] = False
+
+        # Handle parallelization options
+        enable_parallelization = (
+            args.enable_parallelization and not args.disable_parallelization
+        )
+        kwargs["enable_parallelization"] = enable_parallelization
+
+        # Handle incremental processing options
+        enable_incremental = args.enable_incremental and not args.disable_incremental
+        kwargs["enable_incremental"] = enable_incremental
+        if args.fallback_days:
+            # Update coordinator config
+            coordinator.config.fallback_days = args.fallback_days
+
+        # Handle checkpoint resume option
+        resume_from_checkpoint = not args.no_resume
+        kwargs["resume_from_checkpoint"] = resume_from_checkpoint
+
+        logger.info(
+            f"Parallelization: {'enabled' if enable_parallelization else 'disabled'}"
+        )
+        logger.info(
+            f"Incremental processing: {'enabled' if enable_incremental else 'disabled'}"
+        )
+        logger.info(
+            f"Resume from checkpoint: {'enabled' if resume_from_checkpoint else 'disabled'}"
+        )
+        if args.fallback_days:
+            logger.info(f"Fallback days: {args.fallback_days}")
+
+        # Execute pipeline
+        results = await execute_streamlined_pipeline(
+            coordinator=coordinator,
+            data_type=args.data_type,
+            phases=args.phases,
+            from_date=args.from_date,
+            to_date=args.to_date,
+            limit=args.limit,
+            **kwargs,
+        )
+
+        # Display results
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"EXECUTION RESULTS for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+        logger.info(f"Status: {results.get('status')}")
+        logger.info(f"Phases: {results.get('phases')}")
+        logger.info(f"Duration: {results.get('duration', 0):.2f} seconds")
+
+        if "metrics" in results:
+            logger.info("\nPhase Metrics:")
+            for phase, metrics in results["metrics"].items():
+                logger.info(f"  {phase}:")
+                for key, value in metrics.items():
+                    if key != "phase":
+                        logger.info(f"    {key}: {value}")
+
+        if results.get("errors"):
+            logger.info("\nErrors:")
+            for error in results["errors"]:
+                logger.info(f"  - {error}")
+
+        return 0 if results.get("status") == "completed" else 1
+
+    except Exception as e:
+        logger.error(f"Processing failed: {e}")
+        return 1
+
+
+async def command_list_types(args) -> int:
+    """List supported data types."""
+    try:
+        registry = get_consolidated_registry()
+        # No need to call auto_register_plugins() as consolidated registry auto-initializes
+
+        supported_types = registry.list_data_types()
+        stats = registry.get_registry_status()
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info("SUPPORTED DATA TYPES")
+        logger.info(f"{'=' * 60}")
+
+        if supported_types:
+            logger.info("Available data types:")
+            for data_type in sorted(supported_types):
+                fetcher = "✓" if data_type in registry._data_types else "✗"
+                cleaner = "✓" if data_type in registry._data_types else "✗"
+                normalizer = "✓" if data_type in registry._data_types else "✗"
+
+                logger.info(f"  {data_type}")
+                logger.info(
+                    f"    Fetcher: {fetcher}  Cleaner: {cleaner}  Normalizer: {normalizer}"
+                )
+        else:
+            logger.info("No supported data types found")
+
+        logger.info("\nPlugin Registry Statistics:")
+        for key, value in stats.items():
+            logger.info(f"  {key}: {value}")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Failed to list types: {e}")
+        return 1
+
+
+async def command_test_plugins(args) -> int:
+    """Test plugin integration."""
+    try:
+        config = StreamlinedConfig.from_env()
+        coordinator = ResourceCoordinator(config)
+
+        from .cleaner import StreamlinedCleaner
+        from .fetcher import StreamlinedFetcher
+        from .normalizer import StreamlinedNormalizer
+
+        fetcher = await StreamlinedFetcher.from_coordinator(coordinator)
+        cleaner = StreamlinedCleaner(coordinator)
+        normalizer = StreamlinedNormalizer(coordinator)
+
+        # Test specific data type or all
+        if args.data_type:
+            data_types = [args.data_type]
+        else:
+            registry = get_consolidated_registry()
+            # No need to call auto_register_plugins() as consolidated registry auto-initializes
+            data_types = registry.get_supported_data_types()
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info("PLUGIN INTEGRATION TESTS")
+        logger.info(f"{'=' * 60}")
+
+        for data_type in data_types:
+            logger.info(f"\nTesting {data_type}:")
+
+            # Test fetcher plugin
+            fetcher_test = await fetcher.test_plugin_integration(data_type)
+            logger.info(
+                f"  Fetcher: {'✓' if fetcher_test.get('plugin_available') else '✗'}"
+            )
+            if fetcher_test.get("error"):
+                logger.info(f"    Error: {fetcher_test['error']}")
+
+            # Test cleaner plugin
+            cleaner_test = await cleaner.test_plugin_integration(data_type)
+            logger.info(
+                f"  Cleaner: {'✓' if cleaner_test.get('plugin_available') else '✗'}"
+            )
+            if cleaner_test.get("error"):
+                logger.info(f"    Error: {cleaner_test['error']}")
+
+            # Test normalizer plugin
+            normalizer_test = await normalizer.test_plugin_integration(data_type)
+            logger.info(
+                f"  Normalizer: {'✓' if normalizer_test.get('plugin_available') else '✗'}"
+            )
+            if normalizer_test.get("error"):
+                logger.info(f"    Error: {normalizer_test['error']}")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Plugin testing failed: {e}")
+        return 1
+
+
+async def command_status(args) -> int:
+    """Get execution status."""
+    try:
+        config = StreamlinedConfig.from_env()
+        coordinator = ResourceCoordinator(config)
+        executor = StreamlinedExecutor(coordinator)
+
+        status = await executor.get_execution_status(args.data_type)
+        plugin_info = executor.get_plugin_info(args.data_type)
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"STATUS for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+
+        logger.info(f"Execution Status: {status.get('status')}")
+        logger.info(f"Last Execution: {status.get('last_execution')}")
+
+        logger.info("\nPlugin Availability:")
+        logger.info(f"  Fetcher: {'✓' if plugin_info.get('fetcher_plugin') else '✗'}")
+        logger.info(f"  Cleaner: {'✓' if plugin_info.get('cleaner_plugin') else '✗'}")
+        logger.info(
+            f"  Normalizer: {'✓' if plugin_info.get('normalizer_plugin') else '✗'}"
+        )
+
+        if status.get("metrics"):
+            logger.info("\nMetrics:")
+            for key, value in status["metrics"].items():
+                logger.info(f"  {key}: {value}")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Status check failed: {e}")
+        return 1
+
+
+async def command_plugin_info(args) -> int:
+    """Get plugin information."""
+    try:
+        config = StreamlinedConfig.from_env()
+        coordinator = ResourceCoordinator(config)
+        executor = StreamlinedExecutor(coordinator)
+
+        plugin_info = executor.get_plugin_info(args.data_type)
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"PLUGIN INFO for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+
+        logger.info(
+            f"Fetcher Plugin: {'✓' if plugin_info.get('fetcher_plugin') else '✗'}"
+        )
+        logger.info(
+            f"Cleaner Plugin: {'✓' if plugin_info.get('cleaner_plugin') else '✗'}"
+        )
+        logger.info(
+            f"Normalizer Plugin: {'✓' if plugin_info.get('normalizer_plugin') else '✗'}"
+        )
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Plugin info failed: {e}")
+        return 1
+
+
+async def command_config(args) -> int:
+    """Show configuration."""
+    try:
+        config = StreamlinedConfig.from_env()
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info("CONFIGURATION")
+        logger.info(f"{'=' * 60}")
+
+        logger.info("Database:")
+        logger.info(f"  Host: {config.database.host}")
+        logger.info(f"  Port: {config.database.port}")
+        logger.info(f"  Database: {config.database.database}")
+        logger.info(f"  Username: {config.database.username}")
+
+        logger.info("\nAPI:")
+        logger.info(f"  Keys: {len(config.api.keys)} configured")
+        logger.info(f"  Rate Limit: {config.api.rate_limit_per_second}/sec")
+        logger.info(f"  Timeout: {config.api.timeout}")
+        logger.info(f"  Max Retries: {config.api.max_retries}")
+
+        logger.info("\nProcessing:")
+        logger.info(f"  Batch Size: {config.processing.batch_size}")
+        logger.info(f"  Max Workers: {config.processing.max_workers}")
+        logger.info(f"  Chunk Size: {config.processing.chunk_size}")
+        logger.info(f"  Page Size: {config.processing.page_size}")
+        logger.info(f"  Max Concurrent: {config.processing.max_concurrent}")
+
+        if args.validate:
+            logger.info("\nValidation:")
+            validation_errors = config.validate()
+            if validation_errors:
+                logger.info("  Errors found:")
+                for error in validation_errors:
+                    logger.info(f"    - {error}")
+                return 1
+            else:
+                logger.info("  ✓ Configuration is valid")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Configuration display failed: {e}")
+        return 1
+
+
+# =============================================================================
+# CHECKPOINT MANAGEMENT COMMANDS
+# =============================================================================
+
+
+async def command_list_checkpoints(args) -> int:
+    """List checkpoints for a data type."""
+    try:
+        from .libs.hierarchical_checkpoint_system import (
+            HierarchicalCheckpointManager,
+        )
+
+        config = StreamlinedConfig.from_env()
+
+        # Create checkpoint manager with proper path
+        checkpoint_manager = HierarchicalCheckpointManager(
+            db_path="data/checkpoints/hierarchical_checkpoints.db"
+        )
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"CHECKPOINTS for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+
+        # Get checkpoint summary using the available method
+        summary = checkpoint_manager.get_progress_summary(args.data_type)
+
+        if not summary:
+            logger.info("No checkpoints found for this data type")
+            return 0
+
+        for stage, phases in summary.items():
+            logger.info(f"\n{stage.upper()} Stage:")
+
+            for phase, info in phases.items():
+                logger.info(f"  {phase}:")
+                logger.info(f"    Processed: {info.get('processed', 0)}")
+                logger.info(f"    Failed: {info.get('failed', 0)}")
+                logger.info(f"    Total: {info.get('total', 0)}")
+
+                if info.get("current_item"):
+                    logger.info(f"    Current Item: {info['current_item']}")
+
+                if info.get("last_updated"):
+                    logger.info(f"    Last Updated: {info['last_updated']}")
+
+        # Show detailed stats if requested
+        if args.detailed:
+            logger.info(f"\n{'=' * 40}")
+            logger.info("DETAILED CHECKPOINT STATS")
+            logger.info(f"{'=' * 40}")
+
+            # Use the same progress summary for detailed stats
+            for stage, phases in summary.items():
+                logger.info(f"\n{stage.upper()} Stage:")
+                for phase, stats in phases.items():
+                    logger.info(f"  {phase}:")
+                    for key, value in stats.items():
+                        logger.info(f"    {key}: {value}")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Failed to list checkpoints: {e}")
+        return 1
+
+
+async def command_clear_checkpoints(args) -> int:
+    """Clear checkpoints for a data type."""
+    try:
+        from .libs.hierarchical_checkpoint_system import (
+            FetchingPhase,
+            HierarchicalCheckpointManager,
+        )
+
+        config = StreamlinedConfig.from_env()
+
+        # Create checkpoint manager with proper path
+        checkpoint_manager = HierarchicalCheckpointManager(
+            db_path="data/checkpoints/hierarchical_checkpoints.db"
+        )
+
+        # Determine which phases to clear
+        phases_to_clear = []
+        if args.phases:
+            phase_map = {
+                "list_items": FetchingPhase.LIST_ITEMS,
+                "full_data": FetchingPhase.FULL_DATA,
+                "related_data": FetchingPhase.RELATED_DATA,
+            }
+            phases_to_clear = [phase_map[phase] for phase in args.phases]
+        else:
+            phases_to_clear = None  # Clear all phases
+
+        # Show what will be cleared
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"CLEAR CHECKPOINTS for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+
+        if phases_to_clear:
+            logger.info(f"Phases to clear: {[p.value for p in phases_to_clear]}")
+        else:
+            logger.info("All phases will be cleared")
+
+        # Get current checkpoint status using available method
+        current_stats = checkpoint_manager.get_progress_summary(args.data_type)
+
+        if current_stats:
+            logger.info("\nCurrent checkpoint status:")
+            for stage, phases in current_stats.items():
+                for phase, stats in phases.items():
+                    if not phases_to_clear or any(
+                        p.value == phase for p in phases_to_clear
+                    ):
+                        logger.info(
+                            f"  {stage}.{phase}: {stats.get('processed', 0)} items processed"
+                        )
+
+        # Confirmation prompt
+        if not args.confirm:
+            response = input(
+                "\nAre you sure you want to clear these checkpoints? (y/N): "
+            )
+            if response.lower() not in ["y", "yes"]:
+                logger.info("Operation cancelled")
+                return 0
+
+        # Clear checkpoints using available method
+        from .libs.hierarchical_checkpoint_system import ProcessingStage
+
+        # Import the stage mapping
+        stage_map = {
+            "fetching": ProcessingStage.FETCHING,
+            "cleaning": ProcessingStage.CLEANING,
+            "staging": ProcessingStage.STAGING,
+        }
+
+        # If specific phases are requested, clear those phases
+        if phases_to_clear:
+            for phase in phases_to_clear:
+                # Clear from fetching stage (where these phases belong)
+                checkpoint_manager.reset_checkpoint(
+                    ProcessingStage.FETCHING, phase.value, args.data_type
+                )
+        else:
+            # Clear all phases by clearing all stages
+            for stage in stage_map.values():
+                # Get all phases for this stage and clear them
+                stage_summary = checkpoint_manager.get_progress_summary(args.data_type)
+                if stage.value in stage_summary:
+                    for phase in stage_summary[stage.value].keys():
+                        checkpoint_manager.reset_checkpoint(
+                            stage, phase, args.data_type
+                        )
+
+        logger.info(f"\n✓ Checkpoints cleared for {args.data_type}")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Failed to clear checkpoints: {e}")
+        return 1
+
+
+async def command_resume_from_checkpoint(args) -> int:
+    """Resume processing from checkpoint."""
+    try:
+        config = StreamlinedConfig.from_env()
+        coordinator = ResourceCoordinator(config)
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"RESUMING FROM CHECKPOINT for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+
+        # Build kwargs for processing
+        kwargs = {
+            "batch_size": args.batch_size,
+            "resume_from_checkpoint": True,  # Force resume
+            "enable_parallelization": len(config.api.keys) > 1,
+        }
+
+        # Execute only the raw phase (fetching) from checkpoint
+        results = await execute_streamlined_pipeline(
+            coordinator=coordinator,
+            data_type=args.data_type,
+            phases=["raw"],  # Only fetching phase
+            from_date=args.from_date,
+            to_date=args.to_date,
+            limit=args.limit,
+            **kwargs,
+        )
+
+        # Display results
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"RESUME RESULTS for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+        logger.info(f"Status: {results.get('status')}")
+        logger.info(f"Duration: {results.get('duration', 0):.2f} seconds")
+
+        if "metrics" in results:
+            for phase, metrics in results["metrics"].items():
+                logger.info(f"\n{phase} metrics:")
+                for key, value in metrics.items():
+                    if key != "phase":
+                        logger.info(f"  {key}: {value}")
+
+        if results.get("errors"):
+            logger.info("\nErrors:")
+            for error in results["errors"]:
+                logger.info(f"  - {error}")
+
+        return 0 if results.get("status") == "completed" else 1
+
+    except Exception as e:
+        logger.error(f"Resume from checkpoint failed: {e}")
+        return 1
+
+
+async def command_checkpoint_stats(args) -> int:
+    """Show checkpoint statistics."""
+    try:
+        from .processing.optimized_processor import OptimizedParallelProcessor
+
+        config = StreamlinedConfig.from_env()
+
+        # Create processor to access checkpoint manager
+        processor = OptimizedParallelProcessor(
+            api_keys=config.api.keys,
+            client_class=None,  # Not needed for checkpoint operations
+        )
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"CHECKPOINT STATS for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+
+        # Get detailed stats
+        stats = processor.get_checkpoint_stats(args.data_type)
+
+        if not stats:
+            logger.info("No checkpoint statistics found for this data type")
+            return 0
+
+        total_processed = 0
+        total_failed = 0
+        total_items = 0
+
+        for phase, phase_stats in stats.items():
+            logger.info(f"\n{phase.upper()}:")
+            logger.info(f"  Processed Items: {phase_stats.get('processed_items', 0)}")
+            logger.info(f"  Failed Items: {phase_stats.get('failed_items', 0)}")
+            logger.info(f"  Total Items: {phase_stats.get('total_items', 0)}")
+            logger.info(f"  Current Offset: {phase_stats.get('current_offset', 0)}")
+
+            if phase_stats.get("current_item_id"):
+                logger.info(f"  Current Item ID: {phase_stats['current_item_id']}")
+
+            if phase_stats.get("last_updated"):
+                logger.info(f"  Last Updated: {phase_stats['last_updated']}")
+
+            # Calculate progress percentage
+            processed = phase_stats.get("processed_items", 0)
+            total = phase_stats.get("total_items", 0)
+            if total > 0:
+                progress = (processed / total) * 100
+                logger.info(f"  Progress: {progress:.1f}%")
+
+            total_processed += processed
+            total_failed += phase_stats.get("failed_items", 0)
+            total_items += total
+
+        # Summary
+        logger.info(f"\n{'=' * 40}")
+        logger.info("SUMMARY")
+        logger.info(f"{'=' * 40}")
+        logger.info(f"Total Processed: {total_processed}")
+        logger.info(f"Total Failed: {total_failed}")
+        logger.info(f"Total Items: {total_items}")
+
+        if total_items > 0:
+            overall_progress = (total_processed / total_items) * 100
+            logger.info(f"Overall Progress: {overall_progress:.1f}%")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Failed to get checkpoint stats: {e}")
+        return 1
+
+
+async def command_retry_failed(args) -> int:
+    """Retry failed items from checkpoints."""
+    try:
+        from .processing.optimized_processor import OptimizedParallelProcessor
+
+        config = StreamlinedConfig.from_env()
+
+        # Create processor to access checkpoint manager
+        processor = OptimizedParallelProcessor(
+            api_keys=config.api.keys,
+            client_class=None,  # Not needed for checkpoint operations
+        )
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"RETRYING FAILED ITEMS for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+
+        # Retry failed items
+        results = await processor.retry_failed_items(args.data_type, args.max_retries)
+
+        logger.info("Retry Results:")
+        logger.info(f"  Items Retried: {results.get('retried', 0)}")
+        logger.info(f"  Errors: {results.get('errors', 0)}")
+
+        if results.get("failed_items"):
+            logger.info("\nFailed Items Found:")
+            for item in results["failed_items"]:
+                logger.info(
+                    f"  - {item.get('item_id', 'unknown')}: {item.get('error_message', 'no message')}"
+                )
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Failed to retry failed items: {e}")
+        return 1
+
+
+async def main() -> int:
+    """Main CLI entry point."""
+    parser = create_parser()
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        return 1
+
+    # Route to appropriate command handler
+    command_handlers = {
+        "process": command_process,
+        "list-types": command_list_types,
+        "test-plugins": command_test_plugins,
+        "status": command_status,
+        "plugin-info": command_plugin_info,
+        "config": command_config,
+        "list-checkpoints": command_list_checkpoints,
+        "clear-checkpoints": command_clear_checkpoints,
+        "resume-from-checkpoint": command_resume_from_checkpoint,
+        "checkpoint-stats": command_checkpoint_stats,
+        "retry-failed": command_retry_failed,
+    }
+
+    handler = command_handlers.get(args.command)
+    if not handler:
+        logger.error(f"Unknown command: {args.command}")
+        return 1
+
+    try:
+        return await handler(args)
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        return 130
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        return 1
+
+
+def cli_main():
+    """Synchronous entry point for CLI."""
+    try:
+        return asyncio.run(main())
+    except KeyboardInterrupt:
+        return 130
+    except Exception as e:
+        logger.error(f"CLI failed: {e}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(cli_main())

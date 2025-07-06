@@ -24,10 +24,60 @@ class WorkChunk:
     data_type: str = ""
     metadata: dict = None
 
+    def __post_init__(self):
+        """Validate work chunk parameters with enhanced validation."""
+        if self.start_offset < 0:
+            raise ValueError(f"start_offset must be >= 0, got {self.start_offset}")
+        if self.end_offset <= self.start_offset:
+            raise ValueError(
+                f"end_offset ({self.end_offset}) must be > start_offset ({self.start_offset})"
+            )
+        if self.page_size <= 0:
+            raise ValueError(f"page_size must be > 0, got {self.page_size}")
+
+        # Initialize metadata if not provided
+        if self.metadata is None:
+            self.metadata = {}
+
+        # Enhanced validation for page alignment
+        chunk_size = self.end_offset - self.start_offset
+
+        # Check if chunk is properly sized
+        if chunk_size < self.page_size // 4:
+            logger.warning(
+                f"Chunk {self.chunk_id} is very small ({chunk_size} records, "
+                f"< 25% of page size {self.page_size}). This may be inefficient."
+            )
+
+        # Check page boundary alignment for better performance
+        if chunk_size % self.page_size != 0:
+            remainder = chunk_size % self.page_size
+            logger.debug(
+                f"Chunk {self.chunk_id} has partial page: {chunk_size} records "
+                f"({chunk_size // self.page_size} full pages + {remainder} records)"
+            )
+
+        # Add alignment metadata
+        self.metadata.update(
+            {
+                "chunk_size": chunk_size,
+                "is_page_aligned": chunk_size % self.page_size == 0,
+                "full_pages": chunk_size // self.page_size,
+                "partial_page_records": chunk_size % self.page_size,
+                "alignment_efficiency": (chunk_size // self.page_size)
+                * self.page_size
+                / chunk_size,
+            }
+        )
+
     @property
     def num_pages(self) -> int:
         """Calculate number of pages in this chunk."""
-        return max(1, (self.end_offset - self.start_offset) // self.page_size)
+        return max(
+            1,
+            (self.end_offset - self.start_offset + self.page_size - 1)
+            // self.page_size,
+        )
 
     @property
     def estimated_requests(self) -> int:
@@ -35,6 +85,11 @@ class WorkChunk:
         # Assuming 1 request per page for list data
         # Could be adjusted based on historical data
         return self.num_pages
+
+    @property
+    def total_records(self) -> int:
+        """Total number of records in this chunk."""
+        return self.end_offset - self.start_offset
 
 
 class WorkQueue:
@@ -71,21 +126,98 @@ class WorkQueue:
         )
 
     def _create_work_chunks(self):
-        """Create initial work chunks."""
+        """Create initial work chunks with proper API page boundary alignment."""
         chunk_id = 0
         offset = 0
 
+        # Validate that chunk size is reasonable relative to page size
+        if self.chunk_size < self.page_size:
+            logger.warning(
+                f"Chunk size ({self.chunk_size}) is smaller than page size ({self.page_size}). "
+                f"Adjusting chunk size to page size for efficiency."
+            )
+            self.chunk_size = self.page_size
+
         while offset < self.total_records:
+            # Calculate optimal chunk size that aligns with page boundaries
+            remaining_records = self.total_records - offset
+            target_chunk_size = min(self.chunk_size, remaining_records)
+
+            # Calculate the number of complete pages needed for this chunk
+            pages_needed = max(
+                1, (target_chunk_size + self.page_size - 1) // self.page_size
+            )
+
+            # Calculate the actual end offset (aligned to page boundaries)
+            aligned_end_offset = min(
+                offset + (pages_needed * self.page_size), self.total_records
+            )
+
+            # Ensure we don't create chunks that are too small (unless it's the last chunk)
+            min_chunk_size = self.page_size // 2  # Minimum 50% of page size
+            if (
+                aligned_end_offset - offset
+            ) < min_chunk_size and aligned_end_offset < self.total_records:
+                # Merge with next chunk by extending to next page boundary
+                pages_needed += 1
+                aligned_end_offset = min(
+                    offset + (pages_needed * self.page_size), self.total_records
+                )
+
             chunk = WorkChunk(
                 chunk_id=f"chunk_{chunk_id}",
                 start_offset=offset,
-                end_offset=min(offset + self.chunk_size, self.total_records),
+                end_offset=aligned_end_offset,
                 page_size=self.page_size,
             )
+
+            # Validate chunk alignment
+            if not self._validate_chunk_alignment(chunk):
+                logger.error(f"Chunk {chunk_id} failed alignment validation")
+                raise ValueError(f"Chunk {chunk_id} has invalid alignment")
+
             self._queue.put_nowait(chunk)
 
-            offset += self.chunk_size
+            offset = aligned_end_offset
             chunk_id += 1
+
+            logger.debug(
+                f"Created chunk {chunk_id - 1}: offset {chunk.start_offset}-{chunk.end_offset} "
+                f"({chunk.num_pages} pages, {chunk.total_records} records)"
+            )
+
+        logger.info(
+            f"Created {chunk_id} work chunks, all properly aligned to page boundaries"
+        )
+
+    def _validate_chunk_alignment(self, chunk: WorkChunk) -> bool:
+        """Validate that a chunk is properly aligned with API page boundaries."""
+        # Check that chunk size is a multiple of page size (except for the last chunk)
+        chunk_size = chunk.end_offset - chunk.start_offset
+
+        # For chunks that don't end at the total records, they should be page-aligned
+        if chunk.end_offset < self.total_records:
+            if chunk_size % self.page_size != 0:
+                logger.warning(
+                    f"Chunk not aligned: size {chunk_size} not multiple of page size {self.page_size}"
+                )
+                return False
+
+        # Check that start offset is page-aligned (except for first chunk)
+        if chunk.start_offset > 0 and chunk.start_offset % self.page_size != 0:
+            logger.warning(
+                f"Chunk start offset {chunk.start_offset} not aligned to page size {self.page_size}"
+            )
+            return False
+
+        # Check minimum chunk size
+        if chunk_size < self.page_size // 2 and chunk.end_offset < self.total_records:
+            logger.warning(
+                f"Chunk size {chunk_size} is too small (minimum: {self.page_size // 2})"
+            )
+            return False
+
+        return True
 
     async def get_work(self, worker_id: str) -> WorkChunk | None:
         """

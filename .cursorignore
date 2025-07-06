@@ -2,3 +2,4 @@
 DEP_*
 pycon/
 main_dep.py
+src/bicam_collection/

@@ -10,7 +10,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from threading import Lock
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +82,22 @@ class DynamicKeyPool:
     def __init__(self, api_keys: list[str], rate_limit_threshold: int = 4995):
         self.keys = {key: PooledAPIKey(key=key) for key in api_keys}
         self.rate_limit_threshold = rate_limit_threshold
-        self._lock = Lock()
-        self._checkout_condition = asyncio.Condition()
+
+        # Use separate locks for better performance
+        self._keys_lock = asyncio.Lock()  # For key state modifications
+        self._checkout_condition = asyncio.Condition()  # For waiters
+        self._checkout_semaphore = asyncio.Semaphore(
+            len(api_keys)
+        )  # Limit concurrent checkouts
+
+        # Performance optimization: track available keys count
+        self._available_keys_count = len(api_keys)
 
         # Stagger initial usage to avoid all keys hitting limits simultaneously
         self._stagger_initial_keys()
 
         logger.info("==================================================")
-        logger.info("=      DynamicKeyPool INITIALIZED                =")
+        logger.info("=      DynamicKeyPool INITIALIZED (OPTIMIZED)    =")
         logger.info(f"=      Mode: DYNAMIC, Keys: {len(api_keys)}               =")
         logger.info("==================================================")
 
@@ -105,7 +112,7 @@ class DynamicKeyPool:
         self, worker_id: str, preferred_requests: int = 250
     ) -> PooledAPIKey | None:
         """
-        Check out an API key for a worker.
+        Check out an API key for a worker with optimized performance.
 
         Args:
             worker_id: Unique identifier for the worker
@@ -114,26 +121,72 @@ class DynamicKeyPool:
         Returns:
             PooledAPIKey object or None if no keys available
         """
-        async with self._checkout_condition:
-            while True:
-                with self._lock:
-                    # Find best available key
+        # Fast path: check if any keys are available without heavy locking
+        if self._available_keys_count <= 0:
+            return None
+
+        # Use semaphore to limit concurrent checkout operations
+        async with self._checkout_semaphore:
+            # Quick lock-free check with timeout to prevent hanging
+            try:
+                return await asyncio.wait_for(
+                    self._checkout_key_internal(worker_id, preferred_requests),
+                    timeout=15.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Worker {worker_id} timed out during key checkout")
+                return None
+
+    async def _checkout_key_internal(
+        self, worker_id: str, preferred_requests: int
+    ) -> PooledAPIKey | None:
+        """Internal optimized checkout implementation."""
+        # Try immediate checkout first
+        async with self._keys_lock:
+            best_key = self._find_best_key(preferred_requests)
+            if best_key:
+                return self._complete_checkout(best_key, worker_id)
+
+        # If no key available, wait for notification
+        max_wait_attempts = 3
+        for attempt in range(max_wait_attempts):
+            async with self._checkout_condition:
+                # Double-check after acquiring condition lock
+                async with self._keys_lock:
                     best_key = self._find_best_key(preferred_requests)
-
                     if best_key:
-                        best_key.state = KeyState.IN_USE
-                        best_key.checked_out_by = worker_id
-                        best_key.checked_out_at = datetime.now(UTC)
+                        return self._complete_checkout(best_key, worker_id)
 
-                        logger.debug(
-                            f"Worker {worker_id} checked out key {best_key.key[:8]}... "
-                            f"(requests remaining: {best_key.requests_remaining})"
+                # Wait for a key to become available
+                logger.debug(
+                    f"Worker {worker_id} waiting for available key (attempt {attempt + 1}/{max_wait_attempts})"
+                )
+                try:
+                    await asyncio.wait_for(self._checkout_condition.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    if attempt == max_wait_attempts - 1:
+                        logger.warning(
+                            f"Worker {worker_id} exhausted all wait attempts"
                         )
-                        return best_key
+                        return None
+                    continue
 
-                # No keys available, wait for one to be returned
-                logger.debug(f"Worker {worker_id} waiting for available key...")
-                await self._checkout_condition.wait()
+        return None
+
+    def _complete_checkout(self, key_obj: PooledAPIKey, worker_id: str) -> PooledAPIKey:
+        """Complete the checkout process for a key."""
+        key_obj.state = KeyState.IN_USE
+        key_obj.checked_out_by = worker_id
+        key_obj.checked_out_at = datetime.now(UTC)
+
+        # Update available count
+        self._available_keys_count -= 1
+
+        logger.debug(
+            f"Worker {worker_id} checked out key {key_obj.key[:8]}... "
+            f"(requests remaining: {key_obj.requests_remaining})"
+        )
+        return key_obj
 
     def _find_best_key(self, preferred_requests: int) -> PooledAPIKey | None:
         """Find the best available key for the requested number of operations."""
@@ -161,49 +214,57 @@ class DynamicKeyPool:
         self, key: str, requests_made: int = 0, rate_limited: bool = False
     ):
         """
-        Return a key to the pool.
+        Return a key to the pool with optimized performance.
 
         Args:
             key: The API key to return
             requests_made: Number of requests made with this key
             rate_limited: Whether the key was rate limited
         """
-        async with self._checkout_condition:
-            with self._lock:
-                if key not in self.keys:
-                    logger.error(f"Attempted to check in unknown key: {key[:8]}...")
-                    return
+        key_became_available = False
 
-                key_obj = self.keys[key]
-                key_obj.request_count += requests_made
-                key_obj.last_request_time = datetime.now(UTC)
+        async with self._keys_lock:
+            if key not in self.keys:
+                logger.error(f"Attempted to check in unknown key: {key[:8]}...")
+                return
 
-                if rate_limited:
-                    key_obj.mark_rate_limited()
-                elif key_obj.request_count >= self.rate_limit_threshold:
-                    # Preemptively mark as rate limited
-                    logger.info(
-                        f"Key {key[:8]}... approaching limit "
-                        f"({key_obj.request_count}/{self.rate_limit_threshold}), marking as rate limited"
-                    )
-                    key_obj.mark_rate_limited()
-                else:
-                    key_obj.state = KeyState.AVAILABLE
+            key_obj = self.keys[key]
+            old_state = key_obj.state
+            key_obj.request_count += requests_made
+            key_obj.last_request_time = datetime.now(UTC)
 
-                key_obj.checked_out_by = None
-                key_obj.checked_out_at = None
-
-                logger.debug(
-                    f"Key {key[:8]}... checked in. "
-                    f"Requests: {key_obj.request_count}, State: {key_obj.state.value}"
+            if rate_limited:
+                key_obj.mark_rate_limited()
+            elif key_obj.request_count >= self.rate_limit_threshold:
+                # Preemptively mark as rate limited
+                logger.info(
+                    f"Key {key[:8]}... approaching limit "
+                    f"({key_obj.request_count}/{self.rate_limit_threshold}), marking as rate limited"
                 )
+                key_obj.mark_rate_limited()
+            else:
+                key_obj.state = KeyState.AVAILABLE
+                # Key became available if it wasn't before
+                key_became_available = old_state != KeyState.AVAILABLE
+                if key_became_available:
+                    self._available_keys_count += 1
 
-            # Notify waiting workers
-            self._checkout_condition.notify_all()
+            key_obj.checked_out_by = None
+            key_obj.checked_out_at = None
 
-    def get_pool_status(self) -> dict:
+            logger.debug(
+                f"Key {key[:8]}... checked in. "
+                f"Requests: {key_obj.request_count}, State: {key_obj.state.value}"
+            )
+
+        # Notify waiting workers if a key became available (outside of keys lock)
+        if key_became_available:
+            async with self._checkout_condition:
+                self._checkout_condition.notify_all()
+
+    async def get_pool_status(self) -> dict:
         """Get current status of all keys in the pool."""
-        with self._lock:
+        async with self._keys_lock:
             total_keys = len(self.keys)
             available = sum(
                 1 for k in self.keys.values() if k.state == KeyState.AVAILABLE
@@ -219,6 +280,7 @@ class DynamicKeyPool:
             return {
                 "total_keys": total_keys,
                 "available": available,
+                "available_count_cached": self._available_keys_count,
                 "in_use": in_use,
                 "rate_limited": rate_limited,
                 "total_requests_made": total_requests,
@@ -238,25 +300,28 @@ class DynamicKeyPool:
 
     async def reset_expired_limits(self):
         """Reset any keys whose rate limit period has expired."""
-        async with self._checkout_condition:
-            with self._lock:
-                reset_count = 0
-                for key_obj in self.keys.values():
-                    if (
-                        key_obj.state == KeyState.RATE_LIMITED
-                        and key_obj.rate_limited_at
-                        and datetime.now(UTC) - key_obj.rate_limited_at
-                        > key_obj.rate_limit_duration
-                    ):
-                        key_obj.state = KeyState.AVAILABLE
-                        key_obj.request_count = 0
-                        key_obj.rate_limited_at = None
-                        reset_count += 1
-                        logger.info(
-                            f"Key {key_obj.key[:8]}... rate limit expired, now available"
-                        )
+        reset_count = 0
 
-                if reset_count > 0:
-                    self._checkout_condition.notify_all()
+        async with self._keys_lock:
+            for key_obj in self.keys.values():
+                if (
+                    key_obj.state == KeyState.RATE_LIMITED
+                    and key_obj.rate_limited_at
+                    and datetime.now(UTC) - key_obj.rate_limited_at
+                    > key_obj.rate_limit_duration
+                ):
+                    key_obj.state = KeyState.AVAILABLE
+                    key_obj.request_count = 0
+                    key_obj.rate_limited_at = None
+                    reset_count += 1
+                    self._available_keys_count += 1
+                    logger.info(
+                        f"Key {key_obj.key[:8]}... rate limit expired, now available"
+                    )
 
-                return reset_count
+        # Notify waiting workers if any keys were reset (outside of keys lock)
+        if reset_count > 0:
+            async with self._checkout_condition:
+                self._checkout_condition.notify_all()
+
+        return reset_count

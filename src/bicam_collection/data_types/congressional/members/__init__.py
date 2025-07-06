@@ -1,16 +1,9 @@
 """
-Members data type handlers.
+Members data type configuration.
 
-This module provides specialized handling for Congressional members data,
-including fetching, database normalization, and cleaning.
+This data type now uses the streamlined architecture with plugin-based processing.
+All custom logic has been moved to plugins while configuration remains here.
 """
 
-from .cleaner import MembersCleaner
-from .database_normalizer import MembersDatabaseNormalizer
-from .fetcher import MembersFetcher
-
-__all__ = [
-    "MembersFetcher",
-    "MembersDatabaseNormalizer",
-    "MembersCleaner",
-]
+# This data type uses the streamlined plugin architecture
+# Custom logic is now in: src/streamlined/plugins/congressional.py

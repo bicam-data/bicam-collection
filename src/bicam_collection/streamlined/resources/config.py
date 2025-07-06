@@ -1,0 +1,280 @@
+"""
+Configuration for Streamlined Pipeline
+
+This module provides clean configuration management for the streamlined pipeline,
+with sensible defaults and clear organization.
+"""
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class DatabaseConfig:
+    """Database configuration."""
+
+    host: str = os.getenv("POSTGRESQL_HOST", "localhost")
+    port: int = int(os.getenv("POSTGRESQL_PORT", "5432"))
+    database: str = os.getenv("POSTGRESQL_DATABASE", "bicam_collection")
+    username: str = os.getenv("POSTGRESQL_USERNAME", "postgres")
+    password: str = os.getenv("POSTGRESQL_PASSWORD", "password")
+    min_size: int = 2
+    max_size: int = 20
+    command_timeout: int = 60
+
+
+@dataclass
+class APIConfig:
+    """API configuration."""
+
+    keys: list[str] = field(default_factory=list)
+    rate_limit_per_second: float = 2.0
+    max_retries: int = 3
+    timeout: int = 30
+
+    def __post_init__(self):
+        """Load API keys from environment if not provided."""
+        if not self.keys:
+            # Try to load from environment variables
+            congressional_keys = os.getenv("CONGRESSIONAL_API_KEYS") or os.getenv(
+                "CONGRESSIONAL_API_KEY"
+            )
+            if congressional_keys:
+                self.keys.extend(
+                    [k.strip() for k in congressional_keys.split(",") if k.strip()]
+                )
+
+            govinfo_keys = os.getenv("GOVINFO_API_KEYS") or os.getenv("GOVINFO_API_KEY")
+            if govinfo_keys:
+                self.keys.extend(
+                    [k.strip() for k in govinfo_keys.split(",") if k.strip()]
+                )
+
+
+@dataclass
+class ProcessingConfig:
+    """Processing configuration."""
+
+    batch_size: int = int(os.getenv("BATCH_SIZE", "100"))
+    max_workers: int = int(os.getenv("MAX_WORKERS", "4"))
+    chunk_size: int = int(os.getenv("CHUNK_SIZE", "5000"))
+    page_size: int = int(os.getenv("PAGE_SIZE", "250"))
+    max_concurrent: int = int(os.getenv("MAX_CONCURRENT", "5"))
+
+
+@dataclass
+class ParallelizationConfig:
+    """Parallelization configuration."""
+
+    enabled: bool = False
+    fetcher: dict[str, Any] = field(default_factory=dict)
+    normalizer: dict[str, Any] = field(default_factory=dict)
+    cleaner: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        """Set default parallelization settings."""
+        if self.enabled and not self.fetcher:
+            self.fetcher = {
+                "congressional": {
+                    "num_sessions": 2,
+                    "keys_per_session": 2,
+                },
+                "govinfo": {
+                    "num_sessions": 2,
+                    "keys_per_session": 2,
+                },
+            }
+
+
+@dataclass
+class InfrastructureConfig:
+    """Infrastructure configuration."""
+
+    checkpoint_db_path: str = str(
+        Path(__file__).parent.parent.parent.parent.parent
+        / "data"
+        / "checkpoints"
+        / "streamlined_checkpoints.db"
+    )
+    use_postgres_runs: bool = True
+    use_postgres_checkpoints: bool = False
+    use_optimized_storage: bool = True
+    use_dynamic_pool: bool = False
+    storage_flush_interval: int = 10
+    storage_max_memory_mb: int = 500
+
+
+@dataclass
+class StreamlinedConfig:
+    """Complete configuration for streamlined pipeline."""
+
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    api: APIConfig = field(default_factory=APIConfig)
+    processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    parallelization: ParallelizationConfig = field(
+        default_factory=ParallelizationConfig
+    )
+    infrastructure: InfrastructureConfig = field(default_factory=InfrastructureConfig)
+
+    # Processing parameters (runtime configurable)
+    from_date: str | None = None
+    to_date: str | None = None
+    congress: int | None = None
+
+    # Incremental processing flags
+    incremental: bool = os.getenv("INCREMENTAL", "true").lower() == "true"
+    fallback_days: int = int(os.getenv("FALLBACK_DAYS", "30"))
+    use_checkpoint_resume: bool = False
+    use_incremental_dates: bool = True
+    rerun_mode: bool = False
+
+    @classmethod
+    def from_env(cls, env_file: str | None = None) -> "StreamlinedConfig":
+        """Create configuration from environment variables."""
+        if env_file:
+            # Load environment file if specified
+            from ...libs.config import BicamConfig
+
+            original_config = BicamConfig.from_env(env_file)
+
+            # Convert to streamlined config
+            config = cls()
+
+            # Map database settings
+            config.database.host = original_config.database.host
+            config.database.port = original_config.database.port
+            config.database.database = original_config.database.database
+            config.database.username = original_config.database.username
+            config.database.password = original_config.database.password
+
+            # Map API settings
+            if hasattr(original_config, "scraping"):
+                congressional_keys = getattr(
+                    original_config.scraping, "congressional_api_key", None
+                )
+                if congressional_keys:
+                    config.api.keys.extend(
+                        [k.strip() for k in congressional_keys.split(",") if k.strip()]
+                    )
+
+                govinfo_keys = getattr(
+                    original_config.scraping, "govinfo_api_key", None
+                )
+                if govinfo_keys:
+                    config.api.keys.extend(
+                        [k.strip() for k in govinfo_keys.split(",") if k.strip()]
+                    )
+
+                config.api.rate_limit_per_second = getattr(
+                    original_config.scraping, "rate_limit_delay", 2.0
+                )
+
+            # Map processing settings
+            if hasattr(original_config, "processing"):
+                config.processing.batch_size = getattr(
+                    original_config.processing, "chunk_size", 100
+                )
+                config.processing.max_workers = getattr(
+                    original_config.processing, "max_workers", 4
+                )
+
+            return config
+        else:
+            # Create from environment variables directly
+            return cls()
+
+    def enable_parallelization(
+        self,
+        congressional_sessions: int = 2,
+        congressional_keys_per_session: int = 2,
+        govinfo_sessions: int = 2,
+        govinfo_keys_per_session: int = 2,
+    ):
+        """Enable parallelization with specified settings."""
+        self.parallelization.enabled = True
+        self.parallelization.fetcher = {
+            "congressional": {
+                "num_sessions": congressional_sessions,
+                "keys_per_session": congressional_keys_per_session,
+            },
+            "govinfo": {
+                "num_sessions": govinfo_sessions,
+                "keys_per_session": govinfo_keys_per_session,
+            },
+        }
+
+    def get_parallelization_config(self) -> dict[str, Any]:
+        """Get parallelization configuration in expected format."""
+        if not self.parallelization.enabled:
+            return {}
+
+        return {
+            "fetcher": self.parallelization.fetcher,
+            "normalizer": self.parallelization.normalizer,
+            "cleaner": self.parallelization.cleaner,
+        }
+
+    def validate(self) -> list[str]:
+        """Validate configuration and return list of errors."""
+        errors = []
+
+        # Validate API keys
+        if not self.api.keys:
+            errors.append("No API keys configured")
+
+        # Validate database connection
+        if not self.database.host:
+            errors.append("Database host not configured")
+
+        # Validate processing settings
+        if self.processing.batch_size <= 0:
+            errors.append("Batch size must be positive")
+
+        if self.processing.max_workers <= 0:
+            errors.append("Max workers must be positive")
+
+        # Validate parallelization settings
+        if self.parallelization.enabled and not self.parallelization.fetcher:
+            errors.append("Parallelization enabled but no fetcher config provided")
+
+        return errors
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert configuration to dictionary."""
+        return {
+            "database": {
+                "host": self.database.host,
+                "port": self.database.port,
+                "database": self.database.database,
+                "username": self.database.username,
+                # Don't include password in output
+            },
+            "api": {
+                "key_count": len(self.api.keys),
+                "rate_limit": self.api.rate_limit_per_second,
+                "max_retries": self.api.max_retries,
+                "timeout": self.api.timeout,
+            },
+            "processing": {
+                "batch_size": self.processing.batch_size,
+                "max_workers": self.processing.max_workers,
+                "chunk_size": self.processing.chunk_size,
+                "page_size": self.processing.page_size,
+                "max_concurrent": self.processing.max_concurrent,
+            },
+            "parallelization": {
+                "enabled": self.parallelization.enabled,
+                "fetcher": self.parallelization.fetcher,
+                "normalizer": self.parallelization.normalizer,
+                "cleaner": self.parallelization.cleaner,
+            },
+            "infrastructure": {
+                "checkpoint_db_path": self.infrastructure.checkpoint_db_path,
+                "use_postgres_runs": self.infrastructure.use_postgres_runs,
+                "use_postgres_checkpoints": self.infrastructure.use_postgres_checkpoints,
+                "use_optimized_storage": self.infrastructure.use_optimized_storage,
+                "use_dynamic_pool": self.infrastructure.use_dynamic_pool,
+            },
+        }

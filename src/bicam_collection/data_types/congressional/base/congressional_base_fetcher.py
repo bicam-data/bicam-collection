@@ -171,12 +171,21 @@ class CongressionalBaseFetcher(BaseFetcher):
         item_id = self.extract_item_id(item_data)
 
         # Find all get_* methods (e.g., get_actions, get_amendments)
-        for method_name in self._get_related_methods():
+        related_methods = self._get_related_methods()
+        logger.info(
+            f"Found {len(related_methods)} related methods for {self.data_type_name}: {related_methods}"
+        )
+
+        for method_name in related_methods:
+            logger.info(f"Calling {method_name} for item {item_id}")
             try:
                 method = getattr(self, method_name)
                 result = await method(item_data)
 
                 if result:
+                    logger.debug(
+                        f"{method_name} returned {len(result)} items for {item_id}"
+                    )
                     related_data.append(
                         {
                             "type": method_name,
@@ -185,10 +194,15 @@ class CongressionalBaseFetcher(BaseFetcher):
                             "method": method_name,
                         }
                     )
+                else:
+                    logger.debug(f"{method_name} returned no data for {item_id}")
 
             except Exception as e:
-                logger.error(f"Failed to fetch {method_name}: {e}")
+                logger.error(f"Failed to fetch {method_name} for {item_id}: {e}")
 
+        logger.debug(
+            f"Phase 3 for {item_id}: {len(related_data)} total related data types"
+        )
         return related_data
 
     async def fetch_phase_3_data_with_client(
@@ -246,6 +260,35 @@ class CongressionalBaseFetcher(BaseFetcher):
         if not self.db_pool:
             return
 
+        # Check if optimized storage is available and should be used
+        if hasattr(self, "processing_resource") and self.processing_resource:
+            if getattr(self.processing_resource, "use_optimized_storage", False):
+                try:
+                    # Try to use optimized storage if available
+                    storage_manager = (
+                        await self.processing_resource.get_storage_manager()
+                    )
+                    if storage_manager:
+                        from ....processing.optimized_storage_manager import (
+                            OptimizedFetcherStorage,
+                        )
+
+                        optimized_storage = OptimizedFetcherStorage(
+                            storage_manager, self.id_field
+                        )
+                        await optimized_storage.store_phase_1_data(
+                            self.get_default_schema(),
+                            f"{self.data_type_name}_list_raw",
+                            data,
+                            batch_id,
+                        )
+                        return
+                except Exception as e:
+                    logger.debug(
+                        f"Optimized storage not available, falling back to direct storage: {e}"
+                    )
+
+        # Fallback to direct storage
         await self.store_raw_data(
             schema=self.get_default_schema(),
             table=f"{self.data_type_name}_list_raw",
@@ -258,6 +301,35 @@ class CongressionalBaseFetcher(BaseFetcher):
         if not self.db_pool:
             return
 
+        # Check if optimized storage is available and should be used
+        if hasattr(self, "processing_resource") and self.processing_resource:
+            if getattr(self.processing_resource, "use_optimized_storage", False):
+                try:
+                    # Try to use optimized storage if available
+                    storage_manager = (
+                        await self.processing_resource.get_storage_manager()
+                    )
+                    if storage_manager:
+                        from ....processing.optimized_storage_manager import (
+                            OptimizedFetcherStorage,
+                        )
+
+                        optimized_storage = OptimizedFetcherStorage(
+                            storage_manager, self.id_field
+                        )
+                        await optimized_storage.store_phase_2_data(
+                            self.get_default_schema(),
+                            f"{self.data_type_name}_raw",
+                            data,
+                            batch_id,
+                        )
+                        return
+                except Exception as e:
+                    logger.debug(
+                        f"Optimized storage not available, falling back to direct storage: {e}"
+                    )
+
+        # Fallback to direct storage
         await self.store_raw_data(
             schema=self.get_default_schema(),
             table=f"{self.data_type_name}_raw",
@@ -272,6 +344,36 @@ class CongressionalBaseFetcher(BaseFetcher):
         if not self.db_pool or not data:
             return
 
+        # Check if optimized storage is available and should be used
+        if hasattr(self, "processing_resource") and self.processing_resource:
+            if getattr(self.processing_resource, "use_optimized_storage", False):
+                try:
+                    # Try to use optimized storage if available
+                    storage_manager = (
+                        await self.processing_resource.get_storage_manager()
+                    )
+                    if storage_manager:
+                        from ....processing.optimized_storage_manager import (
+                            OptimizedFetcherStorage,
+                        )
+
+                        optimized_storage = OptimizedFetcherStorage(
+                            storage_manager, self.id_field
+                        )
+                        await optimized_storage.store_phase_3_data(
+                            self.get_default_schema(),
+                            self.data_type_name,
+                            data,
+                            parent_id,
+                            batch_id,
+                        )
+                        return
+                except Exception as e:
+                    logger.debug(
+                        f"Optimized storage not available, falling back to direct storage: {e}"
+                    )
+
+        # Fallback to direct storage
         # Group by type and store in appropriate tables
         for item in data:
             method_name = item.get("type", "unknown")
@@ -376,24 +478,34 @@ class CongressionalBaseFetcher(BaseFetcher):
 
     def _extract_pagination_info(self, page_data: dict[str, Any]) -> dict[str, Any]:
         """Extract pagination from Congressional API response."""
-        # Congressional API includes count in pagination object
-        logger.error(f"Page data: {page_data}")
+        logger.debug("Extracting pagination info from page data structure")
 
         if isinstance(page_data, dict) and page_data.get("pagination"):
             pagination = page_data["pagination"]
+            total_count = pagination.get("count", 0)
+            count_per_page = pagination.get("per_page", 250)
+
+            # Validate pagination data
+            if not isinstance(total_count, int) or total_count < 0:
+                logger.warning(f"Invalid total_count in pagination: {total_count}")
+                total_count = 0
+
+            if not isinstance(count_per_page, int) or count_per_page <= 0:
+                logger.warning(
+                    f"Invalid count_per_page in pagination: {count_per_page}"
+                )
+                count_per_page = 250
+
+            logger.debug(
+                f"Extracted pagination: total_count={total_count}, count_per_page={count_per_page}"
+            )
             return {
-                "total_count": pagination.get("count", 0),
-                "count_per_page": pagination.get("per_page", 250),
+                "total_count": total_count,
+                "count_per_page": count_per_page,
             }
 
-        # # If page_data is a list, count the items
-        # if isinstance(page_data, list):
-        #     return {
-        #         "total_count": len(page_data),
-        #         "count_per_page": len(page_data),
-        #     }
-
-        # Fallback for other structures
+        # Fallback for other structures - should not happen in normal operation
+        logger.warning("No pagination object found in page data, using fallback values")
         return {"total_count": 0, "count_per_page": 250}
 
     def _extract_latest_date_from_batch(self, batch: list[dict]) -> str | None:

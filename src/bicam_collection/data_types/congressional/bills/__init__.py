@@ -1,25 +1,9 @@
 """
-Bills data type handlers.
+Bills data type configuration.
 
-This module provides specialized handling for Congressional bills data,
-including fetching, database normalization, cleaning, and Dagster assets.
+This data type now uses the streamlined architecture with plugin-based processing.
+All custom logic has been moved to plugins while configuration remains here.
 """
 
-from .cleaner import BillsCleaner
-from .database_normalizer import BillsDatabaseNormalizer
-from .fetcher import BillsFetcher
-
-
-def get_specialized_assets():
-    """Lazily import and return bills specialized assets to avoid circular imports."""
-    from .specialized_assets import bills_specialized_assets
-
-    return bills_specialized_assets
-
-
-__all__ = [
-    "BillsFetcher",
-    "BillsDatabaseNormalizer",
-    "BillsCleaner",
-    "get_specialized_assets",
-]
+# This data type uses the streamlined plugin architecture
+# Custom logic is now in: src/streamlined/plugins/congressional.py

@@ -1,0 +1,153 @@
+- name: amendments
+  description: Congressional amendments main data
+  
+  api:
+    expected_key: amendment
+    outer_field: amendment
+    page_size: 250
+    retry_attempts: 3
+  
+  schema:
+    table_name: amendments
+    is_main: true
+    create_raw: true
+    id_fields: [amendment_id]
+    related_tables:
+      - sponsors
+      - cosponsors
+      - on_behalf_of
+      - links
+      - amended_bills
+      - amended_treaties
+      - amended_amendments
+      - actions
+      - texts
+  
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: amendments_sponsors
+  description: Amendment sponsors data
+
+  schema:
+    table_name: amendments_sponsors
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, bioguide_id]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_cosponsors
+  description: Amendment cosponsors data
+
+  api:
+    expected_key: cosponsors
+    outer_field: cosponsors
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: amendments_cosponsors
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, bioguide_id]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_actions
+  description: Amendment actions data
+
+  api:
+    expected_key: actions
+    outer_field: actions
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: amendments_actions
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, action_id]
+    related_tables:
+      - recordedvotes
+      - committees
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_actions_recordedvotes
+  description: Amendment actions recorded votes data
+  schema:
+    table_name: amendments_actions_recordedvotes
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, action_id, url]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_actions_committees
+  description: Amendment actions committees data
+
+  schema:
+    table_name: amendments_actions_committees
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, action_id, committee_code]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_texts
+  description: Amendment texts data
+
+  api:
+    expected_key: text
+    outer_field: texts
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: amendments_texts
+    is_main: false
+    create_raw: true
+    id_fields: [amendment_id, date, type]
+
+
+  processing:
+    batch_size: 200
+    checkpoint_frequency: 100
+
+- name: amendments_on_behalf_of
+  description: Amendment on behalf of data
+
+  schema:
+    table_name: amendments_on_behalf_of
+    is_main: false
+    create_raw: false
+    id_fields: [amendment_id, bioguide_id]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: amendments_links
+  description: Amendment links data
+
+  schema:
+    table_name: amendments_links
+    is_main: false
+    create_raw: false
+    id_fields: [amendment_id, link_url]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250

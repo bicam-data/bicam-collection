@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..processing.dynamic_key_pool_manager import DynamicKeyPool
+from ..processing.optimized_storage_manager import OptimizedFetcherStorage
 from ..processing.work_queue_manager import AdaptiveWorkQueue, WorkChunk
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,9 @@ class OptimizedParallelProcessor:
         # Check for incremental processing using last_total_count
         last_processed_count = await self._get_last_processed_count(fetcher)
 
-        incremental_processing = last_processed_count > 0 and total_count > last_processed_count
+        incremental_processing = (
+            last_processed_count > 0 and total_count > last_processed_count
+        )
 
         logger.info(f"Last processed count: {last_processed_count}")
         logger.info(f"Current total count: {total_count}")
@@ -208,7 +211,33 @@ class OptimizedParallelProcessor:
         logger.info(f"Work queue initialized with {total_records} total records")
 
         # =============================================================================
-        # STEP 6: CREATE AND START WORKERS
+        # STEP 6: INITIALIZE STORAGE MANAGER
+        # =============================================================================
+        logger.info("-" * 40)
+        logger.info("INITIALIZING STORAGE MANAGER")
+        logger.info("-" * 40)
+
+        # Start storage manager if using optimized storage
+        storage_manager = None
+        if (
+            hasattr(fetcher, "processing_resource")
+            and fetcher.processing_resource
+            and getattr(fetcher.processing_resource, "use_optimized_storage", False)
+        ):
+                try:
+                    storage_manager = (
+                        await fetcher.processing_resource.get_storage_manager()
+                    )
+                    if storage_manager:
+                        logger.info("Starting storage manager background workers...")
+                        await storage_manager.start()
+                        logger.info("Storage manager started successfully")
+                except Exception as e:
+                    logger.error(f"Failed to initialize storage manager: {e}")
+                    storage_manager = None
+
+        # =============================================================================
+        # STEP 7: CREATE AND START WORKERS
         # =============================================================================
         logger.info("-" * 40)
         logger.info("STARTING WORKERS")
@@ -234,16 +263,29 @@ class OptimizedParallelProcessor:
         # Start key pool maintenance
         maintenance_task = asyncio.create_task(self._maintain_key_pool())
 
-        # Run all workers
-        logger.info(f"Starting {len(workers)} workers for {data_type}...")
-        worker_results = await asyncio.gather(*workers, return_exceptions=True)
+        try:
+            # Run all workers
+            logger.info(f"Starting {len(workers)} workers for {data_type}...")
+            worker_results = await asyncio.gather(*workers, return_exceptions=True)
 
-        # Cancel status reporting
-        status_task.cancel()
-        maintenance_task.cancel()
+        finally:
+            # Cancel status reporting
+            status_task.cancel()
+            maintenance_task.cancel()
+
+            # CRITICAL: Stop storage manager to flush remaining data
+            if storage_manager:
+                try:
+                    logger.info(
+                        "Stopping storage manager and flushing remaining data..."
+                    )
+                    await storage_manager.stop()
+                    logger.info("Storage manager stopped and data flushed")
+                except Exception as e:
+                    logger.error(f"Error stopping storage manager: {e}")
 
         # =============================================================================
-        # STEP 7: AGGREGATE RESULTS
+        # STEP 8: AGGREGATE RESULTS
         # =============================================================================
         logger.info("-" * 40)
         logger.info("AGGREGATING RESULTS")
@@ -381,6 +423,30 @@ class OptimizedParallelProcessor:
         processed = 0
         offset = chunk.start_offset
 
+        # Check if we should use optimized storage
+        use_optimized_storage = False
+        optimized_storage = None
+
+        if (
+            hasattr(fetcher, "processing_resource")
+            and fetcher.processing_resource
+            and getattr(fetcher.processing_resource, "use_optimized_storage", False)
+        ):
+                try:
+                    storage_manager = (
+                        await fetcher.processing_resource.get_storage_manager()
+                    )
+                    if storage_manager:
+                        # Get the id_field from the fetcher's config
+                        id_field = getattr(fetcher, "id_field", "parent_id")
+                        optimized_storage = OptimizedFetcherStorage(
+                            storage_manager, id_field, fetcher
+                        )
+                        use_optimized_storage = True
+                        logger.debug(f"Worker {worker_id} using optimized storage")
+                except Exception as e:
+                    logger.warning(f"Failed to get optimized storage: {e}")
+
         while offset < chunk.end_offset:
             # Calculate requests needed for this batch
             remaining_records = chunk.end_offset - offset
@@ -403,12 +469,16 @@ class OptimizedParallelProcessor:
                 batch_processed = 0
                 requests_made = 0
 
+                # CRITICAL: Use single_page_only=True to prevent overlapping data fetching
+                # Without this, each worker would fetch ALL remaining pages from its offset,
+                # causing massive data duplication across workers
                 async for batch in fetcher.fetch_phase_1_data_with_client(
                     client,
                     from_date=from_date,
                     to_date=to_date,
                     limit=batch_size,
                     offset=offset,
+                    single_page_only=True,
                     **kwargs,
                 ):
                     requests_made += 1
@@ -417,11 +487,21 @@ class OptimizedParallelProcessor:
                     for item in batch:
                         try:
                             # Phase 1: Store list data
-                            await fetcher.store_phase_1_data(item)
+                            if use_optimized_storage:
+                                await optimized_storage.store_phase_1_data(
+                                    fetcher.get_default_schema(),
+                                    f"{fetcher.data_type_name}_list_raw",
+                                    item,
+                                )
+                            else:
+                                await fetcher.store_phase_1_data(item)
 
                             # Phase 2: Get and store full data
                             url = item.get("url")
                             if url:
+                                logger.info(
+                                    f"Worker {worker_id} fetching Phase 2 data from {url}"
+                                )
                                 detailed_data = (
                                     await fetcher.fetch_phase_2_data_with_client(
                                         url, client
@@ -430,22 +510,85 @@ class OptimizedParallelProcessor:
                                 requests_made += 1
 
                                 if detailed_data:
-                                    await fetcher.store_phase_2_data(detailed_data)
+                                    logger.info(
+                                        f"Worker {worker_id} got Phase 2 data, proceeding to Phase 3"
+                                    )
+                                    if use_optimized_storage:
+                                        await optimized_storage.store_phase_2_data(
+                                            fetcher.get_default_schema(),
+                                            f"{fetcher.data_type_name}_raw",
+                                            detailed_data,
+                                        )
+                                    else:
+                                        await fetcher.store_phase_2_data(detailed_data)
 
                                     # Phase 3: Get related data
+                                    logger.info(
+                                        f"Worker {worker_id} starting Phase 3 for item {item.get('url', 'unknown')}"
+                                    )
                                     related_data = (
                                         await fetcher.fetch_phase_3_data_with_client(
                                             detailed_data, client
                                         )
                                     )
+                                    logger.info(
+                                        f"Worker {worker_id} Phase 3 returned: {len(related_data) if related_data else 0} related items"
+                                    )
+                                    logger.info(
+                                        f"Worker {worker_id} Phase 3 data type: {type(related_data)}, truthiness: {bool(related_data)}"
+                                    )
                                     if related_data:
+                                        logger.info(
+                                            f"Worker {worker_id} entering Phase 3 storage block"
+                                        )
                                         requests_made += len(
                                             related_data
                                         )  # Approximate
                                         item_id = fetcher.extract_item_id(detailed_data)
-                                        await fetcher.store_phase_3_data(
-                                            related_data, item_id
+                                        logger.info(
+                                            f"Worker {worker_id} extracted item_id: {item_id}"
                                         )
+
+                                        logger.debug(
+                                            f"Worker {worker_id} processing Phase 3 data: "
+                                            f"{len(related_data)} related items for {item_id}"
+                                        )
+
+                                        if use_optimized_storage:
+                                            logger.info(
+                                                f"Worker {worker_id} calling optimized storage.store_phase_3_data with {len(related_data)} items"
+                                            )
+                                            await optimized_storage.store_phase_3_data(
+                                                fetcher.get_default_schema(),
+                                                fetcher.data_type_name,
+                                                related_data,
+                                                item_id,
+                                            )
+                                            logger.info(
+                                                f"Worker {worker_id} completed optimized storage.store_phase_3_data"
+                                            )
+                                        else:
+                                            logger.info(
+                                                f"Worker {worker_id} calling fetcher.store_phase_3_data with {len(related_data)} items"
+                                            )
+                                            await fetcher.store_phase_3_data(
+                                                related_data, item_id
+                                            )
+                                            logger.info(
+                                                f"Worker {worker_id} completed fetcher.store_phase_3_data"
+                                            )
+                                    else:
+                                        logger.debug(
+                                            f"Worker {worker_id} found no Phase 3 data for item {item.get('url', 'unknown')}"
+                                        )
+                                else:
+                                    logger.warning(
+                                        f"Worker {worker_id} got no Phase 2 data from {url}, skipping Phase 3"
+                                    )
+                            else:
+                                logger.warning(
+                                    f"Worker {worker_id} item has no URL, skipping Phase 2 and 3"
+                                )
 
                             batch_processed += 1
                             processed += 1
@@ -468,8 +611,8 @@ class OptimizedParallelProcessor:
                 # Return key to pool
                 await self.key_pool.checkin_key(api_key.key, requests_made)
 
-                # Update offset
-                offset += batch_processed
+                # Update offset to next page within chunk range
+                offset += batch_size
 
             except Exception as e:
                 logger.error(f"Worker {worker_id} batch processing error: {e}")
@@ -533,20 +676,34 @@ class OptimizedParallelProcessor:
     # INCREMENTAL PROCESSING ANALYSIS
     # =============================================================================
 
-    async def _get_last_processed_count(self, fetcher) -> dict:
-        """Get the last processed date and total count from the database for incremental processing."""
+    async def _get_last_processed_count(self, fetcher) -> int:
+        """Get the last processed count from the database for incremental processing."""
         if not fetcher.client or not hasattr(
             fetcher.client, "access_last_processed_count"
         ):
-            return {}
+            return 0
 
         try:
-            last_processed_count = await fetcher.client.access_last_processed_count(
+            last_processed_info = await fetcher.client.access_last_processed_count(
                 fetcher.data_type_name
             )
-            if last_processed_count:
-                logger.info(f"Found last processed count: {last_processed_count}")
-            return last_processed_count
+
+            if last_processed_info and isinstance(last_processed_info, dict):
+                # Extract total count from the last processed info
+                total_count = last_processed_info.get("total_count", 0)
+                if isinstance(total_count, int) and total_count > 0:
+                    logger.info(
+                        f"Found last processed count for {fetcher.data_type_name}: {total_count}"
+                    )
+                    return total_count
+
+            logger.debug(
+                f"No valid last processed count found for {fetcher.data_type_name}"
+            )
+            return 0
+
         except Exception as e:
-            logger.debug(f"Could not get last processed info: {e}")
-            return {}
+            logger.debug(
+                f"Could not get last processed count for {fetcher.data_type_name}: {e}"
+            )
+            return 0

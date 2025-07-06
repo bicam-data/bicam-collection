@@ -1,16 +1,9 @@
 """
-Committees data type handlers.
+Committeeprints data type configuration.
 
-This module provides specialized handling for Congressional committees data,
-including fetching, database normalization, and cleaning.
+This data type now uses the streamlined architecture with plugin-based processing.
+All custom logic has been moved to plugins while configuration remains here.
 """
 
-from .cleaner import CommitteeprintsCleaner
-from .database_normalizer import CommitteeprintsDatabaseNormalizer
-from .fetcher import CommitteeprintsFetcher
-
-__all__ = [
-    "CommitteeprintsFetcher",
-    "CommitteeprintsDatabaseNormalizer",
-    "CommitteeprintsCleaner",
-]
+# This data type uses the streamlined plugin architecture
+# Custom logic is now in: src/streamlined/plugins/congressional.py

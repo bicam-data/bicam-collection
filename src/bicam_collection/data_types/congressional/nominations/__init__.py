@@ -1,16 +1,9 @@
 """
-Nominations data type handlers.
+Nominations data type configuration.
 
-This module provides specialized handling for Congressional nominations data,
-including fetching, database normalization, and cleaning.
+This data type now uses the streamlined architecture with plugin-based processing.
+All custom logic has been moved to plugins while configuration remains here.
 """
 
-from .cleaner import NominationsCleaner
-from .database_normalizer import NominationsDatabaseNormalizer
-from .fetcher import NominationsFetcher
-
-__all__ = [
-    "NominationsFetcher",
-    "NominationsDatabaseNormalizer",
-    "NominationsCleaner",
-]
+# This data type uses the streamlined plugin architecture
+# Custom logic is now in: src/streamlined/plugins/congressional.py
