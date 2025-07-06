@@ -21,14 +21,22 @@ except ImportError:
 class DatabaseConfig:
     """Database configuration."""
 
-    host: str = os.getenv("POSTGRESQL_HOST", "localhost")
-    port: int = int(os.getenv("POSTGRESQL_PORT", "5432"))
-    database: str = os.getenv("POSTGRESQL_DATABASE", "bicam_collection")
-    username: str = os.getenv("POSTGRESQL_USERNAME", "postgres")
-    password: str = os.getenv("POSTGRESQL_PASSWORD", "password")
+    host: str = "localhost"
+    port: int = 5432
+    database: str = "bicam_collection"
+    username: str = "postgres"
+    password: str = "password"
     min_size: int = 2
     max_size: int = 20
     command_timeout: int = 60
+
+    def __post_init__(self):
+        """Load database configuration from environment variables."""
+        self.host = os.getenv("POSTGRESQL_HOST", self.host)
+        self.port = int(os.getenv("POSTGRESQL_PORT", str(self.port)))
+        self.database = os.getenv("POSTGRESQL_DATABASE", self.database)
+        self.username = os.getenv("POSTGRESQL_USERNAME", self.username)
+        self.password = os.getenv("POSTGRESQL_PASSWORD", self.password)
 
     @property
     def connection_string(self) -> str:
@@ -70,11 +78,19 @@ class APIConfig:
 class ProcessingConfig:
     """Processing configuration."""
 
-    batch_size: int = int(os.getenv("BATCH_SIZE", "100"))
-    max_workers: int = int(os.getenv("MAX_WORKERS", "4"))
-    chunk_size: int = int(os.getenv("CHUNK_SIZE", "5000"))
-    page_size: int = int(os.getenv("PAGE_SIZE", "250"))
-    max_concurrent: int = int(os.getenv("MAX_CONCURRENT", "5"))
+    batch_size: int = 100
+    max_workers: int = 4
+    chunk_size: int = 5000
+    page_size: int = 250
+    max_concurrent: int = 5
+
+    def __post_init__(self):
+        """Load processing configuration from environment variables."""
+        self.batch_size = int(os.getenv("BATCH_SIZE", str(self.batch_size)))
+        self.max_workers = int(os.getenv("MAX_WORKERS", str(self.max_workers)))
+        self.chunk_size = int(os.getenv("CHUNK_SIZE", str(self.chunk_size)))
+        self.page_size = int(os.getenv("PAGE_SIZE", str(self.page_size)))
+        self.max_concurrent = int(os.getenv("MAX_CONCURRENT", str(self.max_concurrent)))
 
 
 @dataclass
@@ -137,11 +153,16 @@ class StreamlinedConfig:
     congress: int | None = None
 
     # Incremental processing flags
-    incremental: bool = os.getenv("INCREMENTAL", "true").lower() == "true"
-    fallback_days: int = int(os.getenv("FALLBACK_DAYS", "30"))
+    incremental: bool = True
+    fallback_days: int = 30
     use_checkpoint_resume: bool = False
     use_incremental_dates: bool = True
     rerun_mode: bool = False
+
+    def __post_init__(self):
+        """Load streamlined configuration from environment variables."""
+        self.incremental = os.getenv("INCREMENTAL", "true").lower() == "true"
+        self.fallback_days = int(os.getenv("FALLBACK_DAYS", "30"))
 
     @classmethod
     def from_env(cls, env_file: str | None = None) -> "StreamlinedConfig":
