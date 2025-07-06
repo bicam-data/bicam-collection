@@ -396,253 +396,253 @@ class CongressionalFetcherPlugin:
         return await self.extract_item_id(list_item)
 
 
-class CongressionalCleanerPlugin:
-    """Plugin that wraps existing Congressional cleaner implementations."""
+# class CongressionalCleanerPlugin:
+#     """Plugin that wraps existing Congressional cleaner implementations."""
 
-    def __init__(self, data_type: str):
-        self.data_type = data_type
-        self._cleaner_instance = None
+#     def __init__(self, data_type: str):
+#         self.data_type = data_type
+#         self._cleaner_instance = None
 
-    async def _get_cleaner_instance(self):
-        """Get or create cleaner instance."""
-        if self._cleaner_instance is None:
-            self._cleaner_instance = await self._create_cleaner_instance()
-        return self._cleaner_instance
+#     async def _get_cleaner_instance(self):
+#         """Get or create cleaner instance."""
+#         if self._cleaner_instance is None:
+#             self._cleaner_instance = await self._create_cleaner_instance()
+#         return self._cleaner_instance
 
-    async def _create_cleaner_instance(self):
-        """Create cleaner instance for this data type."""
-        try:
-            # Import the specific cleaner class for this data type
-            if self.data_type == "bills":
-                from ...data_types.congressional.bills.cleaner import BillsCleaner
+#     async def _create_cleaner_instance(self):
+#         """Create cleaner instance for this data type."""
+#         try:
+#             # Import the specific cleaner class for this data type
+#             if self.data_type == "bills":
+#                 from ...data_types.congressional.bills.cleaner import BillsCleaner
 
-                return BillsCleaner()
-            elif self.data_type == "amendments":
-                from ...data_types.congressional.amendments.cleaner import (
-                    AmendmentsCleaner,
-                )
+#                 return BillsCleaner()
+#             elif self.data_type == "amendments":
+#                 from ...data_types.congressional.amendments.cleaner import (
+#                     AmendmentsCleaner,
+#                 )
 
-                return AmendmentsCleaner()
-            elif self.data_type == "nominations":
-                from ...data_types.congressional.nominations.cleaner import (
-                    NominationsCleaner,
-                )
+#                 return AmendmentsCleaner()
+#             elif self.data_type == "nominations":
+#                 from ...data_types.congressional.nominations.cleaner import (
+#                     NominationsCleaner,
+#                 )
 
-                return NominationsCleaner()
-            elif self.data_type == "committees":
-                from ...data_types.congressional.committees.cleaner import (
-                    CommitteesCleaner,
-                )
+#                 return NominationsCleaner()
+#             elif self.data_type == "committees":
+#                 from ...data_types.congressional.committees.cleaner import (
+#                     CommitteesCleaner,
+#                 )
 
-                return CommitteesCleaner()
-            elif self.data_type == "members":
-                from ...data_types.congressional.members.cleaner import MembersCleaner
+#                 return CommitteesCleaner()
+#             elif self.data_type == "members":
+#                 from ...data_types.congressional.members.cleaner import MembersCleaner
 
-                return MembersCleaner()
-            elif self.data_type == "congresses":
-                from ...data_types.congressional.congresses.cleaner import (
-                    CongressesCleaner,
-                )
+#                 return MembersCleaner()
+#             elif self.data_type == "congresses":
+#                 from ...data_types.congressional.congresses.cleaner import (
+#                     CongressesCleaner,
+#                 )
 
-                return CongressesCleaner()
-            elif self.data_type == "hearings":
-                from ...data_types.congressional.hearings.cleaner import HearingsCleaner
+#                 return CongressesCleaner()
+#             elif self.data_type == "hearings":
+#                 from ...data_types.congressional.hearings.cleaner import HearingsCleaner
 
-                return HearingsCleaner()
-            elif self.data_type == "treaties":
-                from ...data_types.congressional.treaties.cleaner import TreatiesCleaner
+#                 return HearingsCleaner()
+#             elif self.data_type == "treaties":
+#                 from ...data_types.congressional.treaties.cleaner import TreatiesCleaner
 
-                return TreatiesCleaner()
-            elif self.data_type == "committeereports":
-                from ...data_types.congressional.committeereports.cleaner import (
-                    CommitteereportsCleaner,
-                )
+#                 return TreatiesCleaner()
+#             elif self.data_type == "committeereports":
+#                 from ...data_types.congressional.committeereports.cleaner import (
+#                     CommitteereportsCleaner,
+#                 )
 
-                return CommitteereportsCleaner()
-            elif self.data_type == "committeeprints":
-                from ...data_types.congressional.committeeprints.cleaner import (
-                    CommitteeprintsCleaner,
-                )
+#                 return CommitteereportsCleaner()
+#             elif self.data_type == "committeeprints":
+#                 from ...data_types.congressional.committeeprints.cleaner import (
+#                     CommitteeprintsCleaner,
+#                 )
 
-                return CommitteeprintsCleaner()
-            elif self.data_type == "committeemeetings":
-                from ...data_types.congressional.committeemeetings.cleaner import (
-                    CommitteemeetingsCleaner,
-                )
+#                 return CommitteeprintsCleaner()
+#             elif self.data_type == "committeemeetings":
+#                 from ...data_types.congressional.committeemeetings.cleaner import (
+#                     CommitteemeetingsCleaner,
+#                 )
 
-                return CommitteemeetingsCleaner()
-            else:
-                # Fallback to base cleaner
-                from ...data_types.abstract.base_cleaner import BaseCleaner
+#                 return CommitteemeetingsCleaner()
+#             else:
+#                 # Fallback to base cleaner
+#                 from ...data_types.abstract.base_cleaner import BaseCleaner
 
-                return BaseCleaner(data_type_name=self.data_type)
-        except Exception as e:
-            logger.warning(f"Error creating cleaner for {self.data_type}: {e}")
-            return None
+#                 return BaseCleaner(data_type_name=self.data_type)
+#         except Exception as e:
+#             logger.warning(f"Error creating cleaner for {self.data_type}: {e}")
+#             return None
 
-    async def clean_record(
-        self, record_data: dict[str, Any], data_type: str
-    ) -> dict[str, Any]:
-        """Clean record using existing cleaner implementation."""
-        cleaner = await self._get_cleaner_instance()
-        if cleaner is None:
-            return record_data
+#     async def clean_record(
+#         self, record_data: dict[str, Any], data_type: str
+#     ) -> dict[str, Any]:
+#         """Clean record using existing cleaner implementation."""
+#         cleaner = await self._get_cleaner_instance()
+#         if cleaner is None:
+#             return record_data
 
-        # Use the existing _clean_single_record method
-        try:
-            cleaned_data, _, _ = await cleaner._clean_single_record(
-                record_data, data_type
-            )
-            return cleaned_data
-        except Exception as e:
-            logger.warning(f"Error cleaning record for {data_type}: {e}")
-            return record_data
+#         # Use the existing _clean_single_record method
+#         try:
+#             cleaned_data, _, _ = await cleaner._clean_single_record(
+#                 record_data, data_type
+#             )
+#             return cleaned_data
+#         except Exception as e:
+#             logger.warning(f"Error cleaning record for {data_type}: {e}")
+#             return record_data
 
-    async def clean_table_data(
-        self, table_data: list[dict[str, Any]], table_name: str
-    ) -> list[dict[str, Any]]:
-        """Clean table data using existing cleaner implementation."""
-        cleaner = await self._get_cleaner_instance()
-        if cleaner is None:
-            return table_data
+#     async def clean_table_data(
+#         self, table_data: list[dict[str, Any]], table_name: str
+#     ) -> list[dict[str, Any]]:
+#         """Clean table data using existing cleaner implementation."""
+#         cleaner = await self._get_cleaner_instance()
+#         if cleaner is None:
+#             return table_data
 
-        # Clean each record in the table
-        cleaned_records = []
-        for record in table_data:
-            try:
-                cleaned_record = await self.clean_record(record, table_name)
-                cleaned_records.append(cleaned_record)
-            except Exception as e:
-                logger.warning(f"Error cleaning record in table {table_name}: {e}")
-                cleaned_records.append(record)  # Keep original on error
+#         # Clean each record in the table
+#         cleaned_records = []
+#         for record in table_data:
+#             try:
+#                 cleaned_record = await self.clean_record(record, table_name)
+#                 cleaned_records.append(cleaned_record)
+#             except Exception as e:
+#                 logger.warning(f"Error cleaning record in table {table_name}: {e}")
+#                 cleaned_records.append(record)  # Keep original on error
 
-        return cleaned_records
+#         return cleaned_records
 
 
-class CongressionalNormalizerPlugin:
-    """Plugin that wraps existing Congressional normalizer implementations."""
+# class CongressionalNormalizerPlugin:
+#     """Plugin that wraps existing Congressional normalizer implementations."""
 
-    def __init__(self, data_type: str):
-        self.data_type = data_type
-        self._normalizer_instance = None
+#     def __init__(self, data_type: str):
+#         self.data_type = data_type
+#         self._normalizer_instance = None
 
-    async def _get_normalizer_instance(self):
-        """Get or create normalizer instance."""
-        if self._normalizer_instance is None:
-            self._normalizer_instance = await self._create_normalizer_instance()
-        return self._normalizer_instance
+#     async def _get_normalizer_instance(self):
+#         """Get or create normalizer instance."""
+#         if self._normalizer_instance is None:
+#             self._normalizer_instance = await self._create_normalizer_instance()
+#         return self._normalizer_instance
 
-    async def _create_normalizer_instance(self):
-        """Create normalizer instance for this data type."""
-        try:
-            # Import the specific normalizer class for this data type
-            if self.data_type == "bills":
-                from ...data_types.congressional.bills.database_normalizer import (
-                    BillsDatabaseNormalizer,
-                )
+#     async def _create_normalizer_instance(self):
+#         """Create normalizer instance for this data type."""
+#         try:
+#             # Import the specific normalizer class for this data type
+#             if self.data_type == "bills":
+#                 from ...data_types.congressional.bills.database_normalizer import (
+#                     BillsDatabaseNormalizer,
+#                 )
 
-                return BillsDatabaseNormalizer(self.data_type)
-            elif self.data_type == "amendments":
-                from ...data_types.congressional.amendments.database_normalizer import (
-                    AmendmentsDatabaseNormalizer,
-                )
+#                 return BillsDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "amendments":
+#                 from ...data_types.congressional.amendments.database_normalizer import (
+#                     AmendmentsDatabaseNormalizer,
+#                 )
 
-                return AmendmentsDatabaseNormalizer(self.data_type)
-            elif self.data_type == "nominations":
-                from ...data_types.congressional.nominations.database_normalizer import (
-                    NominationsDatabaseNormalizer,
-                )
+#                 return AmendmentsDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "nominations":
+#                 from ...data_types.congressional.nominations.database_normalizer import (
+#                     NominationsDatabaseNormalizer,
+#                 )
 
-                return NominationsDatabaseNormalizer(self.data_type)
-            elif self.data_type == "committees":
-                from ...data_types.congressional.committees.database_normalizer import (
-                    CommitteesDatabaseNormalizer,
-                )
+#                 return NominationsDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "committees":
+#                 from ...data_types.congressional.committees.database_normalizer import (
+#                     CommitteesDatabaseNormalizer,
+#                 )
 
-                return CommitteesDatabaseNormalizer(self.data_type)
-            elif self.data_type == "members":
-                from ...data_types.congressional.members.database_normalizer import (
-                    MembersDatabaseNormalizer,
-                )
+#                 return CommitteesDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "members":
+#                 from ...data_types.congressional.members.database_normalizer import (
+#                     MembersDatabaseNormalizer,
+#                 )
 
-                return MembersDatabaseNormalizer(self.data_type)
-            elif self.data_type == "congresses":
-                from ...data_types.congressional.congresses.database_normalizer import (
-                    CongressesDatabaseNormalizer,
-                )
+#                 return MembersDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "congresses":
+#                 from ...data_types.congressional.congresses.database_normalizer import (
+#                     CongressesDatabaseNormalizer,
+#                 )
 
-                return CongressesDatabaseNormalizer(self.data_type)
-            elif self.data_type == "hearings":
-                from ...data_types.congressional.hearings.database_normalizer import (
-                    HearingsDatabaseNormalizer,
-                )
+#                 return CongressesDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "hearings":
+#                 from ...data_types.congressional.hearings.database_normalizer import (
+#                     HearingsDatabaseNormalizer,
+#                 )
 
-                return HearingsDatabaseNormalizer(self.data_type)
-            elif self.data_type == "treaties":
-                from ...data_types.congressional.treaties.database_normalizer import (
-                    TreatiesDatabaseNormalizer,
-                )
+#                 return HearingsDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "treaties":
+#                 from ...data_types.congressional.treaties.database_normalizer import (
+#                     TreatiesDatabaseNormalizer,
+#                 )
 
-                return TreatiesDatabaseNormalizer(self.data_type)
-            elif self.data_type == "committeereports":
-                from ...data_types.congressional.committeereports.database_normalizer import (
-                    CommitteereportsDatabaseNormalizer,
-                )
+#                 return TreatiesDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "committeereports":
+#                 from ...data_types.congressional.committeereports.database_normalizer import (
+#                     CommitteereportsDatabaseNormalizer,
+#                 )
 
-                return CommitteereportsDatabaseNormalizer(self.data_type)
-            elif self.data_type == "committeeprints":
-                from ...data_types.congressional.committeeprints.database_normalizer import (
-                    CommitteeprintsDatabaseNormalizer,
-                )
+#                 return CommitteereportsDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "committeeprints":
+#                 from ...data_types.congressional.committeeprints.database_normalizer import (
+#                     CommitteeprintsDatabaseNormalizer,
+#                 )
 
-                return CommitteeprintsDatabaseNormalizer(self.data_type)
-            elif self.data_type == "committeemeetings":
-                from ...data_types.congressional.committeemeetings.database_normalizer import (
-                    CommitteemeetingsDatabaseNormalizer,
-                )
+#                 return CommitteeprintsDatabaseNormalizer(self.data_type)
+#             elif self.data_type == "committeemeetings":
+#                 from ...data_types.congressional.committeemeetings.database_normalizer import (
+#                     CommitteemeetingsDatabaseNormalizer,
+#                 )
 
-                return CommitteemeetingsDatabaseNormalizer(self.data_type)
-            else:
-                # Fallback to base normalizer
-                from ...data_types.abstract.base_database_normalizer import (
-                    BaseDatabaseNormalizer,
-                )
+#                 return CommitteemeetingsDatabaseNormalizer(self.data_type)
+#             else:
+#                 # Fallback to base normalizer
+#                 from ...data_types.abstract.base_database_normalizer import (
+#                     BaseDatabaseNormalizer,
+#                 )
 
-                return BaseDatabaseNormalizer(self.data_type)
-        except Exception as e:
-            logger.warning(f"Error creating normalizer for {self.data_type}: {e}")
-            return None
+#                 return BaseDatabaseNormalizer(self.data_type)
+#         except Exception as e:
+#             logger.warning(f"Error creating normalizer for {self.data_type}: {e}")
+#             return None
 
-    async def normalize_jsonb_data(
-        self, db_pool, schema: str, table: str
-    ) -> dict[str, Any]:
-        """Normalize JSONB data using existing normalizer implementation."""
-        normalizer = await self._get_normalizer_instance()
-        if normalizer is None:
-            return {"status": "error", "message": "No normalizer available"}
+#     async def normalize_jsonb_data(
+#         self, db_pool, schema: str, table: str
+#     ) -> dict[str, Any]:
+#         """Normalize JSONB data using existing normalizer implementation."""
+#         normalizer = await self._get_normalizer_instance()
+#         if normalizer is None:
+#             return {"status": "error", "message": "No normalizer available"}
 
-        # Use the existing normalization methods
-        try:
-            # This would use the existing normalize_data method
-            # Implementation depends on the specific normalizer interface
-            return {"status": "success", "normalized_records": 0}
-        except Exception as e:
-            logger.warning(f"Error normalizing JSONB data: {e}")
-            return {"status": "error", "message": str(e)}
+#         # Use the existing normalization methods
+#         try:
+#             # This would use the existing normalize_data method
+#             # Implementation depends on the specific normalizer interface
+#             return {"status": "success", "normalized_records": 0}
+#         except Exception as e:
+#             logger.warning(f"Error normalizing JSONB data: {e}")
+#             return {"status": "error", "message": str(e)}
 
-    async def extract_list_data(
-        self, db_pool, schema: str, source_table: str
-    ) -> dict[str, Any]:
-        """Extract list data using existing normalizer implementation."""
-        normalizer = await self._get_normalizer_instance()
-        if normalizer is None:
-            return {"status": "error", "message": "No normalizer available"}
+#     async def extract_list_data(
+#         self, db_pool, schema: str, source_table: str
+#     ) -> dict[str, Any]:
+#         """Extract list data using existing normalizer implementation."""
+#         normalizer = await self._get_normalizer_instance()
+#         if normalizer is None:
+#             return {"status": "error", "message": "No normalizer available"}
 
-        # Use the existing list extraction methods
-        try:
-            # This would use the existing extract_list_data method
-            # Implementation depends on the specific normalizer interface
-            return {"status": "success", "extracted_records": 0}
-        except Exception as e:
-            logger.warning(f"Error extracting list data: {e}")
-            return {"status": "error", "message": str(e)}
+#         # Use the existing list extraction methods
+#         try:
+#             # This would use the existing extract_list_data method
+#             # Implementation depends on the specific normalizer interface
+#             return {"status": "success", "extracted_records": 0}
+#         except Exception as e:
+#             logger.warning(f"Error extracting list data: {e}")
+#             return {"status": "error", "message": str(e)}

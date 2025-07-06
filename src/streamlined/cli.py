@@ -166,7 +166,18 @@ Examples:
     clear_checkpoints_parser.add_argument(
         "--phases",
         nargs="+",
-        choices=["list_items", "full_data", "related_data"],
+        choices=[
+            "fetching",
+            "staging",
+            "cleaning",
+            "list_items",
+            "full_data",
+            "related_data",
+            "jsonb_to_staging",
+            "extract_lists",
+            "validate_staging",
+            "apply_rules",
+        ],
         help="Specific phases to clear (default: all phases)",
     )
     clear_checkpoints_parser.add_argument(
@@ -652,7 +663,7 @@ async def command_list_checkpoints(args) -> int:
 
         # Create checkpoint manager with proper path
         checkpoint_manager = HierarchicalCheckpointManager(
-            db_path="data/checkpoints/hierarchical_checkpoints.db"
+            db_path=config.infrastructure.checkpoint_db_path
         )
 
         logger.info(f"\n{'=' * 60}")
@@ -707,6 +718,9 @@ async def command_clear_checkpoints(args) -> int:
     try:
         from .libs.hierarchical_checkpoint_system import (
             FetchingPhase,
+            StagingPhase,
+            CleaningPhase,
+            ProcessingStage,
             HierarchicalCheckpointManager,
         )
 
@@ -714,44 +728,80 @@ async def command_clear_checkpoints(args) -> int:
 
         # Create checkpoint manager with proper path
         checkpoint_manager = HierarchicalCheckpointManager(
-            db_path="data/checkpoints/hierarchical_checkpoints.db"
+            db_path=config.infrastructure.checkpoint_db_path
         )
-
-        # Determine which phases to clear
-        phases_to_clear = []
-        if args.phases:
-            phase_map = {
-                "list_items": FetchingPhase.LIST_ITEMS,
-                "full_data": FetchingPhase.FULL_DATA,
-                "related_data": FetchingPhase.RELATED_DATA,
-            }
-            phases_to_clear = [phase_map[phase] for phase in args.phases]
-        else:
-            phases_to_clear = None  # Clear all phases
 
         # Show what will be cleared
         logger.info(f"\n{'=' * 60}")
         logger.info(f"CLEAR CHECKPOINTS for {args.data_type}")
         logger.info(f"{'=' * 60}")
 
-        if phases_to_clear:
-            logger.info(f"Phases to clear: {[p.value for p in phases_to_clear]}")
-        else:
-            logger.info("All phases will be cleared")
-
-        # Get current checkpoint status using available method
+        # Get current checkpoint status
         current_stats = checkpoint_manager.get_progress_summary(args.data_type)
 
         if current_stats:
             logger.info("\nCurrent checkpoint status:")
             for stage, phases in current_stats.items():
                 for phase, stats in phases.items():
-                    if not phases_to_clear or any(
-                        p.value == phase for p in phases_to_clear
-                    ):
-                        logger.info(
-                            f"  {stage}.{phase}: {stats.get('processed', 0)} items processed"
-                        )
+                    processed = stats.get("processed", 0)
+                    total = stats.get("total", 0)
+                    logger.info(
+                        f"  {stage}.{phase}: {processed}/{total} items processed"
+                    )
+
+        # Determine what to clear
+        phases_to_clear = []
+
+        if args.phases:
+            # Map phase names to actual phases
+            phase_map = {
+                # Fetching phases
+                "list_items": (
+                    ProcessingStage.FETCHING,
+                    FetchingPhase.LIST_ITEMS.value,
+                ),
+                "full_data": (ProcessingStage.FETCHING, FetchingPhase.FULL_DATA.value),
+                "related_data": (
+                    ProcessingStage.FETCHING,
+                    FetchingPhase.RELATED_DATA.value,
+                ),
+                # Staging phases
+                "jsonb_to_staging": (
+                    ProcessingStage.STAGING,
+                    StagingPhase.JSONB_TO_STAGING.value,
+                ),
+                "extract_lists": (
+                    ProcessingStage.STAGING,
+                    StagingPhase.EXTRACT_LISTS.value,
+                ),
+                "validate_staging": (
+                    ProcessingStage.STAGING,
+                    StagingPhase.VALIDATE_STAGING.value,
+                ),
+                # Cleaning phases
+                "apply_rules": (
+                    ProcessingStage.CLEANING,
+                    CleaningPhase.APPLY_RULES.value,
+                ),
+                # Stage-level clearing
+                "fetching": "fetching_all",
+                "staging": "staging_all",
+                "cleaning": "cleaning_all",
+            }
+
+            for phase_name in args.phases:
+                if phase_name in phase_map:
+                    phases_to_clear.append((phase_name, phase_map[phase_name]))
+                else:
+                    logger.warning(f"Unknown phase: {phase_name}")
+
+            if phases_to_clear:
+                logger.info(f"Phases to clear: {[p[0] for p in phases_to_clear]}")
+            else:
+                logger.info("No valid phases specified - clearing all phases")
+                phases_to_clear = None
+        else:
+            logger.info("All phases will be cleared")
 
         # Confirmation prompt
         if not args.confirm:
@@ -762,35 +812,77 @@ async def command_clear_checkpoints(args) -> int:
                 logger.info("Operation cancelled")
                 return 0
 
-        # Clear checkpoints using available method
-        from .libs.hierarchical_checkpoint_system import ProcessingStage
+        # Clear checkpoints
+        cleared_count = 0
 
-        # Import the stage mapping
-        stage_map = {
-            "fetching": ProcessingStage.FETCHING,
-            "cleaning": ProcessingStage.CLEANING,
-            "staging": ProcessingStage.STAGING,
-        }
-
-        # If specific phases are requested, clear those phases
         if phases_to_clear:
-            for phase in phases_to_clear:
-                # Clear from fetching stage (where these phases belong)
-                checkpoint_manager.reset_checkpoint(
-                    ProcessingStage.FETCHING, phase.value, args.data_type
-                )
-        else:
-            # Clear all phases by clearing all stages
-            for stage in stage_map.values():
-                # Get all phases for this stage and clear them
-                stage_summary = checkpoint_manager.get_progress_summary(args.data_type)
-                if stage.value in stage_summary:
-                    for phase in stage_summary[stage.value].keys():
+            # Clear specific phases
+            for phase_name, phase_info in phases_to_clear:
+                if phase_info == "fetching_all":
+                    # Clear all fetching phases
+                    for phase in FetchingPhase:
                         checkpoint_manager.reset_checkpoint(
-                            stage, phase, args.data_type
+                            ProcessingStage.FETCHING,
+                            phase.value,
+                            args.data_type,
+                            clear_processed=True,
                         )
+                        cleared_count += 1
+                        logger.info(f"  Cleared: fetching.{phase.value}")
+                elif phase_info == "staging_all":
+                    # Clear all staging phases
+                    for phase in StagingPhase:
+                        checkpoint_manager.reset_checkpoint(
+                            ProcessingStage.STAGING,
+                            phase.value,
+                            args.data_type,
+                            clear_processed=True,
+                        )
+                        cleared_count += 1
+                        logger.info(f"  Cleared: staging.{phase.value}")
+                elif phase_info == "cleaning_all":
+                    # Clear all cleaning phases
+                    for phase in CleaningPhase:
+                        checkpoint_manager.reset_checkpoint(
+                            ProcessingStage.CLEANING,
+                            phase.value,
+                            args.data_type,
+                            clear_processed=True,
+                        )
+                        cleared_count += 1
+                        logger.info(f"  Cleared: cleaning.{phase.value}")
+                else:
+                    # Clear specific phase
+                    stage, phase = phase_info
+                    checkpoint_manager.reset_checkpoint(
+                        stage, phase, args.data_type, clear_processed=True
+                    )
+                    cleared_count += 1
+                    logger.info(f"  Cleared: {stage.value}.{phase}")
+        else:
+            # Clear all phases from all stages
+            all_phases = [
+                (ProcessingStage.FETCHING, FetchingPhase.LIST_ITEMS.value),
+                (ProcessingStage.FETCHING, FetchingPhase.FULL_DATA.value),
+                (ProcessingStage.FETCHING, FetchingPhase.RELATED_DATA.value),
+                (ProcessingStage.STAGING, StagingPhase.JSONB_TO_STAGING.value),
+                (ProcessingStage.STAGING, StagingPhase.EXTRACT_LISTS.value),
+                (ProcessingStage.STAGING, StagingPhase.VALIDATE_STAGING.value),
+                (ProcessingStage.CLEANING, CleaningPhase.APPLY_RULES.value),
+            ]
 
-        logger.info(f"\n✓ Checkpoints cleared for {args.data_type}")
+            for stage, phase in all_phases:
+                checkpoint_manager.reset_checkpoint(
+                    stage, phase, args.data_type, clear_processed=True
+                )
+                cleared_count += 1
+                logger.info(f"  Cleared: {stage.value}.{phase}")
+
+        # Flush caches to ensure changes are persisted
+        checkpoint_manager.flush_all_caches()
+
+        logger.info(f"\n✓ Cleared {cleared_count} checkpoints for {args.data_type}")
+        logger.info("✓ Flushed checkpoint caches")
 
         return 0
 

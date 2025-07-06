@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class ProcessingStage(str, Enum):
     """High-level processing stages."""
+
     FETCHING = "fetching"
     STAGING = "staging"
     CLEANING = "cleaning"
@@ -30,6 +31,7 @@ class ProcessingStage(str, Enum):
 
 class FetchingPhase(str, Enum):
     """Fetching sub-phases."""
+
     LIST_ITEMS = "list_items"
     FULL_DATA = "full_data"
     RELATED_DATA = "related_data"
@@ -37,6 +39,7 @@ class FetchingPhase(str, Enum):
 
 class StagingPhase(str, Enum):
     """Staging/normalization sub-phases."""
+
     JSONB_TO_STAGING = "jsonb_to_staging"
     EXTRACT_LISTS = "extract_lists"
     VALIDATE_STAGING = "validate_staging"
@@ -44,6 +47,7 @@ class StagingPhase(str, Enum):
 
 class CleaningPhase(str, Enum):
     """Cleaning sub-phases."""
+
     APPLY_RULES = "apply_rules"
     VALIDATE_PRODUCTION = "validate_production"
 
@@ -51,6 +55,7 @@ class CleaningPhase(str, Enum):
 @dataclass
 class CheckpointState:
     """Represents the current state of processing."""
+
     stage: ProcessingStage
     phase: str  # Phase within stage
     data_type: str
@@ -77,44 +82,48 @@ class CheckpointState:
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
         return {
-            'stage': self.stage.value,
-            'phase': self.phase,
-            'data_type': self.data_type,
-            'current_item_id': self.current_item_id,
-            'current_offset': self.current_offset,
-            'current_table': self.current_table,
-            'current_field': self.current_field,
-            'current_endpoint': self.current_endpoint,
-            'total_items': self.total_items,
-            'processed_items': self.processed_items,
-            'failed_items': self.failed_items,
-            'skipped_items': self.skipped_items,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'error_message': self.error_message,
-            'metadata': json.dumps(self.metadata)
+            "stage": self.stage.value,
+            "phase": self.phase,
+            "data_type": self.data_type,
+            "current_item_id": self.current_item_id,
+            "current_offset": self.current_offset,
+            "current_table": self.current_table,
+            "current_field": self.current_field,
+            "current_endpoint": self.current_endpoint,
+            "total_items": self.total_items,
+            "processed_items": self.processed_items,
+            "failed_items": self.failed_items,
+            "skipped_items": self.skipped_items,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "error_message": self.error_message,
+            "metadata": json.dumps(self.metadata),
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'CheckpointState':
+    def from_dict(cls, data: dict) -> "CheckpointState":
         """Create from dictionary."""
         return cls(
-            stage=ProcessingStage(data['stage']),
-            phase=data['phase'],
-            data_type=data['data_type'],
-            current_item_id=data.get('current_item_id'),
-            current_offset=data.get('current_offset', 0),
-            current_table=data.get('current_table'),
-            current_field=data.get('current_field'),
-            current_endpoint=data.get('current_endpoint'),
-            total_items=data.get('total_items', 0),
-            processed_items=data.get('processed_items', 0),
-            failed_items=data.get('failed_items', 0),
-            skipped_items=data.get('skipped_items', 0),
-            started_at=datetime.fromisoformat(data['started_at']) if data.get('started_at') else None,
-            updated_at=datetime.fromisoformat(data['updated_at']) if data.get('updated_at') else None,
-            error_message=data.get('error_message'),
-            metadata=json.loads(data.get('metadata', '{}'))
+            stage=ProcessingStage(data["stage"]),
+            phase=data["phase"],
+            data_type=data["data_type"],
+            current_item_id=data.get("current_item_id"),
+            current_offset=data.get("current_offset", 0),
+            current_table=data.get("current_table"),
+            current_field=data.get("current_field"),
+            current_endpoint=data.get("current_endpoint"),
+            total_items=data.get("total_items", 0),
+            processed_items=data.get("processed_items", 0),
+            failed_items=data.get("failed_items", 0),
+            skipped_items=data.get("skipped_items", 0),
+            started_at=datetime.fromisoformat(data["started_at"])
+            if data.get("started_at")
+            else None,
+            updated_at=datetime.fromisoformat(data["updated_at"])
+            if data.get("updated_at")
+            else None,
+            error_message=data.get("error_message"),
+            metadata=json.loads(data.get("metadata", "{}")),
         )
 
 
@@ -212,10 +221,7 @@ class HierarchicalCheckpointManager:
         conn.close()
 
     def get_or_create_checkpoint(
-        self,
-        stage: ProcessingStage,
-        phase: str,
-        data_type: str
+        self, stage: ProcessingStage, phase: str, data_type: str
     ) -> CheckpointState:
         """Get existing checkpoint or create new one."""
         conn = sqlite3.connect(self.db_path)
@@ -228,7 +234,7 @@ class HierarchicalCheckpointManager:
                 SELECT * FROM checkpoints
                 WHERE stage = ? AND phase = ? AND data_type = ?
                 """,
-                (stage.value, phase, data_type)
+                (stage.value, phase, data_type),
             )
             row = cursor.fetchone()
 
@@ -237,10 +243,7 @@ class HierarchicalCheckpointManager:
 
             # Create new checkpoint
             checkpoint = CheckpointState(
-                stage=stage,
-                phase=phase,
-                data_type=data_type,
-                started_at=datetime.now()
+                stage=stage, phase=phase, data_type=data_type, started_at=datetime.now()
             )
 
             self.save_checkpoint(checkpoint)
@@ -267,14 +270,23 @@ class HierarchicalCheckpointManager:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    data['stage'], data['phase'], data['data_type'],
-                    data['current_item_id'], data['current_offset'],
-                    data['current_table'], data['current_field'], data['current_endpoint'],
-                    data['total_items'], data['processed_items'],
-                    data['failed_items'], data['skipped_items'],
-                    data['started_at'], data['updated_at'],
-                    data['error_message'], data['metadata']
-                )
+                    data["stage"],
+                    data["phase"],
+                    data["data_type"],
+                    data["current_item_id"],
+                    data["current_offset"],
+                    data["current_table"],
+                    data["current_field"],
+                    data["current_endpoint"],
+                    data["total_items"],
+                    data["processed_items"],
+                    data["failed_items"],
+                    data["skipped_items"],
+                    data["started_at"],
+                    data["updated_at"],
+                    data["error_message"],
+                    data["metadata"],
+                ),
             )
             conn.commit()
 
@@ -287,7 +299,7 @@ class HierarchicalCheckpointManager:
         phase: str,
         data_type: str,
         item_id: str,
-        sub_item: str = ""
+        sub_item: str = "",
     ):
         """Mark an item as processed (uses cache for performance)."""
         cache_key = f"{stage.value}:{phase}:{data_type}"
@@ -312,7 +324,7 @@ class HierarchicalCheckpointManager:
                 (stage, phase, data_type, item_id, sub_item, processed_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (stage.value, phase, data_type, item_id, sub_item, time.time())
+                (stage.value, phase, data_type, item_id, sub_item, time.time()),
             )
             conn.commit()
         finally:
@@ -324,14 +336,17 @@ class HierarchicalCheckpointManager:
         phase: str,
         data_type: str,
         item_id: str,
-        sub_item: str = ""
+        sub_item: str = "",
     ) -> bool:
         """Check if item is already processed (uses cache first)."""
         cache_key = f"{stage.value}:{phase}:{data_type}"
         cache_item = f"{item_id}:{sub_item}" if sub_item else item_id
 
         # Check cache first
-        if cache_key in self._processed_cache and cache_item in self._processed_cache[cache_key]:
+        if (
+            cache_key in self._processed_cache
+            and cache_item in self._processed_cache[cache_key]
+        ):
             return True
 
         # Check database
@@ -344,7 +359,7 @@ class HierarchicalCheckpointManager:
                 AND item_id = ? AND sub_item = ?
                 LIMIT 1
                 """,
-                (stage.value, phase, data_type, item_id, sub_item)
+                (stage.value, phase, data_type, item_id, sub_item),
             )
             return cursor.fetchone() is not None
         finally:
@@ -359,7 +374,7 @@ class HierarchicalCheckpointManager:
         error_message: str,
         error_type: str = "general",
         sub_item: str = "",
-        error_details: str = ""
+        error_details: str = "",
     ):
         """Log processing error."""
         conn = sqlite3.connect(self.db_path)
@@ -372,20 +387,23 @@ class HierarchicalCheckpointManager:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    stage.value, phase, data_type, item_id, sub_item,
-                    error_type, error_message, error_details, time.time()
-                )
+                    stage.value,
+                    phase,
+                    data_type,
+                    item_id,
+                    sub_item,
+                    error_type,
+                    error_message,
+                    error_details,
+                    time.time(),
+                ),
             )
             conn.commit()
         finally:
             conn.close()
 
     def get_failed_items(
-        self,
-        stage: ProcessingStage,
-        phase: str,
-        data_type: str,
-        max_retries: int = 3
+        self, stage: ProcessingStage, phase: str, data_type: str, max_retries: int = 3
     ) -> list[dict[str, Any]]:
         """Get failed items that haven't exceeded retry limit."""
         conn = sqlite3.connect(self.db_path)
@@ -401,7 +419,7 @@ class HierarchicalCheckpointManager:
                 GROUP BY item_id, sub_item
                 HAVING retry_count < ?
                 """,
-                (stage.value, phase, data_type, max_retries)
+                (stage.value, phase, data_type, max_retries),
             )
 
             return [dict(row) for row in cursor.fetchall()]
@@ -418,15 +436,15 @@ class HierarchicalCheckpointManager:
         if not items:
             return
 
-        stage, phase, data_type = cache_key.split(':')
+        stage, phase, data_type = cache_key.split(":")
 
         conn = sqlite3.connect(self.db_path)
         try:
             # Batch insert
             data = []
             for item in items:
-                if ':' in item:
-                    item_id, sub_item = item.split(':', 1)
+                if ":" in item:
+                    item_id, sub_item = item.split(":", 1)
                 else:
                     item_id, sub_item = item, ""
 
@@ -438,7 +456,7 @@ class HierarchicalCheckpointManager:
                 (stage, phase, data_type, item_id, sub_item, processed_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                data
+                data,
             )
             conn.commit()
 
@@ -467,21 +485,21 @@ class HierarchicalCheckpointManager:
                 WHERE data_type = ?
                 ORDER BY stage, phase
                 """,
-                (data_type,)
+                (data_type,),
             )
 
             stages = {}
             for row in cursor.fetchall():
-                stage = row['stage']
+                stage = row["stage"]
                 if stage not in stages:
                     stages[stage] = {}
 
-                stages[stage][row['phase']] = {
-                    'processed': row['processed_items'],
-                    'failed': row['failed_items'],
-                    'total': row['total_items'],
-                    'current_item': row['current_item_id'],
-                    'last_updated': row['updated_at']
+                stages[stage][row["phase"]] = {
+                    "processed": row["processed_items"],
+                    "failed": row["failed_items"],
+                    "total": row["total_items"],
+                    "current_item": row["current_item_id"],
+                    "last_updated": row["updated_at"],
                 }
 
             return stages
@@ -494,7 +512,7 @@ class HierarchicalCheckpointManager:
         stage: ProcessingStage,
         phase: str,
         data_type: str,
-        clear_processed: bool = True
+        clear_processed: bool = True,
     ):
         """Reset a checkpoint to start fresh."""
         conn = sqlite3.connect(self.db_path)
@@ -505,7 +523,7 @@ class HierarchicalCheckpointManager:
                 DELETE FROM checkpoints
                 WHERE stage = ? AND phase = ? AND data_type = ?
                 """,
-                (stage.value, phase, data_type)
+                (stage.value, phase, data_type),
             )
 
             if clear_processed:
@@ -515,7 +533,7 @@ class HierarchicalCheckpointManager:
                     DELETE FROM processed_items
                     WHERE stage = ? AND phase = ? AND data_type = ?
                     """,
-                    (stage.value, phase, data_type)
+                    (stage.value, phase, data_type),
                 )
 
                 # Clear errors
@@ -524,7 +542,7 @@ class HierarchicalCheckpointManager:
                     DELETE FROM processing_errors
                     WHERE stage = ? AND phase = ? AND data_type = ?
                     """,
-                    (stage.value, phase, data_type)
+                    (stage.value, phase, data_type),
                 )
 
             conn.commit()
@@ -540,10 +558,13 @@ class HierarchicalCheckpointManager:
 
 # Convenience classes for specific stages
 
+
 class FetchingCheckpoint:
     """Specialized checkpoint manager for fetching stage."""
 
-    def __init__(self, checkpoint_manager: HierarchicalCheckpointManager, data_type: str):
+    def __init__(
+        self, checkpoint_manager: HierarchicalCheckpointManager, data_type: str
+    ):
         self.cm = checkpoint_manager
         self.data_type = data_type
         self.stage = ProcessingStage.FETCHING
@@ -563,8 +584,11 @@ class FetchingCheckpoint:
     def mark_related_endpoint_processed(self, item_id: str, endpoint: str):
         """Mark a related endpoint as processed."""
         self.cm.mark_item_processed(
-            self.stage, FetchingPhase.RELATED_DATA.value, self.data_type,
-            item_id, sub_item=endpoint
+            self.stage,
+            FetchingPhase.RELATED_DATA.value,
+            self.data_type,
+            item_id,
+            sub_item=endpoint,
         )
 
     def should_skip_list_item(self, item_id: str) -> bool:
@@ -582,8 +606,11 @@ class FetchingCheckpoint:
     def should_skip_related_endpoint(self, item_id: str, endpoint: str) -> bool:
         """Check if related endpoint was already processed."""
         return self.cm.is_item_processed(
-            self.stage, FetchingPhase.RELATED_DATA.value, self.data_type,
-            item_id, sub_item=endpoint
+            self.stage,
+            FetchingPhase.RELATED_DATA.value,
+            self.data_type,
+            item_id,
+            sub_item=endpoint,
         )
 
     def get_checkpoint(self, phase: FetchingPhase) -> CheckpointState:
@@ -598,7 +625,9 @@ class FetchingCheckpoint:
 class StagingCheckpoint:
     """Specialized checkpoint manager for staging/normalization."""
 
-    def __init__(self, checkpoint_manager: HierarchicalCheckpointManager, data_type: str):
+    def __init__(
+        self, checkpoint_manager: HierarchicalCheckpointManager, data_type: str
+    ):
         self.cm = checkpoint_manager
         self.data_type = data_type
         self.stage = ProcessingStage.STAGING
@@ -612,8 +641,11 @@ class StagingCheckpoint:
     def mark_list_extracted(self, table_name: str, field_name: str):
         """Mark a list field as extracted to its own table."""
         self.cm.mark_item_processed(
-            self.stage, StagingPhase.EXTRACT_LISTS.value, self.data_type,
-            table_name, sub_item=field_name
+            self.stage,
+            StagingPhase.EXTRACT_LISTS.value,
+            self.data_type,
+            table_name,
+            sub_item=field_name,
         )
 
     def should_skip_table(self, table_name: str) -> bool:
@@ -625,15 +657,24 @@ class StagingCheckpoint:
     def should_skip_list_extraction(self, table_name: str, field_name: str) -> bool:
         """Check if list was already extracted."""
         return self.cm.is_item_processed(
-            self.stage, StagingPhase.EXTRACT_LISTS.value, self.data_type,
-            table_name, sub_item=field_name
+            self.stage,
+            StagingPhase.EXTRACT_LISTS.value,
+            self.data_type,
+            table_name,
+            sub_item=field_name,
         )
+
+    def save_checkpoint(self, checkpoint: CheckpointState):
+        """Save checkpoint state."""
+        self.cm.save_checkpoint(checkpoint)
 
 
 class CleaningCheckpoint:
     """Specialized checkpoint manager for cleaning stage."""
 
-    def __init__(self, checkpoint_manager: HierarchicalCheckpointManager, data_type: str):
+    def __init__(
+        self, checkpoint_manager: HierarchicalCheckpointManager, data_type: str
+    ):
         self.cm = checkpoint_manager
         self.data_type = data_type
         self.stage = ProcessingStage.CLEANING
@@ -649,3 +690,7 @@ class CleaningCheckpoint:
         return self.cm.is_item_processed(
             self.stage, CleaningPhase.APPLY_RULES.value, self.data_type, table_name
         )
+
+    def save_checkpoint(self, checkpoint: CheckpointState):
+        """Save checkpoint state."""
+        self.cm.save_checkpoint(checkpoint)

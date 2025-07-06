@@ -118,12 +118,12 @@ class StreamlinedExecutor:
                             data_type, from_date, to_date, limit, **kwargs
                         )
                     elif phase == "staging":
-                        # Data cleaning and staging
+                        # Data normalization to staging
                         phase_results = await self._execute_staging_phase(
                             data_type, **kwargs
                         )
                     elif phase == "production":
-                        # Data normalization to production
+                        # Data cleaning to production
                         phase_results = await self._execute_production_phase(
                             data_type, **kwargs
                         )
@@ -151,6 +151,21 @@ class StreamlinedExecutor:
             results["status"] = "failed"
 
         finally:
+            # Cleanup components
+            try:
+                # Cleanup normalizer (will flush any buffered data)
+                await self.normalizer.cleanup()
+
+                # Cleanup fetcher if initialized
+                if self.fetcher:
+                    await self.fetcher.cleanup()
+
+                # Cleanup cleaner
+                # await self.cleaner.cleanup()
+
+            except Exception as e:
+                logger.warning(f"Error during component cleanup: {e}")
+
             # Cleanup resources
             await self.coordinator.cleanup()
 
@@ -190,35 +205,46 @@ class StreamlinedExecutor:
         }
 
     async def _execute_staging_phase(self, data_type: str, **kwargs) -> dict[str, Any]:
-        """Execute data cleaning and staging phase."""
+        """Execute data normalization to staging phase."""
         logger.info(f"Executing staging phase for {data_type}")
-
-        # Use streamlined cleaner with plugin system
-        results = await self.cleaner.clean_data_type(data_type=data_type, **kwargs)
-
-        return {
-            "phase": "staging",
-            "items_cleaned": results.get("items_cleaned", 0),
-            "items_validated": results.get("items_validated", 0),
-            "duration": results.get("duration", 0),
-            "status": "completed",
-        }
-
-    async def _execute_production_phase(
-        self, data_type: str, **kwargs
-    ) -> dict[str, Any]:
-        """Execute data normalization to production phase."""
-        logger.info(f"Executing production phase for {data_type}")
 
         # Use streamlined normalizer with plugin system
         results = await self.normalizer.normalize_data_type(
             data_type=data_type, **kwargs
         )
 
+        # Map the actual returned metrics to expected format
+        return {
+            "phase": "staging",
+            "items_normalized": (
+                results.get("main_records_processed", 0)
+                + results.get("related_records_processed", 0)
+            ),
+            "items_inserted": (
+                results.get("main_records_processed", 0)
+                + results.get("related_records_processed", 0)
+                + results.get("lists_extracted", 0)
+            ),
+            "duration": results.get("duration", 0),
+            "status": results.get("status", "completed"),
+            "errors": results.get("errors", 0),
+        }
+
+    async def _execute_production_phase(
+        self, data_type: str, **kwargs
+    ) -> dict[str, Any]:
+        """Execute data cleaning to production phase."""
+        logger.info(f"Executing production phase for {data_type}")
+
+        # Use streamlined cleaner with plugin system
+        results = await self.cleaner.clean_data_type(
+            data_type=data_type, **kwargs
+        )
+
         return {
             "phase": "production",
-            "items_normalized": results.get("items_normalized", 0),
-            "items_inserted": results.get("items_inserted", 0),
+            "items_cleaned": results.get("items_cleaned", 0),
+            "items_validated": results.get("items_validated", 0),
             "duration": results.get("duration", 0),
             "status": "completed",
         }

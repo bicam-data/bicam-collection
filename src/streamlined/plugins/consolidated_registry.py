@@ -24,11 +24,7 @@ from ..libs.data_type_config import (
     SchemaConfig,
 )
 from .base import CleanerPlugin, FetcherPlugin, NormalizerPlugin
-from .congressional import (
-    CongressionalCleanerPlugin,
-    CongressionalFetcherPlugin,
-    CongressionalNormalizerPlugin,
-)
+from .congressional import CongressionalFetcherPlugin
 from .govinfo import (
     GovInfoCleanerPlugin,
     GovInfoFetcherPlugin,
@@ -305,7 +301,7 @@ class ConsolidatedRegistry:
 
         try:
             if data_source == "congressional":
-                return CongressionalCleanerPlugin(data_type)
+                return None
             elif data_source == "govinfo":
                 return GovInfoCleanerPlugin(data_type)
             else:
@@ -324,7 +320,7 @@ class ConsolidatedRegistry:
 
         try:
             if data_source == "congressional":
-                return CongressionalNormalizerPlugin(data_type)
+                return None
             elif data_source == "govinfo":
                 return GovInfoNormalizerPlugin(data_type)
             else:

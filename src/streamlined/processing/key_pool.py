@@ -224,3 +224,5 @@ class DynamicKeyPool:
 
         if reset_count > 0:
             logger.info(f"Reset {reset_count} expired rate limits")
+
+        return reset_count

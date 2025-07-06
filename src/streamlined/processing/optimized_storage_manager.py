@@ -10,6 +10,7 @@ This module provides efficient batched storage with:
 """
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -18,7 +19,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import asyncpg
 from asyncpg.pool import Pool
@@ -913,3 +914,450 @@ class OptimizedFetcherStorage:
     ):
         """Save checkpoint using SQLite."""
         self.storage.save_checkpoint(data_type, phase, offset, item_id, total_processed)
+
+
+class OptimizedNormalizerStorage:
+    """
+    Storage adapter for StreamlinedNormalizer with dynamic schema support.
+
+    Handles all database operations including:
+    - Dynamic table creation (all TEXT columns, no constraints)
+    - Bulk inserts using PostgreSQL COPY
+    - Schema evolution (adding missing columns)
+    - Efficient batching and flushing
+    """
+
+    def __init__(
+        self,
+        storage_manager: OptimizedStorageManager,
+        target_schema: str = "bicam_staging",
+        data_type: str = None,
+    ):
+        """
+        Initialize the normalizer storage adapter.
+
+        Args:
+            storage_manager: The underlying optimized storage manager
+            target_schema: Target schema for normalized data
+            data_type: Data type being processed (for checkpointing)
+        """
+        self.storage = storage_manager
+        self.target_schema = target_schema
+        self.data_type = data_type
+
+        # Table schema cache to avoid repeated operations
+        self._table_schema_cache = {}
+        self._cache_lock = asyncio.Lock()
+
+        # Batch accumulator for bulk operations
+        self.batch_accumulator = defaultdict(list)
+        self.batch_sizes = defaultdict(int)
+        self.max_batch_size = 5000
+
+        logger.info(f"OptimizedNormalizerStorage initialized for {target_schema}")
+
+    async def store_normalized_records(
+        self,
+        table_name: str,
+        records: list[dict[str, Any]],
+        record_type: Literal["main", "related", "nested"] = "main",
+        ensure_table: bool = True,
+        checkpoint: bool = True,
+    ) -> dict[str, int]:
+        """
+        Store normalized records with dynamic schema support.
+
+        Args:
+            table_name: Target table name
+            records: List of records to store
+            record_type: Type of records (affects deduplication)
+            ensure_table: Whether to ensure table exists
+            checkpoint: Whether to update checkpoints
+
+        Returns:
+            Dictionary with storage statistics
+        """
+        if not records:
+            return {"stored": 0, "errors": 0}
+
+        # Convert field names to lowercase for PostgreSQL compatibility
+        normalized_records = []
+        for record in records:
+            normalized_record = {k.lower(): v for k, v in record.items()}
+            normalized_records.append(normalized_record)
+
+        # Add to batch accumulator
+        key = f"{self.target_schema}.{table_name}"
+        self.batch_accumulator[key].extend(normalized_records)
+        self.batch_sizes[key] += len(normalized_records)
+
+        logger.debug(
+            f"Added {len(records)} {record_type} records to buffer for {key}. "
+            f"Buffer size: {self.batch_sizes[key]}"
+        )
+
+        # Check if we should flush
+        if self.batch_sizes[key] >= self.max_batch_size:
+            return await self._flush_table(table_name, ensure_table, checkpoint)
+
+        # Return provisional stats (records added but not yet flushed)
+        return {"stored": len(records), "errors": 0}
+
+    async def _flush_table(
+        self, table_name: str, ensure_table: bool = True, checkpoint: bool = True
+    ) -> dict[str, int]:
+        """Flush a specific table's buffer to PostgreSQL."""
+        key = f"{self.target_schema}.{table_name}"
+        records = self.batch_accumulator.get(key, [])
+
+        if not records:
+            return {"stored": 0, "errors": 0}
+
+        # Clear buffer immediately to prevent double-flush
+        self.batch_accumulator[key] = []
+        self.batch_sizes[key] = 0
+
+        stats = {"stored": 0, "errors": 0}
+
+        try:
+            # Get database pool
+            db_pool = self.storage.pg_pool
+
+            async with db_pool.acquire() as conn:
+                # Ensure table exists with dynamic schema
+                if ensure_table:
+                    # Create combined sample record with ALL columns
+                    combined_sample = {}
+                    for record in records:
+                        combined_sample.update(record)
+
+                    await self._ensure_table_with_schema(
+                        conn, table_name, combined_sample
+                    )
+
+                # Perform bulk insert using COPY
+                stored_count = await self._bulk_copy_insert(conn, table_name, records)
+
+                stats["stored"] = stored_count
+
+                # Update checkpoint if requested
+                if checkpoint and self.data_type:
+                    staging_checkpoint = self.storage.get_staging_checkpoint(
+                        self.data_type
+                    )
+                    staging_checkpoint.mark_table_processed(table_name)
+
+                logger.info(
+                    f"Flushed {stored_count} records to {self.target_schema}.{table_name}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error flushing {table_name}: {e}")
+            stats["errors"] = len(records)
+
+            # Re-add records to buffer for retry
+            self.batch_accumulator[key].extend(records)
+            self.batch_sizes[key] += len(records)
+
+            # Log error in checkpoint system
+            if checkpoint and self.data_type:
+                staging_checkpoint = self.storage.get_staging_checkpoint(self.data_type)
+                staging_checkpoint.cm.log_error(
+                    ProcessingStage.STAGING,
+                    StagingPhase.JSONB_TO_STAGING.value,
+                    self.data_type,
+                    table_name,
+                    str(e),
+                    error_type="bulk_insert",
+                )
+
+        return stats
+
+    async def _ensure_table_with_schema(
+        self, conn: asyncpg.Connection, table_name: str, sample_record: dict[str, Any]
+    ) -> bool:
+        """Ensure table exists with proper schema (all TEXT columns, no constraints)."""
+        # Ensure schema exists
+        await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self.target_schema}")
+
+        cache_key = f"{self.target_schema}.{table_name.lower()}"
+
+        # Check cache first
+        table_exists = False
+        async with self._cache_lock:
+            if cache_key in self._table_schema_cache:
+                table_exists = True
+
+        # Use advisory lock for this table to prevent concurrent modifications
+        lock_id = int(hashlib.md5(cache_key.encode()).hexdigest()[:8], 16)
+
+        try:
+            # Try to acquire lock
+            lock_acquired = await conn.fetchval(
+                "SELECT pg_try_advisory_lock($1)", lock_id
+            )
+
+            if not lock_acquired:
+                # Wait for lock
+                await conn.fetchval("SELECT pg_advisory_lock($1)", lock_id)
+
+            # Check table existence if not cached
+            if not table_exists:
+                table_exists = await self._table_exists(conn, table_name.lower())
+
+                if table_exists:
+                    # Cache existence
+                    async with self._cache_lock:
+                        self._table_schema_cache[cache_key] = True
+
+            if not table_exists:
+                # Create table with all TEXT columns, no constraints
+                await self._create_table(conn, table_name.lower(), sample_record)
+                logger.info(f"Created table {self.target_schema}.{table_name}")
+
+                # Cache existence
+                async with self._cache_lock:
+                    self._table_schema_cache[cache_key] = True
+
+                return True
+            else:
+                # Table exists, check for missing columns
+                await self._add_missing_columns(conn, table_name.lower(), sample_record)
+                return True
+
+        finally:
+            # Release lock
+            try:
+                await conn.fetchval("SELECT pg_advisory_unlock($1)", lock_id)
+            except Exception as e:
+                logger.warning(f"Failed to release lock for {table_name}: {e}")
+
+    async def _table_exists(self, conn: asyncpg.Connection, table_name: str) -> bool:
+        """Check if table exists."""
+        result = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = $1 AND table_name = $2
+            )
+            """,
+            self.target_schema,
+            table_name.lower(),
+        )
+        return result
+
+    async def _create_table(
+        self, conn: asyncpg.Connection, table_name: str, sample_record: dict[str, Any]
+    ) -> bool:
+        """Create table with all TEXT columns, no constraints."""
+        try:
+            # Build column definitions - ALL TEXT, no constraints
+            columns = []
+            for key in sample_record:
+                columns.append(f"{key} TEXT")
+
+            # Create table
+            create_sql = f"""
+                CREATE TABLE IF NOT EXISTS {self.target_schema}.{table_name} (
+                    {", ".join(columns)}
+                )
+            """
+
+            await conn.execute(create_sql)
+            return True
+
+        except asyncpg.DuplicateTableError:
+            # Table already exists (concurrent creation)
+            logger.debug(f"Table {self.target_schema}.{table_name} already exists")
+            return True
+        except Exception as e:
+            # Handle PostgreSQL type constraint violations
+            if "duplicate key value violates unique constraint" in str(e):
+                logger.debug(f"Table type for {table_name} already exists (concurrent)")
+                # Check if table actually exists now
+                if await self._table_exists(conn, table_name.lower()):
+                    return True
+
+            logger.error(f"Error creating table {table_name}: {e}")
+            raise
+
+    async def _add_missing_columns(
+        self, conn: asyncpg.Connection, table_name: str, sample_record: dict[str, Any]
+    ) -> None:
+        """Add missing columns to existing table (all as TEXT)."""
+        # Get existing columns
+        rows = await conn.fetch(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = $1 AND table_name = $2
+            """,
+            self.target_schema,
+            table_name,
+        )
+        existing_columns = {row["column_name"].lower() for row in rows}
+
+        # Find missing columns
+        missing_columns = []
+        for key in sample_record:
+            if key.lower() not in existing_columns:
+                missing_columns.append(key)
+
+        if missing_columns:
+            logger.info(
+                f"Adding {len(missing_columns)} columns to {table_name}: {missing_columns}"
+            )
+
+            for col in missing_columns:
+                try:
+                    alter_sql = f"""
+                        ALTER TABLE {self.target_schema}.{table_name} 
+                        ADD COLUMN {col} TEXT
+                    """
+                    await conn.execute(alter_sql)
+                    logger.debug(f"Added column {col} to {table_name}")
+                except Exception as e:
+                    if "already exists" in str(e).lower():
+                        logger.debug(f"Column {col} already exists (concurrent)")
+                    else:
+                        logger.error(f"Failed to add column {col}: {e}")
+
+    async def _bulk_copy_insert(
+        self, conn: asyncpg.Connection, table_name: str, records: list[dict[str, Any]]
+    ) -> int:
+        """Use PostgreSQL COPY for high-performance bulk inserts."""
+        if not records:
+            return 0
+
+        # Get all unique columns from all records
+        all_columns = set()
+        for record in records:
+            all_columns.update(record.keys())
+
+        # Sort columns for consistent ordering
+        columns = sorted(all_columns)
+
+        # Create tab-separated values
+        output = io.StringIO()
+
+        for record in records:
+            row_values = []
+            for col in columns:
+                value = record.get(col)
+                if value is None:
+                    row_values.append("\\N")  # PostgreSQL NULL
+                elif isinstance(value, bool):
+                    row_values.append(str(value).lower())
+                elif isinstance(value, (dict, list)):
+                    # JSON encode complex types
+                    json_str = json.dumps(value)
+                    # Escape special characters
+                    json_str = (
+                        json_str.replace("\\", "\\\\")
+                        .replace("\t", "\\t")
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                    )
+                    row_values.append(json_str)
+                else:
+                    # Convert to string and escape
+                    str_value = str(value)
+                    str_value = (
+                        str_value.replace("\\", "\\\\")
+                        .replace("\t", "\\t")
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                    )
+                    row_values.append(str_value)
+
+            output.write("\t".join(row_values) + "\n")
+
+        # Reset to beginning
+        output.seek(0)
+
+        # Use COPY to insert - asyncpg copy_records_to_table method
+        # Convert StringIO data to list of tuples for copy_records_to_table
+        records_data = []
+        for line in output:
+            if line.strip():  # Skip empty lines
+                values = line.rstrip("\n").split("\t")
+                # Convert '\N' back to None for NULL values
+                processed_values = [None if v == "\\N" else v for v in values]
+                records_data.append(tuple(processed_values))
+
+        if records_data:
+            await conn.copy_records_to_table(
+                table_name,
+                records=records_data,
+                columns=columns,
+                schema_name=self.target_schema,
+                timeout=300.0,  # 5 minute timeout
+            )
+
+        return len(records)
+
+    async def flush_all(self) -> dict[str, int]:
+        """Flush all buffered records to database."""
+        logger.info("Flushing all normalizer buffers...")
+
+        total_stats = {"stored": 0, "errors": 0}
+        tables_to_flush = list(self.batch_accumulator.keys())
+
+        for table_key in tables_to_flush:
+            if self.batch_accumulator[table_key]:
+                # Extract table name from key
+                table_name = table_key.split(".")[-1]
+
+                stats = await self._flush_table(
+                    table_name, ensure_table=True, checkpoint=True
+                )
+
+                total_stats["stored"] += stats["stored"]
+                total_stats["errors"] += stats["errors"]
+
+        logger.info(
+            f"Normalizer flush complete: {total_stats['stored']} stored, "
+            f"{total_stats['errors']} errors"
+        )
+
+        return total_stats
+
+    def get_buffer_status(self) -> dict[str, int]:
+        """Get current buffer status."""
+        return {
+            table: len(records)
+            for table, records in self.batch_accumulator.items()
+            if records
+        }
+
+    async def store_multiple_tables(
+        self, table_records: dict[str, list[dict[str, Any]]], checkpoint: bool = True
+    ) -> dict[str, Any]:
+        """
+        Store records for multiple tables in a single operation.
+
+        Args:
+            table_records: Dictionary mapping table names to lists of records
+            checkpoint: Whether to update checkpoints
+
+        Returns:
+            Storage statistics
+        """
+        total_stats = {"tables": 0, "stored": 0, "errors": 0}
+
+        for table_name, records in table_records.items():
+            if not records:
+                continue
+
+            stats = await self.store_normalized_records(
+                table_name=table_name,
+                records=records,
+                ensure_table=True,
+                checkpoint=checkpoint,
+            )
+
+            total_stats["tables"] += 1
+            total_stats["stored"] += stats["stored"]
+            total_stats["errors"] += stats["errors"]
+
+        return total_stats

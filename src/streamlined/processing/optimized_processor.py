@@ -293,9 +293,15 @@ class OptimizedParallelProcessor:
             worker_results = await asyncio.gather(*workers, return_exceptions=True)
 
         finally:
-            # Cancel status reporting
+            # Cancel status reporting and maintenance tasks
             status_task.cancel()
             maintenance_task.cancel()
+
+            # Wait for tasks to complete cancellation
+            try:
+                await asyncio.gather(status_task, maintenance_task, return_exceptions=True)
+            except Exception as e:
+                logger.debug(f"Error during task cancellation: {e}")
 
             # CRITICAL: Stop storage manager to flush remaining data
             if storage_manager:
@@ -319,7 +325,7 @@ class OptimizedParallelProcessor:
         stats = {
             "data_type": data_type,
             "total_workers": len(workers),
-            "total_keys": len(self.key_pool.keys),
+            "total_keys": len(self.key_pool._keys),
             "duration": (datetime.now(UTC) - start_time).total_seconds(),
             "total_processed": 0,
             "total_errors": 0,
@@ -351,7 +357,7 @@ class OptimizedParallelProcessor:
                 stats["total_errors"] += 1
 
         # Get final key pool status
-        stats["final_key_status"] = self.key_pool.get_pool_status()
+        stats["final_key_status"] = await self.key_pool.get_pool_status()
 
         logger.info("=" * 60)
         logger.info(f"PROCESSING COMPLETED FOR {data_type.upper()}")
@@ -520,174 +526,170 @@ class OptimizedParallelProcessor:
 
             worker_stats["keys_used"].add(api_key.key[:8])
 
-            # Create client with this key
+            # Create client with this key and use as async context manager
             client = self.client_class(api_keys=[api_key.key], db_pool=self.db_pool)
 
-            try:
-                # Process this batch
-                batch_processed = 0
-                requests_made = 0
+            async with client:
+                try:
+                    # Process this batch
+                    batch_processed = 0
+                    requests_made = 0
 
-                # CRITICAL: Use single_page_only=True to prevent overlapping data fetching
-                async for batch in fetcher.fetch_phase_1_data_with_client(
-                    client,
-                    from_date=from_date,
-                    to_date=to_date,
-                    limit=batch_size,
-                    offset=offset,
-                    single_page_only=True,
-                    **kwargs,
-                ):
-                    requests_made += 1
+                    # CRITICAL: Use single_page_only=True to prevent overlapping data fetching
+                    async for batch in fetcher.fetch_phase_1_data_with_client(
+                        client,
+                        from_date=from_date,
+                        to_date=to_date,
+                        limit=batch_size,
+                        offset=offset,
+                        single_page_only=True,
+                        **kwargs,
+                    ):
+                        requests_made += 1
 
-                    # Process items in batch (Phase 1, 2, 3)
-                    for item in batch:
-                        try:
-                            # Phase 1: Store list data
-                            if use_optimized_storage:
-                                await optimized_storage.store_phase_1_data(
-                                    fetcher.get_default_schema(),
-                                    f"{fetcher.data_type_name}_list_raw",
-                                    item,
-                                )
-                            else:
-                                await fetcher.store_phase_1_data(item)
-
-                            # Phase 2: Get and store full data
-                            url = item.get("url")
-                            if url:
-                                logger.debug(
-                                    f"Worker {worker_id} fetching Phase 2 data from {url}"
-                                )
-                                detailed_data = (
-                                    await fetcher.fetch_phase_2_data_with_client(
-                                        url, client
+                        # Process items in batch (Phase 1, 2, 3)
+                        for item in batch:
+                            try:
+                                # Phase 1: Store list data
+                                if use_optimized_storage:
+                                    await optimized_storage.store_phase_1_data(
+                                        fetcher.get_default_schema(),
+                                        f"{fetcher.data_type_name}_list_raw",
+                                        item,
                                     )
-                                )
-                                requests_made += 1
+                                else:
+                                    await fetcher.store_phase_1_data(item)
 
-                                if detailed_data:
+                                # Phase 2: Get and store full data
+                                url = item.get("url")
+                                if url:
                                     logger.debug(
-                                        f"Worker {worker_id} got Phase 2 data, proceeding to Phase 3"
+                                        f"Worker {worker_id} fetching Phase 2 data from {url}"
                                     )
-                                    if use_optimized_storage:
-                                        await optimized_storage.store_phase_2_data(
-                                            fetcher.get_default_schema(),
-                                            f"{fetcher.data_type_name}_raw",
-                                            detailed_data,
-                                        )
-                                    else:
-                                        await fetcher.store_phase_2_data(detailed_data)
-
-                                    # Phase 3: Get related data
-                                    logger.debug(
-                                        f"Worker {worker_id} starting Phase 3 for item {item.get('url', 'unknown')}"
-                                    )
-                                    related_data = (
-                                        await fetcher.fetch_phase_3_data_with_client(
-                                            detailed_data, client
+                                    detailed_data = (
+                                        await fetcher.fetch_phase_2_data_with_client(
+                                            url, client
                                         )
                                     )
+                                    requests_made += 1
 
-                                    if related_data:
-                                        requests_made += len(
-                                            related_data
-                                        )  # Approximate
-                                        item_id = await fetcher.extract_item_id(
-                                            detailed_data
-                                        )
-
+                                    if detailed_data:
                                         logger.debug(
-                                            f"Worker {worker_id} processing Phase 3 data: "
-                                            f"{len(related_data)} related items for {item_id}"
+                                            f"Worker {worker_id} got Phase 2 data, proceeding to Phase 3"
                                         )
-
                                         if use_optimized_storage:
-                                            await optimized_storage.store_phase_3_data(
+                                            await optimized_storage.store_phase_2_data(
                                                 fetcher.get_default_schema(),
-                                                fetcher.data_type_name,
-                                                related_data,
-                                                item_id,
+                                                f"{fetcher.data_type_name}_raw",
+                                                detailed_data,
                                             )
                                         else:
-                                            await fetcher.store_phase_3_data(
-                                                related_data, item_id
+                                            await fetcher.store_phase_2_data(detailed_data)
+
+                                        # Phase 3: Get related data
+                                        logger.debug(
+                                            f"Worker {worker_id} starting Phase 3 for item {item.get('url', 'unknown')}"
+                                        )
+                                        related_data = (
+                                            await fetcher.fetch_phase_3_data_with_client(
+                                                detailed_data, client
+                                            )
+                                        )
+
+                                        if related_data:
+                                            requests_made += len(
+                                                related_data
+                                            )  # Approximate
+                                            item_id = await fetcher.extract_item_id(
+                                                detailed_data
+                                            )
+
+                                            logger.debug(
+                                                f"Worker {worker_id} processing Phase 3 data: "
+                                                f"{len(related_data)} related items for {item_id}"
+                                            )
+
+                                            if use_optimized_storage:
+                                                await optimized_storage.store_phase_3_data(
+                                                    fetcher.get_default_schema(),
+                                                    fetcher.data_type_name,
+                                                    related_data,
+                                                    item_id,
+                                                )
+                                            else:
+                                                await fetcher.store_phase_3_data(
+                                                    related_data, item_id
+                                                )
+                                        else:
+                                            logger.debug(
+                                                f"Worker {worker_id} found no Phase 3 data"
                                             )
                                     else:
-                                        logger.debug(
-                                            f"Worker {worker_id} found no Phase 3 data"
+                                        logger.warning(
+                                            f"Worker {worker_id} got no Phase 2 data from {url}"
                                         )
                                 else:
-                                    logger.warning(
-                                        f"Worker {worker_id} got no Phase 2 data from {url}"
+                                    logger.debug(
+                                        f"Worker {worker_id} item has no URL, skipping Phase 2 and 3"
                                     )
-                            else:
-                                logger.debug(
-                                    f"Worker {worker_id} item has no URL, skipping Phase 2 and 3"
-                                )
 
-                            batch_processed += 1
-                            processed += 1
+                                batch_processed += 1
+                                processed += 1
 
-                        except Exception as e:
-                            logger.error(f"Error processing item: {e}", exc_info=True)
-                            worker_stats["errors"] += 1
+                            except Exception as e:
+                                logger.error(f"Error processing item: {e}", exc_info=True)
+                                worker_stats["errors"] += 1
 
-                    # Check if we should switch keys preemptively
-                    if (
-                        api_key.request_count + requests_made
-                        > self.key_pool.rate_limit_threshold - 10
-                    ):
-                        logger.info(
-                            f"Worker {worker_id} preemptively returning key "
-                            f"{api_key.key[:8]}... (near limit)"
-                        )
-                        break
+                        # Check if we should switch keys preemptively
+                        if (
+                            api_key.request_count + requests_made
+                            > self.key_pool.rate_limit_threshold - 10
+                        ):
+                            logger.info(
+                                f"Worker {worker_id} preemptively returning key "
+                                f"{api_key.key[:8]}... (near limit)"
+                            )
+                            break
 
-                # Successfully processed batch, reset failure counter
-                consecutive_failures = 0
+                    # Successfully processed batch, reset failure counter
+                    consecutive_failures = 0
 
-                # Return key to pool
-                await self.key_pool.checkin_key(api_key.key, requests_made)
+                    # Return key to pool
+                    await self.key_pool.checkin_key(api_key.key, requests_made)
 
-                # Update offset to next page within chunk range
-                offset += batch_size
+                    # Update offset to next page within chunk range
+                    offset += batch_size
 
-            except Exception as e:
-                logger.error(f"Worker {worker_id} batch processing error: {e}")
+                except Exception as e:
+                    logger.error(f"Worker {worker_id} batch processing error: {e}")
 
-                # Check if rate limited
-                rate_limited = "429" in str(e) or "rate limit" in str(e).lower()
-                await self.key_pool.checkin_key(
-                    api_key.key, requests_made, rate_limited
-                )
+                    # Check if rate limited
+                    rate_limited = "429" in str(e) or "rate limit" in str(e).lower()
+                    await self.key_pool.checkin_key(
+                        api_key.key, requests_made, rate_limited
+                    )
 
-                if rate_limited:
-                    logger.info(f"Worker {worker_id} hit rate limit, will get new key")
-                    # Continue with next iteration to get a new key
-                    continue
-                else:
-                    # Non-rate-limit error
-                    consecutive_failures += 1
-                    if consecutive_failures >= max_consecutive_failures:
-                        logger.error(
-                            f"Worker {worker_id} failed {consecutive_failures} times "
-                            f"consecutively, abandoning chunk"
-                        )
-                        raise
+                    if rate_limited:
+                        logger.info(f"Worker {worker_id} hit rate limit, will get new key")
+                        # Continue with next iteration to get a new key
+                        continue
                     else:
-                        logger.warning(
-                            f"Worker {worker_id} encountered error, retrying... "
-                            f"(failure {consecutive_failures}/{max_consecutive_failures})"
-                        )
-                        await asyncio.sleep(
-                            2**consecutive_failures
-                        )  # Exponential backoff
-
-            finally:
-                # Ensure client is cleaned up
-                if hasattr(client, "__aexit__"):
-                    await client.__aexit__(None, None, None)
+                        # Non-rate-limit error
+                        consecutive_failures += 1
+                        if consecutive_failures >= max_consecutive_failures:
+                            logger.error(
+                                f"Worker {worker_id} failed {consecutive_failures} times "
+                                f"consecutively, abandoning chunk"
+                            )
+                            raise
+                        else:
+                            logger.warning(
+                                f"Worker {worker_id} encountered error, retrying... "
+                                f"(failure {consecutive_failures}/{max_consecutive_failures})"
+                            )
+                            await asyncio.sleep(
+                                2**consecutive_failures
+                            )  # Exponential backoff
 
         return processed
 
@@ -698,13 +700,17 @@ class OptimizedParallelProcessor:
                 await asyncio.sleep(interval)
 
                 queue_status = work_queue.get_progress()
-                pool_status = self.key_pool.get_pool_status()
+                pool_status = await self.key_pool.get_pool_status()
 
+                # Calculate available keys from status
+                available_keys = pool_status['status_by_state'].get('available', 0)
+                total_keys = pool_status['total_keys']
+                
                 logger.info(
-                    f"Progress: {queue_status['completion_percent']:.1f}% "
-                    f"({queue_status['completed']}/{queue_status['total_chunks']} chunks), "
-                    f"Keys: {pool_status['available']}/{pool_status['total_keys']} available, "
-                    f"Capacity: {pool_status['capacity_used_percent']:.1f}% used"
+                    f"Progress: {queue_status['completion_percentage']:.1f}% "
+                    f"({queue_status['completed_chunks']}/{queue_status['total_chunks']} chunks), "
+                    f"Keys: {available_keys}/{total_keys} available, "
+                    f"Requests remaining: {pool_status['total_requests_remaining']}"
                 )
 
             except asyncio.CancelledError:
@@ -719,7 +725,7 @@ class OptimizedParallelProcessor:
                 await asyncio.sleep(interval)
 
                 reset_count = await self.key_pool.reset_expired_limits()
-                if reset_count > 0:
+                if reset_count is not None and reset_count > 0:
                     logger.info(f"Reset {reset_count} expired rate limits")
 
             except asyncio.CancelledError:
