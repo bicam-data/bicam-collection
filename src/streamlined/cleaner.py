@@ -1,15 +1,20 @@
 """
-Streamlined Cleaner
+Streamlined Cleaner with Full Plugin Integration
 
-This module provides focused data cleaning with plugin support.
-Replaces: Complex cleaner hierarchy
-Benefits: Direct database operations, integrated validation, simplified error handling
+This module provides focused data cleaning with comprehensive plugin support,
+checkpoint management, and production table operations.
 """
 
+import asyncio
 import logging
 import time
 from typing import Any
 
+from .libs.hierarchical_checkpoint_system import (
+    CleaningCheckpoint,
+    CleaningPhase,
+    ProcessingStage,
+)
 from .plugins.consolidated_registry import get_consolidated_registry
 from .resources.coordinator import ResourceCoordinator
 
@@ -18,13 +23,16 @@ logger = logging.getLogger(__name__)
 
 class StreamlinedCleaner:
     """
-    Focused data cleaner with plugin support.
+    Enhanced data cleaner with full plugin support and checkpoint management.
 
-    This replaces the complex cleaner hierarchy with a single, focused component:
-    - Direct database operations
-    - Integrated validation
-    - Simplified error handling
-    - Plugin-based custom logic preservation
+    This integrates the comprehensive cleaning logic from CongressionalBaseCleaner
+    with the streamlined architecture:
+    - Custom logic plugins for data type-specific cleaning
+    - Checkpoint-based resume capability
+    - Direct streaming from staging tables
+    - Chunk-based processing
+    - Production table management
+    - Post-processing support
     """
 
     def __init__(self, resource_coordinator: ResourceCoordinator):
@@ -37,20 +45,32 @@ class StreamlinedCleaner:
         self.coordinator = resource_coordinator
         self.plugin_registry = get_consolidated_registry()
 
-        logger.info(
-            "StreamlinedCleaner initialized with focused data cleaning operations"
-        )
+        # Cache for custom logic plugins
+        self._custom_logic_cache = {}
+
+        # Target table override system
+        self._target_table_override = None
+
+        logger.info("StreamlinedCleaner initialized")
 
     async def clean_data_type(
-        self, data_type: str, batch_size: int = 100, validate: bool = True, **kwargs
+        self,
+        data_type: str,
+        chunk_size: int = 1000,
+        max_workers: int = None,
+        rerun: bool = False,
+        resume: bool = True,
+        **kwargs
     ) -> dict[str, Any]:
         """
-        Clean data for a specific data type using plugin system.
+        Clean data for a specific data type using plugin system with checkpoint support.
 
         Args:
             data_type: The data type to clean (e.g., "bills", "nominations")
-            batch_size: Number of items to process in each batch
-            validate: Whether to validate cleaned data
+            chunk_size: Number of items to process in each batch
+            max_workers: Maximum number of parallel workers
+            rerun: Whether to reprocess existing records (ignores checkpoints)
+            resume: Whether to use checkpoint-based resume logic
             **kwargs: Additional parameters for specific data types
 
         Returns:
@@ -59,322 +79,442 @@ class StreamlinedCleaner:
         logger.info(f"Starting streamlined cleaning for {data_type}")
         start_time = time.time()
 
-        # Get plugin for this data type
-        cleaner_plugin = self.plugin_registry.get_cleaner_plugin(data_type)
-        if not cleaner_plugin:
-            raise ValueError(f"No cleaner plugin found for data type: {data_type}")
+        # Get resources from coordinator
+        db_pool = await self.coordinator.get_db_pool()
+        checkpoint_manager = self.coordinator.get_checkpoint_manager_instance()
+        storage_manager = await self.coordinator.get_storage_manager_instance()
 
-        # Initialize resources
-        storage_manager = self.coordinator.storage_manager
+        # Get custom logic plugin for this data type
+        custom_logic = self._get_custom_logic_plugin(data_type)
+        if not custom_logic:
+            logger.warning(f"No custom logic plugin found for {data_type}, using generic cleaning")
+
+        # Get data type configuration
+        try:
+            config = self.plugin_registry.get_data_type_config(data_type)
+            schema_names = self.plugin_registry.get_schema_names(data_type)
+            staging_schema = schema_names["staging"]
+            production_schema = schema_names["production"]
+        except Exception as e:
+            logger.error(f"Failed to get configuration for {data_type}: {e}")
+            return {
+                "data_type": data_type,
+                "status": "failed",
+                "error": f"Configuration error: {str(e)}",
+                "duration": time.time() - start_time,
+            }
+
+        # Initialize cleaner storage adapter
+        cleaner_storage = storage_manager.get_cleaner_storage(
+            staging_schema=staging_schema,
+            production_schema=production_schema,
+            data_type=data_type
+        )
+
+        # Setup cleaning checkpoint
+        cleaning_checkpoint = CleaningCheckpoint(checkpoint_manager, data_type)
+
+        # Initialize custom logic with resources if needed
+        if custom_logic:
+            if hasattr(custom_logic, "db_pool"):
+                custom_logic.db_pool = db_pool
+            if hasattr(custom_logic, "staging_schema"):
+                custom_logic.staging_schema = staging_schema
+            if hasattr(custom_logic, "production_schema"):
+                custom_logic.production_schema = production_schema
 
         results = {
             "data_type": data_type,
-            "items_cleaned": 0,
-            "items_validated": 0,
-            "items_rejected": 0,
-            "batches_processed": 0,
-            "duration": 0,
+            "tables_processed": 0,
+            "total_records_processed": 0,
+            "total_errors": 0,
+            "start_time": start_time,
+            "resume_enabled": resume,
+            "rerun_enabled": rerun,
             "status": "started",
         }
 
         try:
-            # Phase 1: Get raw data to clean
-            logger.info(f"Retrieving raw data for {data_type}")
-            raw_data = await self._get_raw_data(storage_manager, data_type, **kwargs)
+            # Get tables to process from custom logic or config
+            tables_to_process = self._get_tables_to_process(data_type, custom_logic, config)
 
-            if not raw_data:
-                logger.warning(f"No raw data found for {data_type}")
+            if not tables_to_process:
+                logger.warning(f"No tables found to process for {data_type}")
                 results["status"] = "completed"
                 results["duration"] = time.time() - start_time
                 return results
 
-            # Phase 2: Clean data in batches
-            logger.info(f"Cleaning {len(raw_data)} items in batches of {batch_size}")
-            cleaned_data = await self._clean_data_batches(
-                cleaner_plugin, raw_data, batch_size, **kwargs
+            logger.info(f"Found {len(tables_to_process)} tables to process for {data_type}")
+
+            # Process each table (potentially in parallel)
+            table_results = await self._process_tables(
+                tables_to_process,
+                data_type,
+                custom_logic,
+                cleaning_checkpoint,
+                chunk_size,
+                max_workers,
+                rerun,
+                resume,
+                cleaner_storage,
+                config
             )
 
-            # Phase 3: Validate cleaned data (if requested)
-            if validate:
-                logger.info(f"Validating {len(cleaned_data)} cleaned items")
-                validated_data, rejected_data = await self._validate_cleaned_data(
-                    cleaner_plugin, cleaned_data, **kwargs
-                )
-            else:
-                validated_data = cleaned_data
-                rejected_data = []
+            # Aggregate results
+            for _table, result in table_results.items():
+                if result.get("success", False):
+                    results["tables_processed"] += 1
+                results["total_records_processed"] += result.get("records_processed", 0)
+                results["total_errors"] += result.get("errors", 0)
 
-            # Phase 4: Store cleaned data
-            logger.info(f"Storing {len(validated_data)} cleaned items")
-            stored_count = await self._store_cleaned_data(
-                storage_manager, data_type, validated_data, **kwargs
-            )
+            # Run post-processing if available
+            if custom_logic and hasattr(custom_logic, f"_post_process_{data_type}"):
+                logger.info(f"Running post-processing for {data_type}")
+                try:
+                    post_results = await self._run_post_processing(
+                        data_type, custom_logic, cleaning_checkpoint, rerun, resume
+                    )
+                    results["post_processing"] = post_results
+                except Exception as e:
+                    logger.error(f"Post-processing failed for {data_type}: {e}")
+                    results["post_processing"] = {"status": "failed", "error": str(e)}
 
-            results.update(
-                {
-                    "items_cleaned": len(cleaned_data),
-                    "items_validated": len(validated_data),
-                    "items_rejected": len(rejected_data),
-                    "batches_processed": (len(raw_data) + batch_size - 1) // batch_size,
-                    "duration": time.time() - start_time,
-                    "status": "completed",
-                }
-            )
-
-            logger.info(f"Streamlined cleaning completed for {data_type}: {results}")
+            results["status"] = "completed"
 
         except Exception as e:
             logger.error(f"Streamlined cleaning failed for {data_type}: {str(e)}")
-            results.update(
-                {
-                    "status": "failed",
-                    "error": str(e),
-                    "duration": time.time() - start_time,
-                }
-            )
+            results["status"] = "failed"
+            results["error"] = str(e)
+
+        results["duration"] = time.time() - start_time
+        logger.info(f"Streamlined cleaning completed for {data_type}: {results}")
 
         return results
 
-    async def _get_raw_data(
-        self, storage_manager: Any, data_type: str, **kwargs
-    ) -> list[dict[str, Any]]:
-        """Get raw data that needs to be cleaned."""
-        try:
-            # Use storage manager to get raw data
-            raw_data = await storage_manager.get_raw_data(data_type=data_type, **kwargs)
+    def _get_custom_logic_plugin(self, data_type: str) -> Any:
+        """Get or cache custom logic plugin for data type."""
+        if data_type in self._custom_logic_cache:
+            return self._custom_logic_cache[data_type]
 
-            logger.info(f"Retrieved {len(raw_data)} raw items for {data_type}")
-            return raw_data
+        plugin = self.plugin_registry.get_custom_logic_plugin(data_type)
+        if plugin:
+            self._custom_logic_cache[data_type] = plugin
+
+        return plugin
+
+    def _get_tables_to_process(self, data_type: str, custom_logic: Any, config: Any) -> list[str]:
+        """Get list of tables to process for this data type."""
+        tables = []
+
+        # First check if custom logic has a method to get tables
+        if custom_logic and hasattr(custom_logic, "get_data_types_to_process"):
+            try:
+                tables = custom_logic.get_data_types_to_process()
+            except Exception as e:
+                logger.warning(f"Error getting tables from custom logic: {e}")
+
+        # If no tables from custom logic, try config
+        if not tables and config:
+            # Main table
+            table_name = config.schema.table_name or data_type
+            tables.append(table_name)
+
+            # Related tables
+            for suffix in config.schema.related_tables:
+                tables.append(f"{data_type}_{suffix}")
+
+        # If still no tables, just use the data type name
+        if not tables:
+            tables = [data_type]
+
+        return tables
+
+    async def _process_tables(
+        self,
+        tables: list[str],
+        data_type: str,
+        custom_logic: Any,
+        cleaning_checkpoint: CleaningCheckpoint,
+        chunk_size: int,
+        max_workers: int,
+        rerun: bool,
+        resume: bool,
+        cleaner_storage: Any,
+        config: Any
+    ) -> dict[str, dict[str, Any]]:
+        """Process multiple tables potentially in parallel."""
+        if max_workers is None:
+            max_workers = min(len(tables), 4)  # Reasonable default
+
+        semaphore = asyncio.Semaphore(max_workers)
+
+        async def process_table_with_semaphore(table):
+            async with semaphore:
+                return await self._process_single_table(
+                    table, data_type, custom_logic, cleaning_checkpoint,
+                    chunk_size, rerun, resume, cleaner_storage, config
+                )
+
+        # Process all tables
+        tasks = []
+        for table in tables:
+            # Skip if already processed (unless rerun)
+            if not rerun and resume and cleaning_checkpoint.should_skip_table(table):
+                logger.info(f"Skipping already processed table {table}")
+                tasks.append((table, {"success": True, "records_processed": 0, "skipped": True}))
+            else:
+                tasks.append(process_table_with_semaphore(table))
+
+        # Wait for all tasks
+        results = await asyncio.gather(*[t if asyncio.iscoroutine(t) else asyncio.create_task(asyncio.coroutine(lambda t=t: t)()) for t in tasks])
+
+        # Convert to dict
+        return dict(results) if all(isinstance(r, tuple) for r in results) else {}
+
+    async def _process_single_table(
+        self,
+        table: str,
+        data_type: str,
+        custom_logic: Any,
+        cleaning_checkpoint: CleaningCheckpoint,
+        chunk_size: int,
+        rerun: bool,
+        resume: bool,
+        cleaner_storage: Any,
+        config: Any
+    ) -> tuple[str, dict[str, Any]]:
+        """Process a single table with streaming and checkpoints."""
+        logger.info(f"Processing table {table} for data type {data_type}")
+
+        stats = {
+            "records_processed": 0,
+            "chunks_processed": 0,
+            "errors": 0,
+            "start_time": time.time(),
+            "success": False
+        }
+
+        try:
+            # Get checkpoint to determine offset
+            checkpoint_data = cleaner_storage.get_cleaning_checkpoint(table)
+            start_offset = checkpoint_data["last_offset"] if checkpoint_data else 0
+
+            # Use optimized storage for streaming
+            order_by = config.schema.id_fields[0] if config and config.schema.id_fields else None
+
+            async for chunk in cleaner_storage.stream_staging_data(
+                table_name=table,
+                batch_size=chunk_size,
+                order_by=order_by,
+                checkpoint_offset=start_offset if resume else 0
+            ):
+                # Process chunk of records
+                chunk_result = await self._process_chunk(
+                    chunk, table, data_type, custom_logic, rerun, cleaner_storage, config
+                )
+
+                stats["records_processed"] += chunk_result.get("records_processed", 0)
+                stats["errors"] += chunk_result.get("errors", 0)
+                stats["chunks_processed"] += 1
+
+                # Update checkpoint periodically
+                if stats["chunks_processed"] % 10 == 0:
+                    checkpoint = cleaning_checkpoint.cm.get_or_create_checkpoint(
+                        ProcessingStage.CLEANING,
+                        CleaningPhase.APPLY_RULES.value,
+                        data_type
+                    )
+                    checkpoint.processed_items = stats["records_processed"]
+                    checkpoint.current_table = table
+                    cleaning_checkpoint.save_checkpoint(checkpoint)
+
+            # Mark table as processed
+            if not rerun and stats["records_processed"] > 0:
+                cleaning_checkpoint.mark_table_cleaned(table)
+
+            stats["success"] = True
 
         except Exception as e:
-            logger.error(f"Failed to retrieve raw data: {str(e)}")
-            raise
+            logger.error(f"Error processing table {table}: {e}")
+            stats["error"] = str(e)
 
-    async def _clean_data_batches(
+            # Log error in checkpoint system
+            cleaning_checkpoint.cm.log_error(
+                ProcessingStage.CLEANING,
+                CleaningPhase.APPLY_RULES.value,
+                data_type,
+                table,
+                str(e)
+            )
+
+        stats["duration"] = time.time() - stats["start_time"]
+        logger.info(f"Completed processing table {table}: {stats}")
+
+        return table, stats
+
+    async def _process_chunk(
         self,
-        cleaner_plugin: Any,
-        raw_data: list[dict[str, Any]],
-        batch_size: int,
-        **kwargs,
-    ) -> list[dict[str, Any]]:
-        """Clean data in batches using the plugin."""
-        cleaned_data = []
+        chunk: list[dict[str, Any]],
+        table: str,
+        data_type: str,
+        custom_logic: Any,
+        rerun: bool,
+        cleaner_storage: Any,
+        config: Any
+    ) -> dict[str, Any]:
+        """Process a chunk of records."""
+        stats = {"records_processed": 0, "errors": 0}
 
-        # Process data in batches
-        for i in range(0, len(raw_data), batch_size):
-            batch = raw_data[i : i + batch_size]
+        if not chunk:
+            return stats
 
+        # Group cleaned records by target table
+        records_by_table = {}
+
+        for record in chunk:
             try:
-                # Use plugin to clean batch (preserves custom logic)
-                cleaned_batch = await cleaner_plugin.clean_batch(
-                    batch_data=batch, **kwargs
+                # Clean the record using custom logic or generic cleaning
+                cleaned_record, target_table = await self._clean_single_record(
+                    record, table, data_type, custom_logic
                 )
 
-                cleaned_data.extend(cleaned_batch)
+                if target_table not in records_by_table:
+                    records_by_table[target_table] = []
+                records_by_table[target_table].append(cleaned_record)
 
-                logger.debug(
-                    f"Cleaned batch {i // batch_size + 1}: {len(cleaned_batch)} items"
-                )
+                stats["records_processed"] += 1
 
             except Exception as e:
-                logger.error(f"Failed to clean batch {i // batch_size + 1}: {str(e)}")
-                # Continue with other batches
-                continue
+                logger.error(f"Error cleaning record {record.get('id', 'UNKNOWN')}: {e}")
+                stats["errors"] += 1
 
-        return cleaned_data
+        # Store cleaned records using optimized bulk insert
+        if records_by_table:
+            try:
+                for target_table, cleaned_records in records_by_table.items():
+                    # Get primary keys from config if available
+                    primary_keys = []
+                    if config and hasattr(config.schema, 'id_fields'):
+                        primary_keys = config.schema.id_fields
 
-    async def _validate_cleaned_data(
-        self, cleaner_plugin: Any, cleaned_data: list[dict[str, Any]], **kwargs
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Validate cleaned data using the plugin."""
-        validated_data = []
-        rejected_data = []
+                    stored_count = await cleaner_storage.bulk_insert_production(
+                        table_name=target_table,
+                        records=cleaned_records,
+                        upsert=rerun,
+                        primary_keys=primary_keys
+                    )
+                    logger.debug(f"Stored {stored_count} cleaned records in {target_table}")
+            except Exception as e:
+                logger.error(f"Error storing chunk: {e}")
+                stats["errors"] += len(chunk)
 
-        try:
-            # Use plugin to validate data (preserves custom logic)
-            validation_results = await cleaner_plugin.validate_cleaned_data(
-                cleaned_data=cleaned_data, **kwargs
-            )
+        return stats
 
-            validated_data = validation_results.get("validated", [])
-            rejected_data = validation_results.get("rejected", [])
-
-            logger.info(
-                f"Validation completed: {len(validated_data)} valid, {len(rejected_data)} rejected"
-            )
-
-        except Exception as e:
-            logger.error(f"Validation failed: {str(e)}")
-            # If validation fails, use all cleaned data
-            validated_data = cleaned_data
-            rejected_data = []
-
-        return validated_data, rejected_data
-
-    async def _store_cleaned_data(
+    async def _clean_single_record(
         self,
-        storage_manager: Any,
+        record: dict[str, Any],
+        table: str,
         data_type: str,
-        cleaned_data: list[dict[str, Any]],
-        **kwargs,
-    ) -> int:
-        """Store cleaned data using the storage manager."""
-        try:
-            # Use storage manager to store cleaned data
-            stored_count = await storage_manager.store_staging_data(
-                data_type=data_type, data=cleaned_data, **kwargs
-            )
+        custom_logic: Any
+    ) -> tuple[dict[str, Any], str]:
+        """Clean a single record using custom logic."""
+        # Clear any previous override
+        self._target_table_override = None
 
-            logger.info(f"Stored {stored_count} cleaned items for {data_type}")
-            return stored_count
+        # Try custom logic first
+        if custom_logic:
+            # Look for specific cleaning method
+            method_name = f"_clean_{table}_singular"
+            if hasattr(custom_logic, method_name):
+                # Call the custom cleaning method
+                cleaned_data = await getattr(custom_logic, method_name)(record)
+
+                # Check if custom logic set a target table override
+                if hasattr(custom_logic, "_target_table_override"):
+                    self._target_table_override = custom_logic._target_table_override
+
+                target_table = self._target_table_override or table
+                return cleaned_data, target_table
+
+        # Fallback to generic cleaning
+        cleaned_data = self._clean_generic(record)
+        return cleaned_data, table
+
+    def _clean_generic(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Generic record cleaning."""
+        cleaned = record.copy()
+
+        # Basic cleaning operations
+        for key, value in cleaned.items():
+            if isinstance(value, str):
+                # Clean whitespace
+                cleaned[key] = value.strip() if value else None
+            elif value == "":
+                cleaned[key] = None
+
+        return cleaned
+
+    async def _run_post_processing(
+        self,
+        data_type: str,
+        custom_logic: Any,
+        cleaning_checkpoint: CleaningCheckpoint,
+        rerun: bool,
+        resume: bool
+    ) -> dict[str, Any]:
+        """Run post-processing operations."""
+        if not custom_logic:
+            return {"status": "skipped", "reason": "no custom logic"}
+
+        method_name = f"_post_process_{data_type}"
+        if not hasattr(custom_logic, method_name):
+            return {"status": "skipped", "reason": "no post-processing method"}
+
+        # Check if already processed
+        if not rerun and resume and cleaning_checkpoint.should_skip_table(f"{data_type}_post_process"):
+            return {"status": "skipped", "reason": "already processed"}
+
+        try:
+            result = await getattr(custom_logic, method_name)()
+
+            # Mark as processed
+            if not rerun:
+                cleaning_checkpoint.mark_table_cleaned(f"{data_type}_post_process")
+
+            return {"status": "success", "result": result}
 
         except Exception as e:
-            logger.error(f"Failed to store cleaned data: {str(e)}")
-            raise
+            logger.error(f"Post-processing failed: {e}")
+            return {"status": "failed", "error": str(e)}
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        # Flush checkpoint caches if we have a checkpoint manager from coordinator
+        try:
+            checkpoint_manager = self.coordinator.get_checkpoint_manager_instance()
+            checkpoint_manager.flush_all_caches()
+        except Exception as e:
+            logger.warning(f"Could not flush checkpoint caches: {e}")
+
+        logger.info("StreamlinedCleaner cleanup completed")
 
     async def get_cleaning_status(self, data_type: str) -> dict[str, Any]:
-        """Get current cleaning status for a data type."""
+        """Get cleaning status with checkpoint information."""
         try:
-            # Get storage manager
-            storage_manager = self.coordinator.storage_manager
+            checkpoint_manager = self.coordinator.get_checkpoint_manager_instance()
 
-            # Query cleaning status
-            # This is a simplified example - real implementation would query actual tables
-            status = {
+            # Get checkpoint status
+            progress = checkpoint_manager.get_progress_summary(data_type)
+
+            # Get cleaning-specific status
+            cleaning_progress = progress.get(ProcessingStage.CLEANING.value, {})
+
+            return {
                 "data_type": data_type,
-                "raw_count": 0,
-                "staging_count": 0,
-                "last_cleaned": None,
-                "status": "idle",
+                "cleaning_progress": cleaning_progress,
+                "checkpoint_available": bool(cleaning_progress),
+                "status": "ready"
             }
-
-            return status
-
         except Exception as e:
-            logger.error(f"Failed to get cleaning status: {str(e)}")
+            logger.error(f"Failed to get cleaning status: {e}")
             return {"data_type": data_type, "status": "error", "error": str(e)}
-
-    def get_supported_data_types(self) -> list[str]:
-        """Get list of supported data types from plugin registry."""
-        return self.plugin_registry.get_supported_data_types()
-
-    async def test_plugin_integration(self, data_type: str) -> dict[str, Any]:
-        """Test plugin integration for a specific data type."""
-        cleaner_plugin = self.plugin_registry.get_cleaner_plugin(data_type)
-
-        if not cleaner_plugin:
-            return {
-                "data_type": data_type,
-                "plugin_available": False,
-                "error": f"No cleaner plugin found for {data_type}",
-            }
-
-        try:
-            # Test basic plugin functionality
-            test_data = [{"id": "test", "data": "test_value"}]
-
-            # Check if plugin has required methods
-            required_methods = ["clean_batch", "validate_cleaned_data"]
-            available_methods = [
-                method for method in dir(cleaner_plugin) if not method.startswith("_")
-            ]
-
-            return {
-                "data_type": data_type,
-                "plugin_available": True,
-                "plugin_type": type(cleaner_plugin).__name__,
-                "required_methods": required_methods,
-                "available_methods": available_methods,
-                "methods_match": all(
-                    method in available_methods for method in required_methods
-                ),
-            }
-
-        except Exception as e:
-            return {
-                "data_type": data_type,
-                "plugin_available": True,
-                "plugin_type": type(cleaner_plugin).__name__,
-                "error": str(e),
-            }
-
-    async def get_cleaning_metrics(self, data_type: str) -> dict[str, Any]:
-        """Get cleaning metrics for a specific data type."""
-        try:
-            # Get storage manager
-            storage_manager = self.coordinator.storage_manager
-
-            # This is a simplified example - real implementation would query actual metrics
-            metrics = {
-                "data_type": data_type,
-                "total_cleaned": 0,
-                "cleaning_rate": 0.0,
-                "validation_rate": 0.0,
-                "rejection_rate": 0.0,
-                "avg_batch_size": 0,
-                "last_24h_count": 0,
-            }
-
-            return metrics
-
-        except Exception as e:
-            logger.error(f"Failed to get cleaning metrics: {str(e)}")
-            return {"data_type": data_type, "error": str(e)}
-
-    async def clean_specific_items(
-        self, data_type: str, item_ids: list[str], **kwargs
-    ) -> dict[str, Any]:
-        """Clean specific items by ID."""
-        logger.info(f"Cleaning specific items for {data_type}: {item_ids}")
-        start_time = time.time()
-
-        # Get plugin for this data type
-        cleaner_plugin = self.plugin_registry.get_cleaner_plugin(data_type)
-        if not cleaner_plugin:
-            raise ValueError(f"No cleaner plugin found for data type: {data_type}")
-
-        try:
-            # Get storage manager
-            storage_manager = self.coordinator.storage_manager
-
-            # Get specific items
-            raw_data = await storage_manager.get_raw_data_by_ids(
-                data_type=data_type, item_ids=item_ids, **kwargs
-            )
-
-            if not raw_data:
-                return {
-                    "data_type": data_type,
-                    "item_ids": item_ids,
-                    "items_cleaned": 0,
-                    "status": "no_data_found",
-                }
-
-            # Clean the specific items
-            cleaned_data = await cleaner_plugin.clean_batch(
-                batch_data=raw_data, **kwargs
-            )
-
-            # Store cleaned data
-            stored_count = await storage_manager.store_staging_data(
-                data_type=data_type, data=cleaned_data, **kwargs
-            )
-
-            return {
-                "data_type": data_type,
-                "item_ids": item_ids,
-                "items_cleaned": len(cleaned_data),
-                "items_stored": stored_count,
-                "duration": time.time() - start_time,
-                "status": "completed",
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to clean specific items: {str(e)}")
-            return {
-                "data_type": data_type,
-                "item_ids": item_ids,
-                "status": "failed",
-                "error": str(e),
-                "duration": time.time() - start_time,
-            }

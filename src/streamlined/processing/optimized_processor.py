@@ -147,21 +147,29 @@ class OptimizedParallelProcessor:
             last_processed_count > 0 and total_count > last_processed_count
         )
 
-        logger.info(f"Last processed count: {last_processed_count}")
-        logger.info(f"Current total count: {total_count}")
-        logger.info(f"Incremental processing: {incremental_processing}")
+        logger.info(f"*** DEBUG: Last processed count: {last_processed_count}")
+        logger.info(f"*** DEBUG: Current total count: {total_count}")
+        logger.info(
+            f"*** DEBUG: Incremental processing condition: {last_processed_count} > 0 and {total_count} > {last_processed_count}"
+        )
+        logger.info(f"*** DEBUG: Incremental processing: {incremental_processing}")
 
         if incremental_processing:
             # Calculate exact pages needed based on new records
             new_records = total_count - last_processed_count
             pages_to_process = (new_records + count_per_page - 1) // count_per_page
-            logger.info(f"New records since last run: {new_records}")
-            logger.info(f"Pages needed for new records: {pages_to_process}")
+            logger.info(f"*** DEBUG: New records since last run: {new_records}")
+            logger.info(f"*** DEBUG: Pages needed for new records: {pages_to_process}")
         else:
             pages_to_process = total_pages
-            logger.info("Full processing (no incremental data or first run)")
+            logger.info(
+                f"*** DEBUG: Full processing - using total_pages: {total_pages}"
+            )
 
-        logger.info(f"Final pages to process: {pages_to_process}")
+        logger.info(f"*** DEBUG: Final pages to process: {pages_to_process}")
+        logger.info(
+            f"*** DEBUG: Total records calculation: min({total_count}, {pages_to_process} * {count_per_page}) = {min(total_count, pages_to_process * count_per_page)}"
+        )
 
         # =============================================================================
         # STEP 4: WORK DISTRIBUTION ANALYSIS
@@ -299,7 +307,9 @@ class OptimizedParallelProcessor:
 
             # Wait for tasks to complete cancellation
             try:
-                await asyncio.gather(status_task, maintenance_task, return_exceptions=True)
+                await asyncio.gather(
+                    status_task, maintenance_task, return_exceptions=True
+                )
             except Exception as e:
                 logger.debug(f"Error during task cancellation: {e}")
 
@@ -584,16 +594,16 @@ class OptimizedParallelProcessor:
                                                 detailed_data,
                                             )
                                         else:
-                                            await fetcher.store_phase_2_data(detailed_data)
+                                            await fetcher.store_phase_2_data(
+                                                detailed_data
+                                            )
 
                                         # Phase 3: Get related data
                                         logger.debug(
                                             f"Worker {worker_id} starting Phase 3 for item {item.get('url', 'unknown')}"
                                         )
-                                        related_data = (
-                                            await fetcher.fetch_phase_3_data_with_client(
-                                                detailed_data, client
-                                            )
+                                        related_data = await fetcher.fetch_phase_3_data_with_client(
+                                            detailed_data, client
                                         )
 
                                         if related_data:
@@ -637,7 +647,9 @@ class OptimizedParallelProcessor:
                                 processed += 1
 
                             except Exception as e:
-                                logger.error(f"Error processing item: {e}", exc_info=True)
+                                logger.error(
+                                    f"Error processing item: {e}", exc_info=True
+                                )
                                 worker_stats["errors"] += 1
 
                         # Check if we should switch keys preemptively
@@ -670,7 +682,9 @@ class OptimizedParallelProcessor:
                     )
 
                     if rate_limited:
-                        logger.info(f"Worker {worker_id} hit rate limit, will get new key")
+                        logger.info(
+                            f"Worker {worker_id} hit rate limit, will get new key"
+                        )
                         # Continue with next iteration to get a new key
                         continue
                     else:
@@ -703,9 +717,9 @@ class OptimizedParallelProcessor:
                 pool_status = await self.key_pool.get_pool_status()
 
                 # Calculate available keys from status
-                available_keys = pool_status['status_by_state'].get('available', 0)
-                total_keys = pool_status['total_keys']
-                
+                available_keys = pool_status["status_by_state"].get("available", 0)
+                total_keys = pool_status["total_keys"]
+
                 logger.info(
                     f"Progress: {queue_status['completion_percentage']:.1f}% "
                     f"({queue_status['completed_chunks']}/{queue_status['total_chunks']} chunks), "

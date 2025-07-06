@@ -108,7 +108,7 @@ Examples:
     )
 
     # List types command
-    list_parser = subparsers.add_parser("list-types", help="List supported data types")
+    _list_parser = subparsers.add_parser("list-types", help="List supported data types")
 
     # Test plugins command
     test_parser = subparsers.add_parser("test-plugins", help="Test plugin integration")
@@ -537,6 +537,7 @@ async def command_diagnostics(args) -> int:
     try:
         import os
         from pathlib import Path
+
         from .resources.config import StreamlinedConfig
 
         logger.info(f"\n{'=' * 60}")
@@ -557,7 +558,7 @@ async def command_diagnostics(args) -> int:
                 logger.info(f"  {exists} {env_path}")
                 if env_path.exists():
                     try:
-                        with open(env_path, "r") as f:
+                        with open(env_path) as f:
                             content = f.read()
                             db_vars = [
                                 line
@@ -717,11 +718,11 @@ async def command_clear_checkpoints(args) -> int:
     """Clear checkpoints for a data type."""
     try:
         from .libs.hierarchical_checkpoint_system import (
-            FetchingPhase,
-            StagingPhase,
             CleaningPhase,
-            ProcessingStage,
+            FetchingPhase,
             HierarchicalCheckpointManager,
+            ProcessingStage,
+            StagingPhase,
         )
 
         config = StreamlinedConfig.from_env()
@@ -817,7 +818,7 @@ async def command_clear_checkpoints(args) -> int:
 
         if phases_to_clear:
             # Clear specific phases
-            for phase_name, phase_info in phases_to_clear:
+            for _phase_name, phase_info in phases_to_clear:
                 if phase_info == "fetching_all":
                     # Clear all fetching phases
                     for phase in FetchingPhase:

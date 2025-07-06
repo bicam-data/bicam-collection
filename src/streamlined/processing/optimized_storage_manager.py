@@ -18,6 +18,7 @@ import sqlite3
 import time
 import uuid
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -30,6 +31,7 @@ from ..libs.hierarchical_checkpoint_system import (
     StagingCheckpoint,
     StagingPhase,
 )
+import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -1361,3 +1363,456 @@ class OptimizedNormalizerStorage:
             total_stats["errors"] += stats["errors"]
 
         return total_stats
+
+
+
+class OptimizedCleanerStorage:
+    """
+    Storage adapter for StreamlinedCleaner with production table support.
+    
+    Handles:
+    - Streaming data from staging tables
+    - Bulk inserts to production tables
+    - Schema management for production tables
+    - Checkpoint integration
+    """
+
+    def __init__(
+        self,
+        storage_manager: "OptimizedStorageManager",
+        staging_schema: str = "bicam_staging_congressional",
+        production_schema: str = "bicam_congressional",
+        data_type: str = None
+    ):
+        """
+        Initialize the cleaner storage adapter.
+        
+        Args:
+            storage_manager: The underlying optimized storage manager
+            staging_schema: Source schema for staging data
+            production_schema: Target schema for cleaned data
+            data_type: Data type being processed (for checkpointing)
+        """
+        self.storage = storage_manager
+        self.staging_schema = staging_schema
+        self.production_schema = production_schema
+        self.data_type = data_type
+
+        # Production table schema cache
+        self._prod_schema_cache = {}
+        self._cache_lock = asyncio.Lock()
+
+        logger.info(
+            f"OptimizedCleanerStorage initialized: "
+            f"{staging_schema} -> {production_schema}"
+        )
+
+    async def stream_staging_data(
+        self,
+        table_name: str,
+        batch_size: int = 1000,
+        order_by: str = None,
+        where_clause: str = None,
+        checkpoint_offset: int = 0
+    ) -> AsyncIterator[list[dict[str, Any]]]:
+        """
+        Stream data from staging table in batches.
+        
+        Args:
+            table_name: Staging table to read from
+            batch_size: Number of records per batch
+            order_by: Column to order by (auto-detected if None)
+            where_clause: Optional WHERE clause
+            checkpoint_offset: Starting offset for resume
+            
+        Yields:
+            Batches of records as dictionaries
+        """
+        async with self.storage.pg_pool.acquire() as conn:
+            # Check table existence
+            exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = $1 AND table_name = $2
+                )
+                """,
+                self.staging_schema,
+                table_name
+            )
+
+            if not exists:
+                logger.warning(f"Table {self.staging_schema}.{table_name} does not exist")
+                return
+
+            # Auto-detect order column if not specified
+            if not order_by:
+                columns = await conn.fetch(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = $1 AND table_name = $2
+                    ORDER BY ordinal_position
+                    """,
+                    self.staging_schema,
+                    table_name
+                )
+
+                column_names = [col["column_name"] for col in columns]
+
+                # Prefer these columns for ordering
+                for preferred in ["processed_at", "id", "created_at", "scraped_at"]:
+                    if preferred in column_names:
+                        order_by = preferred
+                        break
+
+                if not order_by and column_names:
+                    order_by = column_names[0]
+
+            # Build query
+            where_part = f"WHERE {where_clause}" if where_clause else ""
+            query = f"""
+                SELECT * FROM {self.staging_schema}.{table_name}
+                {where_part}
+                ORDER BY {order_by}
+                LIMIT $1 OFFSET $2
+            """
+
+            offset = checkpoint_offset
+            records_yielded = 0
+
+            while True:
+                try:
+                    rows = await conn.fetch(query, batch_size, offset)
+                    if not rows:
+                        break
+
+                    batch = [dict(row) for row in rows]
+                    yield batch
+
+                    records_yielded += len(batch)
+                    offset += len(batch)
+
+                    # Update checkpoint periodically
+                    if self.data_type and records_yielded % 10000 == 0:
+                        self.storage.save_checkpoint(
+                            self.data_type,
+                            f"cleaning_{table_name}",
+                            offset,
+                            batch[-1].get("id", ""),
+                            records_yielded
+                        )
+
+                    if len(batch) < batch_size:
+                        break
+
+                except Exception as e:
+                    logger.error(f"Error streaming {table_name} at offset {offset}: {e}")
+                    raise
+
+    async def bulk_insert_production(
+        self,
+        table_name: str,
+        records: list[dict[str, Any]],
+        upsert: bool = False,
+        primary_keys: list[str] = None
+    ) -> int:
+        """
+        Bulk insert cleaned records to production table.
+
+        Args:
+            table_name: Production table name
+            records: Cleaned records to insert
+            upsert: Whether to use UPSERT (requires primary_keys)
+            primary_keys: Primary key columns for UPSERT
+
+        Returns:
+            Number of records inserted
+        """
+        if not records:
+            return 0
+
+        async with self.storage.pg_pool.acquire() as conn:
+            # Ensure production schema and table exist
+            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self.production_schema}")
+            await self._ensure_production_table(conn, table_name, records[0])
+
+            # Use COPY for bulk insert
+            if upsert and primary_keys:
+                # For UPSERT, we need to use a temp table approach
+                return await self._bulk_upsert_via_temp(
+                    conn, table_name, records, primary_keys
+                )
+            else:
+                # Direct COPY for simple inserts
+                return await self._bulk_copy_production(conn, table_name, records)
+
+    async def _ensure_production_table(
+        self,
+        conn: asyncpg.Connection,
+        table_name: str,
+        sample_record: dict[str, Any]
+    ):
+        """Ensure production table exists with proper schema."""
+        cache_key = f"{self.production_schema}.{table_name}"
+
+        # Check cache
+        async with self._cache_lock:
+            if cache_key in self._prod_schema_cache:
+                return
+
+        # Check existence
+        exists = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = $1 AND table_name = $2
+            )
+            """,
+            self.production_schema,
+            table_name
+        )
+
+        if not exists:
+            # Create table based on sample record
+            columns = []
+            for key, value in sample_record.items():
+                # Infer PostgreSQL type from Python type
+                if isinstance(value, bool):
+                    col_type = "BOOLEAN"
+                elif isinstance(value, int):
+                    col_type = "BIGINT"
+                elif isinstance(value, float):
+                    col_type = "DOUBLE PRECISION"
+                elif isinstance(value, dict) or isinstance(value, list):
+                    col_type = "JSONB"
+                else:
+                    col_type = "TEXT"
+
+                columns.append(f"{key} {col_type}")
+
+            create_sql = f"""
+                CREATE TABLE IF NOT EXISTS {self.production_schema}.{table_name} (
+                    {", ".join(columns)}
+                )
+            """
+
+            await conn.execute(create_sql)
+            logger.info(f"Created production table {self.production_schema}.{table_name}")
+
+        # Cache existence
+        async with self._cache_lock:
+            self._prod_schema_cache[cache_key] = True
+
+    async def _bulk_copy_production(
+        self,
+        conn: asyncpg.Connection,
+        table_name: str,
+        records: list[dict[str, Any]]
+    ) -> int:
+        """Use COPY for fast bulk inserts to production."""
+        if not records:
+            return 0
+
+        # Get all unique columns
+        all_columns = set()
+        for record in records:
+            all_columns.update(record.keys())
+        columns = sorted(all_columns)
+
+        # Prepare data for COPY
+        output = io.StringIO()
+
+        for record in records:
+            row_values = []
+            for col in columns:
+                value = record.get(col)
+                if value is None:
+                    row_values.append("\\N")
+                elif isinstance(value, bool):
+                    row_values.append("t" if value else "f")
+                elif isinstance(value, (dict, list)):
+                    json_str = json.dumps(value)
+                    # Escape for COPY
+                    json_str = (
+                        json_str.replace("\\", "\\\\")
+                        .replace("\t", "\\t")
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                    )
+                    row_values.append(json_str)
+                else:
+                    str_value = str(value)
+                    # Escape for COPY
+                    str_value = (
+                        str_value.replace("\\", "\\\\")
+                        .replace("\t", "\\t")
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                    )
+                    row_values.append(str_value)
+
+            output.write("\t".join(row_values) + "\n")
+
+        # Convert to records for copy_records_to_table
+        output.seek(0)
+        records_data = []
+
+        for line in output:
+            if line.strip():
+                values = line.rstrip("\n").split("\t")
+                # Convert back from COPY format
+                processed_values = []
+                for v in values:
+                    if v == "\\N":
+                        processed_values.append(None)
+                    elif v in ("t", "f"):
+                        processed_values.append(v == "t")
+                    else:
+                        # Unescape
+                        v = (
+                            v.replace("\\t", "\t")
+                            .replace("\\n", "\n")
+                            .replace("\\r", "\r")
+                            .replace("\\\\", "\\")
+                        )
+                        processed_values.append(v)
+
+                records_data.append(tuple(processed_values))
+
+        if records_data:
+            await conn.copy_records_to_table(
+                table_name,
+                records=records_data,
+                columns=columns,
+                schema_name=self.production_schema,
+                timeout=300.0
+            )
+
+        return len(records)
+
+    async def _bulk_upsert_via_temp(
+        self,
+        conn: asyncpg.Connection,
+        table_name: str,
+        records: list[dict[str, Any]],
+        primary_keys: list[str]
+    ) -> int:
+        """Perform bulk UPSERT using temporary table."""
+        if not records:
+            return 0
+
+        temp_table = f"temp_{table_name}_{id(records)}"
+
+        try:
+            # Create temp table
+            await conn.execute(f"""
+                CREATE TEMP TABLE {temp_table} 
+                AS SELECT * FROM {self.production_schema}.{table_name} 
+                WHERE FALSE
+            """)
+
+            # Bulk insert to temp table
+            inserted = await self._bulk_copy_production(conn, temp_table, records)
+
+            # Get columns for UPDATE clause
+            all_columns = set()
+            for record in records:
+                all_columns.update(record.keys())
+
+            update_columns = [col for col in all_columns if col not in primary_keys]
+            update_clause = ", ".join(
+                f"{col} = EXCLUDED.{col}" for col in update_columns
+            )
+
+            # UPSERT from temp to production
+            pk_clause = ", ".join(primary_keys)
+            merge_sql = f"""
+                INSERT INTO {self.production_schema}.{table_name}
+                SELECT * FROM {temp_table}
+                ON CONFLICT ({pk_clause}) DO UPDATE SET {update_clause}
+            """
+
+            result = await conn.execute(merge_sql)
+
+            # Extract affected rows from result
+            if result:
+                parts = result.split()
+                if len(parts) >= 2:
+                    return int(parts[1])
+
+            return inserted
+
+        finally:
+            # Clean up temp table
+            with contextlib.suppress(Exception):
+                await conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
+
+    async def get_staging_record_count(
+        self, table_name: str, where_clause: str = None
+    ) -> int:
+        """Get count of records in staging table."""
+        async with self.storage.pg_pool.acquire() as conn:
+            where_part = f"WHERE {where_clause}" if where_clause else ""
+            query = f"""
+                SELECT COUNT(*) FROM {self.staging_schema}.{table_name}
+                {where_part}
+            """
+
+            return await conn.fetchval(query)
+
+    async def get_production_record_count(self, table_name: str) -> int:
+        """Get count of records in production table."""
+        async with self.storage.pg_pool.acquire() as conn:
+            # Check if table exists first
+            exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = $1 AND table_name = $2
+                )
+                """,
+                self.production_schema,
+                table_name
+            )
+
+            if not exists:
+                return 0
+
+            query = f"SELECT COUNT(*) FROM {self.production_schema}.{table_name}"
+            return await conn.fetchval(query)
+
+    def get_cleaning_checkpoint(self, table_name: str) -> dict[str, Any] | None:
+        """Get cleaning checkpoint for a specific table."""
+        if self.data_type:
+            return self.storage.get_checkpoint(
+                self.data_type,
+                f"cleaning_{table_name}"
+            )
+        return None
+
+
+# Add this method to the existing OptimizedStorageManager class
+def get_cleaner_storage(
+    self,
+    staging_schema: str,
+    production_schema: str,
+    data_type: str = None
+) -> OptimizedCleanerStorage:
+    """
+    Get a storage adapter for cleaning operations.
+
+    Args:
+        staging_schema: Source schema
+        production_schema: Target schema
+        data_type: Data type for checkpointing
+
+    Returns:
+        OptimizedCleanerStorage instance
+    """
+    return OptimizedCleanerStorage(
+        self,
+        staging_schema=staging_schema,
+        production_schema=production_schema,
+        data_type=data_type
+    )
