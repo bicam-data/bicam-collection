@@ -7,6 +7,7 @@ key allocation and work distribution.
 
 import asyncio
 import logging
+import random
 from datetime import UTC, datetime
 from typing import Any
 
@@ -459,7 +460,7 @@ class OptimizedParallelProcessor:
         worker_stats: dict,
         **kwargs,
     ) -> int:
-        """Process a single work chunk with dynamic key management."""
+        """Process a single work chunk with improved key management."""
         processed = 0
         offset = chunk.start_offset
 
@@ -502,42 +503,18 @@ class OptimizedParallelProcessor:
             estimated_requests = max(1, batch_size // limit)  # Pages needed
 
             logger.info(
-                f"Worker {worker_id} processing chunk [{chunk.start_offset}, {chunk.end_offset}] at offset {offset}, batch_size={batch_size}, remaining={remaining_records}"
+                f"Worker {worker_id} processing chunk [{chunk.start_offset}, {chunk.end_offset}] "
+                f"at offset {offset}, batch_size={batch_size}, remaining={remaining_records}"
             )
 
-            # CRITICAL FIX: Keep trying to get a key instead of giving up
-            api_key = None
-            key_wait_attempts = 0
-            max_key_wait_attempts = 10
-
-            while api_key is None and key_wait_attempts < max_key_wait_attempts:
-                api_key = await self.key_pool.checkout_key(
-                    worker_id, preferred_requests=estimated_requests
-                )
-
-                if api_key is None:
-                    key_wait_attempts += 1
-                    if key_wait_attempts < max_key_wait_attempts:
-                        wait_time = min(
-                            2**key_wait_attempts, 30
-                        )  # Exponential backoff, max 30s
-                        logger.info(
-                            f"Worker {worker_id} waiting {wait_time}s for API key "
-                            f"(attempt {key_wait_attempts}/{max_key_wait_attempts})"
-                        )
-                        await asyncio.sleep(wait_time)
-                    else:
-                        logger.error(
-                            f"*** CRITICAL: Worker {worker_id} failed to get API key after "
-                            f"{max_key_wait_attempts} attempts, abandoning chunk [{chunk.start_offset}, {chunk.end_offset}] "
-                            f"at offset {offset}. Processed {processed} items so far."
-                        )
-                        worker_stats["errors"] += 1
-                        return processed  # Return what we've processed so far
-
-            if not api_key:
-                # This shouldn't happen with the above logic, but just in case
-                break
+            # Use improved key acquisition strategy
+            api_key = await self._acquire_api_key_with_smart_backoff(
+                worker_id=worker_id,
+                key_pool=self.key_pool,
+                estimated_requests=estimated_requests,
+                chunk=chunk,
+                offset=offset
+            )
 
             worker_stats["keys_used"].add(api_key.key[:8])
 
@@ -680,7 +657,8 @@ class OptimizedParallelProcessor:
                         batch_processed  # Use actual processed count, not batch_size
                     )
                     logger.info(
-                        f"Worker {worker_id} updated offset: {old_offset} -> {offset} (processed {batch_processed} items)"
+                        f"Worker {worker_id} updated offset: {old_offset} -> {offset} "
+                        f"(processed {batch_processed} items)"
                     )
 
                 except Exception as e:
@@ -718,9 +696,105 @@ class OptimizedParallelProcessor:
                             )  # Exponential backoff
 
         logger.info(
-            f"*** SUCCESS: Worker {worker_id} completed chunk [{chunk.start_offset}, {chunk.end_offset}] - processed {processed} items"
+            f"*** SUCCESS: Worker {worker_id} completed chunk [{chunk.start_offset}, {chunk.end_offset}] "
+            f"- processed {processed} items"
         )
         return processed
+
+    async def _acquire_api_key_with_smart_backoff(
+        self,
+        worker_id: str,
+        key_pool,
+        estimated_requests: int,
+        chunk: WorkChunk,
+        offset: int
+    ) -> Any:
+        """
+        Acquire an API key with a smart backoff strategy that balances between:
+        - Never abandoning work (must process every item)
+        - Not wasting time with excessive waits
+        - Minimizing overhead from constant polling
+
+        Strategy:
+        1. Start with quick retries (good for transient unavailability)
+        2. Move to medium backoff with periodic quick checks
+        3. Cap at reasonable maximum wait with jitter
+        """
+
+        api_key = None
+        attempt = 0
+        consecutive_long_waits = 0
+
+        # Configuration
+        INITIAL_WAIT = 0.5  # Start with 500ms
+        QUICK_CHECK_INTERVAL = 5  # Do a quick check every N long waits
+        MAX_WAIT = 30  # Cap at 30 seconds instead of 60
+        JITTER_FACTOR = 0.2  # Add ±20% jitter to prevent thundering herd
+
+        while api_key is None:
+            # Try to get a key
+            api_key = await key_pool.checkout_key(
+                worker_id, preferred_requests=estimated_requests
+            )
+
+            if api_key is not None:
+                # Success! Log if we had to wait
+                if attempt > 0:
+                    logger.info(
+                        f"Worker {worker_id} acquired API key after {attempt} attempts"
+                    )
+                return api_key
+
+            # No key available - implement smart backoff
+            attempt += 1
+
+            # Calculate base wait time with exponential backoff
+            if attempt <= 3:
+                # First 3 attempts: quick retries (0.5s, 1s, 2s)
+                base_wait = INITIAL_WAIT * (2 ** (attempt - 1))
+            else:
+                # After that: slower backoff capped at MAX_WAIT
+                base_wait = min(INITIAL_WAIT * (2 ** (attempt - 1)), MAX_WAIT)
+
+                # Every QUICK_CHECK_INTERVAL long waits, do a quick check
+                consecutive_long_waits += 1
+                if consecutive_long_waits >= QUICK_CHECK_INTERVAL:
+                    logger.info(
+                        f"Worker {worker_id} doing quick availability check after "
+                        f"{QUICK_CHECK_INTERVAL} long waits"
+                    )
+                    base_wait = INITIAL_WAIT  # Quick check
+                    consecutive_long_waits = 0
+
+            # Add jitter to prevent thundering herd
+            jitter = base_wait * JITTER_FACTOR * (2 * random.random() - 1)
+            wait_time = max(0.1, base_wait + jitter)  # Never wait less than 100ms
+
+            # Log wait status with useful context
+            if attempt == 1:
+                logger.info(
+                    f"Worker {worker_id} waiting for API key "
+                    f"(chunk [{chunk.start_offset}-{chunk.end_offset}] @ offset {offset})"
+                )
+            elif attempt % 10 == 0:  # Log every 10 attempts to avoid spam
+                logger.warning(
+                    f"Worker {worker_id} still waiting for API key "
+                    f"(attempt {attempt}, wait {wait_time:.1f}s, "
+                    f"chunk [{chunk.start_offset}-{chunk.end_offset}] @ offset {offset})"
+                )
+
+            await asyncio.sleep(wait_time)
+
+            # Periodically check pool status for debugging
+            if attempt % 20 == 0:
+                pool_status = await key_pool.get_pool_status()
+                available = pool_status["status_by_state"].get("available", 0)
+                total = pool_status["total_keys"]
+                logger.info(
+                    f"Key pool status: {available}/{total} keys available, "
+                    f"{pool_status['total_requests_remaining']} requests remaining"
+                )
+
 
     async def _report_status(self, work_queue: AdaptiveWorkQueue, interval: int = 30):
         """Periodically report processing status."""
