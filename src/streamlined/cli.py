@@ -130,6 +130,17 @@ Examples:
         "--validate", action="store_true", help="Validate configuration"
     )
 
+    # Diagnostics command
+    diagnostics_parser = subparsers.add_parser(
+        "diagnostics", help="Debug configuration and environment"
+    )
+    diagnostics_parser.add_argument(
+        "--check-env", action="store_true", help="Check environment variables"
+    )
+    diagnostics_parser.add_argument(
+        "--check-dotenv", action="store_true", help="Check .env file locations"
+    )
+
     # =============================================================================
     # CHECKPOINT MANAGEMENT COMMANDS
     # =============================================================================
@@ -510,6 +521,92 @@ async def command_config(args) -> int:
         return 1
 
 
+async def command_diagnostics(args) -> int:
+    """Debug configuration and environment."""
+    try:
+        import os
+        from pathlib import Path
+        from .resources.config import StreamlinedConfig
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info("DIAGNOSTICS")
+        logger.info(f"{'=' * 60}")
+
+        # Check .env file locations
+        if args.check_dotenv or not args.check_env:
+            logger.info("\n.env File Locations:")
+            env_paths = [
+                Path.cwd() / ".env",  # Current working directory
+                Path(__file__).parent.parent.parent / ".env",  # Project root
+                Path.home() / ".env",  # User home directory
+            ]
+
+            for env_path in env_paths:
+                exists = "✓" if env_path.exists() else "✗"
+                logger.info(f"  {exists} {env_path}")
+                if env_path.exists():
+                    try:
+                        with open(env_path, "r") as f:
+                            content = f.read()
+                            db_vars = [
+                                line
+                                for line in content.split("\n")
+                                if line.strip() and "POSTGRESQL" in line
+                            ]
+                            if db_vars:
+                                logger.info(
+                                    f"    Database variables found: {len(db_vars)}"
+                                )
+                                for var in db_vars:
+                                    var_name = var.split("=")[0]
+                                    logger.info(f"      {var_name}")
+                            else:
+                                logger.info("    No POSTGRESQL variables found")
+                    except Exception as e:
+                        logger.info(f"    Error reading file: {e}")
+
+        # Check environment variables
+        if args.check_env or not args.check_dotenv:
+            logger.info("\nExpected Environment Variables:")
+            expected_vars = [
+                "POSTGRESQL_HOST",
+                "POSTGRESQL_PORT",
+                "POSTGRESQL_DATABASE",
+                "POSTGRESQL_USERNAME",
+                "POSTGRESQL_PASSWORD",
+                "CONGRESSIONAL_API_KEY",
+                "GOVINFO_API_KEY",
+            ]
+
+            for var in expected_vars:
+                value = os.getenv(var)
+                if value:
+                    if "PASSWORD" in var or "KEY" in var:
+                        logger.info(f"  ✓ {var}=***hidden***")
+                    else:
+                        logger.info(f"  ✓ {var}={value}")
+                else:
+                    logger.info(f"  ✗ {var} (not set)")
+
+        # Test configuration loading
+        logger.info("\nConfiguration Loading Test:")
+        try:
+            config = StreamlinedConfig.from_env()
+            logger.info(f"  Database Host: {config.database.host}")
+            logger.info(f"  Database Port: {config.database.port}")
+            logger.info(f"  Database Name: {config.database.database}")
+            logger.info(f"  Database Username: {config.database.username}")
+            logger.info(f"  API Keys: {len(config.api.keys)} configured")
+        except Exception as e:
+            logger.error(f"  Failed to load configuration: {e}")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Diagnostics failed: {e}")
+        return 1
+
+
 # =============================================================================
 # CHECKPOINT MANAGEMENT COMMANDS
 # =============================================================================
@@ -853,6 +950,7 @@ async def main() -> int:
         "status": command_status,
         "plugin-info": command_plugin_info,
         "config": command_config,
+        "diagnostics": command_diagnostics,
         "list-checkpoints": command_list_checkpoints,
         "clear-checkpoints": command_clear_checkpoints,
         "resume-from-checkpoint": command_resume_from_checkpoint,
