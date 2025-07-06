@@ -600,6 +600,35 @@ async def command_diagnostics(args) -> int:
         except Exception as e:
             logger.error(f"  Failed to load configuration: {e}")
 
+        # Test dotenv loading specifically
+        logger.info("\nDotenv Loading Test:")
+        try:
+            from dotenv import load_dotenv
+
+            logger.info("  ✓ python-dotenv is available")
+
+            # Test loading the .env file explicitly
+            env_file = Path.cwd() / ".env"
+            if env_file.exists():
+                logger.info(f"  Attempting to load: {env_file}")
+                result = load_dotenv(env_file, override=True)
+                logger.info(f"  load_dotenv result: {result}")
+
+                # Check if variables are now loaded
+                logger.info(
+                    f"  After load_dotenv - POSTGRESQL_HOST: {os.getenv('POSTGRESQL_HOST')}"
+                )
+                logger.info(
+                    f"  After load_dotenv - POSTGRESQL_USERNAME: {os.getenv('POSTGRESQL_USERNAME')}"
+                )
+            else:
+                logger.info("  .env file not found in current directory")
+
+        except ImportError:
+            logger.error("  ✗ python-dotenv not available")
+        except Exception as e:
+            logger.error(f"  Dotenv loading failed: {e}")
+
         return 0
 
     except Exception as e:
