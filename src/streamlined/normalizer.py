@@ -538,18 +538,18 @@ class StreamlinedNormalizer:
                             logger.warning(f"Empty payload for {source_doc_id}")
                             return {"success": False, "error": "Empty payload"}
 
-                        # Check for wrapper key if configured
-                        if hasattr(config.api, "full_key") and config.api.full_key:
-                            if config.api.full_key in payload:
-                                payload = payload[config.api.full_key]
-                            else:
-                                logger.warning(
-                                    f"Expected wrapper key '{config.api.full_key}' not found in payload"
-                                )
-                                return {
-                                    "success": False,
-                                    "error": f"Missing wrapper key: {config.api.full_key}",
-                                }
+                        # # Check for wrapper key if configured
+                        # if hasattr(config.api, "full_key") and config.api.full_key:
+                        #     if config.api.full_key in payload:
+                        #         payload = payload[config.api.full_key]
+                        #     else:
+                        #         logger.warning(
+                        #             f"Expected wrapper key '{config.api.full_key}' not found in payload"
+                        #         )
+                        #         return {
+                        #             "success": False,
+                        #             "error": f"Missing wrapper key: {config.api.full_key}",
+                        #         }
 
                         # Get record ID using configured field
                         record_id = payload.get(config.id_field) or source_doc_id
@@ -763,18 +763,18 @@ class StreamlinedNormalizer:
                             logger.warning(f"Empty payload for {source_doc_id}")
                             return {"success": False, "error": "Empty payload"}
 
-                        # Check for wrapper key if configured
-                        if hasattr(config.api, "full_key") and config.api.full_key:
-                            if config.api.full_key in payload:
-                                payload = payload[config.api.full_key]
-                            else:
-                                logger.warning(
-                                    f"Expected wrapper key '{config.api.full_key}' not found in payload"
-                                )
-                                return {
-                                    "success": False,
-                                    "error": f"Missing wrapper key: {config.api.full_key}",
-                                }
+                        # # Check for wrapper key if configured
+                        # if hasattr(config.api, "full_key") and config.api.full_key:
+                        #     if config.api.full_key in payload:
+                        #         payload = payload[config.api.full_key]
+                        #     else:
+                        #         logger.warning(
+                        #             f"Expected wrapper key '{config.api.full_key}' not found in payload"
+                        #         )
+                        #         return {
+                        #             "success": False,
+                        #             "error": f"Missing wrapper key: {config.api.full_key}",
+                        #         }
 
                         # Get record ID using configured field
                         record_id = payload.get(config.id_field) or source_doc_id
