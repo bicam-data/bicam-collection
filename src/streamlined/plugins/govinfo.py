@@ -182,36 +182,25 @@ class GovInfoFetcherPlugin:
         if not batch:
             return []
 
-        logger.debug(
-            f"Extracting list items from batch type: {type(batch)}, length: {len(batch) if hasattr(batch, '__len__') else 'N/A'}"
-        )
-
         # For GovInfo API, the batch IS the packages list
         # The API client already extracts packages from the response
         if isinstance(batch, list):
-            logger.debug(f"Batch is a list with {len(batch)} items")
             # Add URL field for Phase 2 compatibility
             for item in batch:
-                logger.debug(f"Processing item with keys: {list(item.keys())}")
                 if "packageLink" in item and "url" not in item:
                     item["url"] = item["packageLink"]
-                    logger.debug(f"Added url field: {item['url']}")
                 elif "url" not in item:
                     logger.warning(f"Item missing both packageLink and url: {item}")
             return batch
 
         # Fallback: if it's a dict, look for packages key
         if isinstance(batch, dict):
-            logger.debug(f"Batch is a dict with keys: {list(batch.keys())}")
             packages = batch.get("packages", [])
             if packages:
-                logger.debug(f"Found packages key with {len(packages)} items")
                 # Add URL field for Phase 2 compatibility
                 for item in packages:
-                    logger.debug(f"Processing item with keys: {list(item.keys())}")
                     if "packageLink" in item and "url" not in item:
                         item["url"] = item["packageLink"]
-                        logger.debug(f"Added url field: {item['url']}")
                     elif "url" not in item:
                         logger.warning(f"Item missing both packageLink and url: {item}")
                 return packages if isinstance(packages, list) else []

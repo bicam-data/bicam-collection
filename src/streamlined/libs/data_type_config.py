@@ -23,6 +23,8 @@ class ApiConfig:
     api_endpoint: str | None = None
     list_key: str | list[str] | None = None
     full_key: str | None = None
+    doc_class: str | None = None
+    granule_class: str | None = None
     page_size: int = 250
     retry_attempts: int = 3
 
