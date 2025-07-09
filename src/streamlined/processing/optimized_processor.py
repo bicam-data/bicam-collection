@@ -11,6 +11,11 @@ import random
 from datetime import UTC, datetime
 from typing import Any
 
+from ..libs.hierarchical_checkpoint_system import (
+    HierarchicalCheckpointManager,
+    ProcessingStage,
+    FetchingPhase,
+)
 from ..processing.key_pool import DynamicKeyPool
 from ..processing.optimized_storage_manager import OptimizedFetcherStorage
 from ..processing.work_queue import AdaptiveWorkQueue, WorkChunk
@@ -53,6 +58,7 @@ class OptimizedParallelProcessor:
         logger.info(
             f"=  Workers: {self.num_workers}, Chunk Size: {self.chunk_size}          ="
         )
+        logger.info(f"=  API Keys: {len(api_keys)}, Key Pool: DynamicKeyPool    =")
         logger.info("==================================================")
 
         logger.info(
@@ -124,6 +130,28 @@ class OptimizedParallelProcessor:
         logger.info(f"Has data: {has_data}")
         if error:
             logger.error(f"Error in raw metadata: {error}")
+
+        # Update checkpoint with total count from API response
+        if hasattr(fetcher, "hierarchical_checkpoint_manager") and total_count > 0:
+            try:
+                # Get the list_items checkpoint and update its total_items
+                list_checkpoint = (
+                    fetcher.hierarchical_checkpoint_manager.get_or_create_checkpoint(
+                        ProcessingStage.FETCHING,
+                        FetchingPhase.LIST_ITEMS.value,
+                        data_type,
+                    )
+                )
+                if list_checkpoint.total_items == 0:
+                    list_checkpoint.total_items = total_count
+                    fetcher.hierarchical_checkpoint_manager.save_checkpoint(
+                        list_checkpoint
+                    )
+                    logger.info(
+                        f"Updated checkpoint total_items to {total_count} for {data_type}"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to update checkpoint total_items: {e}")
 
         # Check if we have data to process
         if not has_data or total_count == 0:
