@@ -130,18 +130,36 @@ class GovInfoFetcherPlugin:
             # Use the unified retrieve_collection_data method
             # This will navigate to start_page and then continue fetching pages until limit is reached
             data_batches = []
-            async for batch in api_client.retrieve_collection_data(
-                collection_code=config.api.api_endpoint,
-                start_date=api_client._format_date_for_api(from_date)
+
+            # Prepare API call parameters, avoiding duplicate doc_class
+            api_params = {
+                "collection_code": config.api.api_endpoint,
+                "start_date": api_client._format_date_for_api(from_date)
                 if from_date
                 else None,
-                end_date=api_client._format_date_for_api(to_date) if to_date else None,
-                doc_class=config.api.doc_class,
-                start_page=start_page,
-                limit=limit,  # This controls total items, not pages
-                single_page_only=single_page_only,
-                **kwargs,
-            ):
+                "end_date": api_client._format_date_for_api(to_date)
+                if to_date
+                else None,
+                "start_page": start_page,
+                "limit": limit,  # This controls total items, not pages
+                "single_page_only": single_page_only,
+            }
+
+            # Only add doc_class if it's not already in kwargs
+            if "doc_class" not in kwargs and config.api.doc_class:
+                api_params["doc_class"] = config.api.doc_class
+                logger.info(
+                    f"Using doc_class from plugin config: {config.api.doc_class}"
+                )
+            elif "doc_class" in kwargs:
+                logger.info(f"Using doc_class from kwargs: {kwargs['doc_class']}")
+            else:
+                logger.info("No doc_class specified - will fetch all documents")
+
+            # Add any additional kwargs
+            api_params.update(kwargs)
+
+            async for batch in api_client.retrieve_collection_data(**api_params):
                 items = self._extract_list_items(batch, config)
                 data_batches.extend(items)
                 logger.debug(f"Batch returned {len(items)} items")
