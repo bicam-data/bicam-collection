@@ -467,6 +467,9 @@ class OptimizedStorageManager:
         self, conn: asyncpg.Connection, schema: str, table: str, sample_record: dict
     ):
         """Ensure table exists with proper fixed schema."""
+        # Replace dashes with underscores in table name
+        safe_table_name = table.replace("-", "_")
+
         # Check if table exists
         exists = await conn.fetchval(
             """
@@ -476,13 +479,13 @@ class OptimizedStorageManager:
             )
             """,
             schema,
-            table,
+            safe_table_name,
         )
 
         if not exists:
             # Use fixed schema for raw tables - don't unnest JSON fields
             await conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                CREATE TABLE IF NOT EXISTS {schema}.{safe_table_name} (
                     id_uuid       TEXT NOT NULL PRIMARY KEY,
                     url           TEXT,
                     batch_id      TEXT,
@@ -493,10 +496,12 @@ class OptimizedStorageManager:
                 )
             """)
 
-            logger.info(f"Created table {schema}.{table} with fixed schema (8 columns)")
+            logger.info(
+                f"Created table {schema}.{safe_table_name} with fixed schema (8 columns)"
+            )
         else:
             # Table exists, ensure it has all required columns
-            await self._ensure_required_columns_exist(conn, schema, table)
+            await self._ensure_required_columns_exist(conn, schema, safe_table_name)
 
     async def _ensure_required_columns_exist(
         self, conn: asyncpg.Connection, schema: str, table: str
@@ -1256,14 +1261,19 @@ class OptimizedNormalizerStorage:
     ) -> bool:
         """Create table with all TEXT columns, no constraints."""
         try:
+            # Replace dashes with underscores in table name
+            safe_table_name = table_name.replace("-", "_")
+
             # Build column definitions - ALL TEXT, no constraints
             columns = []
             for key in sample_record:
-                columns.append(f"{key} TEXT")
+                # Replace dashes with underscores in column names
+                safe_column_name = key.replace("-", "_")
+                columns.append(f"{safe_column_name} TEXT")
 
             # Create table
             create_sql = f"""
-                CREATE TABLE IF NOT EXISTS {self.target_schema}.{table_name} (
+                CREATE TABLE IF NOT EXISTS {self.target_schema}.{safe_table_name} (
                     {", ".join(columns)}
                 )
             """
@@ -1290,6 +1300,9 @@ class OptimizedNormalizerStorage:
         self, conn: asyncpg.Connection, table_name: str, sample_record: dict[str, Any]
     ) -> None:
         """Add missing columns to existing table (all as TEXT)."""
+        # Replace dashes with underscores in table name
+        safe_table_name = table_name.replace("-", "_")
+
         # Get existing columns
         rows = await conn.fetch(
             """
@@ -1298,29 +1311,31 @@ class OptimizedNormalizerStorage:
             WHERE table_schema = $1 AND table_name = $2
             """,
             self.target_schema,
-            table_name,
+            safe_table_name,
         )
         existing_columns = {row["column_name"].lower() for row in rows}
 
         # Find missing columns
         missing_columns = []
         for key in sample_record:
-            if key.lower() not in existing_columns:
-                missing_columns.append(key)
+            # Replace dashes with underscores in column names for comparison
+            safe_key = key.replace("-", "_")
+            if safe_key.lower() not in existing_columns:
+                missing_columns.append(safe_key)
 
         if missing_columns:
             logger.info(
-                f"Adding {len(missing_columns)} columns to {table_name}: {missing_columns}"
+                f"Adding {len(missing_columns)} columns to {safe_table_name}: {missing_columns}"
             )
 
             for col in missing_columns:
                 try:
                     alter_sql = f"""
-                        ALTER TABLE {self.target_schema}.{table_name}
+                        ALTER TABLE {self.target_schema}.{safe_table_name}
                         ADD COLUMN {col} TEXT
                     """
                     await conn.execute(alter_sql)
-                    logger.debug(f"Added column {col} to {table_name}")
+                    logger.debug(f"Added column {col} to {safe_table_name}")
                 except Exception as e:
                     if "already exists" in str(e).lower():
                         logger.debug(f"Column {col} already exists (concurrent)")
@@ -1334,9 +1349,17 @@ class OptimizedNormalizerStorage:
         if not records:
             return 0
 
-        # Get all unique columns from all records
+        # Get all unique columns from all records and convert dashes to underscores
         all_columns = set().union(*(record.keys() for record in records))
-        columns = sorted(all_columns)
+        # Replace dashes with underscores in column names
+        safe_columns = [col.replace("-", "_") for col in all_columns]
+        columns = sorted(safe_columns)
+
+        # Create mapping from safe column names back to original names
+        column_mapping = {}
+        for original_col in all_columns:
+            safe_col = original_col.replace("-", "_")
+            column_mapping[safe_col] = original_col
 
         # Create tab-separated values
         output = io.StringIO()
@@ -1344,7 +1367,9 @@ class OptimizedNormalizerStorage:
         for record in records:
             row_values = []
             for col in columns:
-                value = record.get(col)
+                # Get the original column name for record lookup
+                original_col = column_mapping.get(col, col)
+                value = record.get(original_col)
                 if value is None:
                     row_values.append("\\N")  # PostgreSQL NULL
                 elif isinstance(value, bool):
@@ -1387,8 +1412,10 @@ class OptimizedNormalizerStorage:
                 records_data.append(tuple(processed_values))
 
         if records_data:
+            # Replace dashes with underscores in table name
+            safe_table_name = table_name.replace("-", "_")
             await conn.copy_records_to_table(
-                table_name,
+                safe_table_name,
                 records=records_data,
                 columns=columns,
                 schema_name=self.target_schema,
