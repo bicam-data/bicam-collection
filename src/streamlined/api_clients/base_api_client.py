@@ -264,7 +264,7 @@ class BaseAPIClient(ABC):
                     data_type,
                     date,
                     total_count,
-                    datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now(UTC),
                 )
                 return True
         except Exception as e:

@@ -12,7 +12,6 @@ All logic is organized into classes that can be used by the plugin system.
 import logging
 import re
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
 from typing import Any
 
 # Import the base class that provides shared functionality
@@ -237,118 +236,6 @@ class BillsFetcherLogic(CongressionalBaseFetcherLogic):
                     )
 
         return committee_activities
-
-
-class BillsNormalizerLogic:
-    """
-    Bills-specific database normalization logic extracted from BillsDatabaseNormalizer class.
-    Contains all the custom methods for normalizing bills data.
-    """
-
-    def __init__(
-        self,
-        data_type_name: str = "bills",
-        system_name: str = "congressional",
-        target_schema: str = "bicam_staging_congressional",
-        source_schema: str = "bicam_raw_congressional",
-    ):
-        self.data_type_name = data_type_name
-        self.system_name = system_name
-        self.target_schema = target_schema
-        self.source_schema = source_schema
-        self.main_id_field = "bill_id"
-
-    def _process_item_record(
-        self, raw_row: dict[str, Any]
-    ) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
-        """
-        Process a single bill record with bills-specific validation logic.
-
-        Overrides the base method to add bills-specific data structure handling.
-        """
-        # Check for data in either "payload" or "data" fields
-        data = raw_row.get("payload", raw_row.get("data", {}))
-        existing_id = raw_row.get("source_doc_id")
-
-        if not existing_id:
-            logger.warning("No source_doc_id found in raw data")
-            return {}, {}
-
-        # Handle different data structures with bills-specific logic
-        bill_data = {}
-
-        if isinstance(data, dict):
-            # Case 1: Data wrapped in "bill" key -> {"bill": {...}}
-            if "bill" in data and isinstance(data["bill"], dict):
-                bill_data = data["bill"]
-                logger.debug(f"Found bill data wrapped in 'bill' key for {existing_id}")
-            # Case 2: Direct bill data (no wrapper) with bills-specific validation
-            elif data and any(
-                key in data for key in ["type", "number", "congress", "title", "url"]
-            ):
-                bill_data = data
-                logger.debug(f"Found direct bill data (no wrapper) for {existing_id}")
-            # Case 3: Empty or invalid data structure
-            else:
-                logger.error(
-                    f"No valid bill data found for {existing_id}. Data keys: {list(data.keys())}"
-                )
-                return {}, {}
-        else:
-            logger.error(
-                f"Data is not a dictionary for {existing_id}. Type: {type(data)}"
-            )
-            return {}, {}
-
-        # Validate that we have substantial bill data
-        if not bill_data or len(bill_data) == 0:
-            logger.error(f"Bill data is empty for {existing_id}")
-            return {}, {}
-
-        # Log debug info about the bill data structure
-        logger.debug(
-            f"Processing bill {existing_id} with {len(bill_data)} fields: {list(bill_data.keys())[:10]}"
-        )
-
-        # Use base class methods for processing
-        flattened = self._flatten_dict(bill_data)
-
-        # Validate flattened data has content
-        if not flattened or len(flattened) == 0:
-            logger.error(
-                f"Flattened data is empty for {existing_id}. Original bill_data: {bill_data}"
-            )
-            return {}, {}
-
-        # Use existing ID and add metadata
-        flattened[self.main_id_field] = existing_id
-        flattened["processed_at"] = self._get_current_timestamp()
-
-        # Extract all list fields using base class method
-        extracted_lists = self._extract_lists(
-            bill_data, existing_id, parent_table="bills"
-        )
-
-        logger.debug(
-            f"Successfully processed bill {existing_id}: {len(flattened)} main fields, {len(extracted_lists)} list tables"
-        )
-        return flattened, extracted_lists
-
-    def _get_current_timestamp(self) -> str:
-        """Get current timestamp in ISO format."""
-        return datetime.now(UTC).isoformat()
-
-    def _flatten_dict(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Flatten nested dictionary structure."""
-        # This would need implementation from base class
-        return data
-
-    def _extract_lists(
-        self, data: dict[str, Any], record_id: str, parent_table: str
-    ) -> dict[str, list[dict[str, Any]]]:
-        """Extract list data from dictionary."""
-        # This would need implementation from base class
-        return {}
 
 
 class BillsCleanerLogic:

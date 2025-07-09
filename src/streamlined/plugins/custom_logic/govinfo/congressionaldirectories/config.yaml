@@ -1,0 +1,38 @@
+- name: congressionaldirectories
+  description: GovInfo Congressional Directories main data
+
+  api:
+    api_endpoint: CDIR
+    granule_class: CONGRESSMEMBERSTATE
+    page_size: 1000
+    retry_attempts: 3
+
+  schema:
+    table_name: congressionaldirectories
+
+    is_main: true
+    create_raw: true
+    id_fields: [package_id]
+    related_tables:
+    - granules
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+    has_granules: true
+
+- name: granules
+  description: Congressional Directory Members granule data
+
+  api:
+    page_size: 1000
+    retry_attempts: 3
+
+  schema:
+    table_name: granules
+    is_main: false
+    create_raw: true
+    id_fields: [granule_id]
+
+  processing:
+    batch_size: 100

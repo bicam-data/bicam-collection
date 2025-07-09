@@ -1,0 +1,63 @@
+- name: members
+  description: Congressional members main data
+
+  api:
+    api_endpoint: member
+    list_key: members
+    full_key: member
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: members
+    is_main: true
+    create_raw: true
+    id_fields: [bioguide_id]
+    related_tables:
+      - terms
+      - leadershiproles
+      - partyhistory
+
+  processing:
+    batch_size: 50
+    checkpoint_frequency: 25
+
+- name: members_terms
+  description: Congressional members terms data
+
+  schema:
+    table_name: members_terms
+    is_main: false
+    create_raw: false
+    id_fields: [bioguide_id, start_year, end_year]
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: members_leadershiproles
+  description: Congressional members leadership roles data
+
+  schema:
+    table_name: members_leadershiproles
+    is_main: false
+    create_raw: false
+    id_fields: [bioguide_id, role, congress, chamber, is_current]
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: members_partyhistory
+  description: Congressional members party history data
+
+  schema:
+    table_name: members_partyhistory
+    is_main: false
+    create_raw: false
+    id_fields: [bioguide_id, party_code, start_year, end_year]
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+

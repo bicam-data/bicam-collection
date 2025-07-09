@@ -1,0 +1,66 @@
+- name: committeereports
+  description: Congressional committee reports main data
+
+  api:
+    api_endpoint: committee-report
+    list_key: reports
+    full_key: committeeReports
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: committeereports
+    is_main: true
+    create_raw: true
+    id_fields: [report_id]
+    related_tables:
+      - texts
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: committeereports_committees
+  description: Committee reports committees data
+
+  schema:
+    table_name: committeereports_committees
+    is_main: false
+    create_raw: false
+    id_fields: [report_id, committee_code]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeereports_bills
+  description: Committee reports bills data
+
+  schema:
+    table_name: committeereports_bills
+    is_main: false
+    create_raw: false
+    id_fields: [report_id, bill_id]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeereports_texts
+  description: Committee reports texts data
+
+  api:
+    api_endpoint: text
+    list_key: textVersions
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: committeereports_texts
+    is_main: false
+    create_raw: true
+    id_fields: [report_id, formatted_text, pdf]
+
+  processing:
+    batch_size: 200
+    checkpoint_frequency: 100

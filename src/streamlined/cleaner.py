@@ -180,7 +180,13 @@ class StreamlinedCleaner:
                 logger.info(f"Running post-processing for {data_type}")
                 try:
                     post_results = await self._run_post_processing(
-                        data_type, custom_logic, cleaning_checkpoint, rerun, resume
+                        data_type,
+                        custom_logic,
+                        cleaning_checkpoint,
+                        rerun,
+                        resume,
+                        storage_manager,
+                        cleaner_storage,
                     )
                     results["post_processing"] = post_results
                 except Exception as e:
@@ -332,11 +338,20 @@ class StreamlinedCleaner:
                 else None
             )
 
+            # Get multi-table configuration from custom logic if available
+            multi_table_data_types = (
+                getattr(custom_logic, "multi_table_data_types", None)
+                if custom_logic
+                else None
+            )
+
             async for chunk in cleaner_storage.stream_staging_data(
                 table_name=table,
                 batch_size=chunk_size,
                 order_by=order_by,
                 checkpoint_offset=start_offset if resume else 0,
+                multi_table_data_types=multi_table_data_types,
+                custom_logic=custom_logic,
             ):
                 # Process chunk of records
                 chunk_result = await self._process_chunk(
@@ -470,8 +485,11 @@ class StreamlinedCleaner:
                     # Call the custom cleaning method
                     cleaned_data = await getattr(custom_logic, method_name)(record)
 
-                    # Check if custom logic set a target table override
-                    if hasattr(custom_logic, "_target_table_override"):
+                    # Check if custom logic set a target table override using the new pattern
+                    if hasattr(custom_logic, "target_table_override"):
+                        self._target_table_override = custom_logic.target_table_override
+                    elif hasattr(custom_logic, "_target_table_override"):
+                        # Legacy support for old pattern
                         self._target_table_override = (
                             custom_logic._target_table_override
                         )
@@ -491,6 +509,8 @@ class StreamlinedCleaner:
         cleaning_checkpoint: CleaningCheckpoint,
         rerun: bool,
         resume: bool,
+        storage_manager=None,
+        cleaner_storage=None,
     ) -> dict[str, Any]:
         """Run post-processing operations."""
         if not custom_logic:
@@ -509,7 +529,33 @@ class StreamlinedCleaner:
             return {"status": "skipped", "reason": "already processed"}
 
         try:
-            result = await getattr(custom_logic, method_name)()
+            # Get the method and check its signature
+            method = getattr(custom_logic, method_name)
+
+            # Check if method expects storage parameters
+            import inspect
+
+            sig = inspect.signature(method)
+            params = list(sig.parameters.keys())
+
+            # Skip 'self' parameter
+            if params and params[0] == "self":
+                params = params[1:]
+
+            # Call method with appropriate parameters
+            if (
+                len(params) >= 2
+                and "storage_manager" in params
+                and "cleaner_storage" in params
+            ):
+                result = await method(
+                    storage_manager=storage_manager, cleaner_storage=cleaner_storage
+                )
+            elif len(params) >= 1 and "storage_manager" in params:
+                result = await method(storage_manager=storage_manager)
+            else:
+                # Fallback to no parameters for backward compatibility
+                result = await method()
 
             # Mark as processed
             if not rerun:

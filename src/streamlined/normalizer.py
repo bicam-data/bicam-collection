@@ -6,6 +6,7 @@ using optimized normalizer storage and hierarchical checkpoint system.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -47,6 +48,118 @@ class StreamlinedNormalizer:
         self.normalizer_storage = None  # Will be initialized when needed
 
         logger.info("StreamlinedNormalizer initialized")
+
+    def _generate_deterministic_id(
+        self, data: dict[str, Any], exclude_fields: list[str] = None
+    ) -> str:
+        """
+        Generate a deterministic ID from data by hashing the content.
+
+        Args:
+            data: Dictionary to hash
+            exclude_fields: Fields to exclude from hashing (e.g., timestamps, updatedate, etc.)
+
+        Returns:
+            Deterministic hash string
+        """
+        if exclude_fields is None:
+            exclude_fields = []
+
+        # Create a copy of data for hashing
+        hash_data = {}
+        for key, value in data.items():
+            # Skip excluded fields and fields ending with _at
+            if (
+                key.lower() in exclude_fields
+                or key.lower() in ["updatedate", "lastmodified"]
+                or key.lower().endswith("_at")
+            ):
+                continue
+
+            # Convert value to string for consistent hashing
+            if value is None:
+                hash_data[key] = "null"
+            elif isinstance(value, dict | list):
+                hash_data[key] = json.dumps(value, sort_keys=True)
+            else:
+                hash_data[key] = str(value)
+
+        # Sort keys for deterministic ordering
+        sorted_items = sorted(hash_data.items())
+
+        # Create hash string
+        hash_string = json.dumps(sorted_items, sort_keys=True)
+
+        # Generate SHA-256 hash
+        hash_obj = hashlib.sha256(hash_string.encode("utf-8"))
+        return hash_obj.hexdigest()[:16]  # Use first 16 characters for readability
+
+    def _get_parent_table_suffix(self, table_name: str) -> str:
+        """
+        Extract the suffix from a table name to use as foreign key field name.
+
+        Examples:
+            amendments_actions -> actions
+            amendments_actions_committees -> committees
+            bills_notes_links -> links
+            simple_table -> table
+
+        Args:
+            table_name: Full table name
+
+        Returns:
+            Suffix to use as foreign key field name
+        """
+        parts = table_name.split("_")
+        if len(parts) >= 2:
+            return parts[-1]  # Return the last part
+        return table_name
+
+    def _add_hierarchical_ids(
+        self,
+        flat_data: dict[str, Any],
+        table_name: str,
+        parent_id: str = None,
+        parent_table_name: str = None,
+        config: Any = None,
+    ) -> dict[str, Any]:
+        """
+        Add hierarchical IDs to the data.
+
+        Args:
+            flat_data: Flattened data dictionary
+            table_name: Current table name
+            parent_id: ID of parent record (if this is an extracted table)
+            parent_table_name: Name of parent table (if this is an extracted table)
+            config: Configuration object to get proper id_field
+
+        Returns:
+            Data with hierarchical IDs added
+        """
+        # Generate deterministic ID for this record
+        deterministic_id = self._generate_deterministic_id(flat_data)
+        flat_data["id"] = deterministic_id
+
+        # If this is an extracted table, add foreign key to parent
+        # Only add foreign key if both parent_id and parent_table_name are provided
+        if parent_id and parent_table_name:
+            # Use the config's id_field if available, otherwise fall back to generic approach
+            if config and hasattr(config, "id_field"):
+                # For related tables, use the first id_field from the config
+                # This handles cases like amendments_links where id_fields: [amendment_id, link_url]
+                foreign_key_field = (
+                    config.id_fields[0]
+                    if hasattr(config, "id_fields")
+                    else config.id_field
+                )
+            else:
+                # Fallback to generic approach
+                parent_suffix = self._get_parent_table_suffix(parent_table_name)
+                foreign_key_field = f"{parent_suffix}_id"
+
+            flat_data[foreign_key_field] = parent_id
+
+        return flat_data
 
     async def normalize_data_type(
         self,
@@ -114,6 +227,7 @@ class StreamlinedNormalizer:
             "main_records_processed": 0,
             "related_records_processed": 0,
             "lists_extracted": 0,
+            "columns_cleaned": 0,
             "errors": 0,
             "start_time": datetime.now(UTC),
         }
@@ -184,24 +298,16 @@ class StreamlinedNormalizer:
             # Phase 2: Process related tables (only those with create_raw: True)
             if hasattr(config, "related_tables") and config.related_tables:
                 for related_table in config.related_tables:
-                    # Check if this related table has a raw table (create_raw: True)
-                    # Get the specific config for this related table
-                    related_config = None
-                    try:
-                        # Try to get config for the related data type
-                        related_data_type = f"{data_type}_{related_table}"
-                        related_config = self.registry.get_data_type_config(
-                            related_data_type
-                        )
-                    except Exception:
-                        # If no specific config, check if it's in the main config
-                        pass
+                    # Get the specific config for this related table from the main data type's config file
+                    related_config = self.registry.get_related_table_config(
+                        data_type, related_table
+                    )
 
-                    # Skip if no raw table exists for this related table
+                    # Check if this related table has a raw table (create_raw: True)
                     if (
                         related_config
-                        and hasattr(related_config, "create_raw")
-                        and not related_config.create_raw
+                        and hasattr(related_config.schema, "create_raw")
+                        and not related_config.schema.create_raw
                     ):
                         logger.info(
                             f"Skipping {related_table} - no raw table (create_raw: False)"
@@ -220,7 +326,7 @@ class StreamlinedNormalizer:
                         )
                         continue
 
-                    table_name = f"{data_type}_{related_table}"
+                    table_name = f"{data_type}_{related_table}".lower()
 
                     if not rerun and staging_checkpoint.should_skip_table(table_name):
                         logger.info(
@@ -230,11 +336,17 @@ class StreamlinedNormalizer:
 
                     logger.info(f"Processing related table: {table_name}")
 
+                    if related_config is None:
+                        logger.warning(
+                            f"No config found for related table {related_table}, skipping."
+                        )
+                        continue
+
                     related_stats = await self._process_related_table(
                         db_pool,
                         data_type,
                         source_schema,
-                        config,
+                        related_config,  # Always use the correct config
                         related_table,
                         batch_size,
                         max_concurrent,
@@ -248,10 +360,28 @@ class StreamlinedNormalizer:
                     staging_checkpoint.mark_table_processed(table_name)
                     results["tables_processed"] += 1
 
-            # Phase 3: Clean up JSON columns that were already extracted in Phase 1
+            # Phase 3: Extract lists from all tables (including recursively extracted ones)
             logger.info(
-                "Cleaning up JSON columns that were already extracted in Phase 1"
+                "Extracting lists from all tables (including recursively extracted ones)"
             )
+
+            extract_stats = await self._extract_all_lists(
+                db_pool,
+                data_type,
+                target_schema,
+                config,
+                staging_checkpoint,
+                extract_checkpoint,
+                batch_size,
+                max_concurrent,
+                rerun,
+            )
+
+            results["lists_extracted"] = extract_stats["lists_extracted"]
+            results["errors"] += extract_stats["errors"]
+
+            # Phase 4: Clean up JSON columns that were extracted in Phase 3
+            logger.info("Cleaning up JSON columns that were extracted in Phase 3")
 
             cleanup_stats = await self._cleanup_extracted_json_columns(
                 db_pool,
@@ -263,7 +393,7 @@ class StreamlinedNormalizer:
                 rerun,
             )
 
-            results["lists_extracted"] = cleanup_stats["columns_cleaned"]
+            results["columns_cleaned"] = cleanup_stats["columns_cleaned"]
             results["errors"] += cleanup_stats["errors"]
 
             # Update final checkpoint state
@@ -409,16 +539,16 @@ class StreamlinedNormalizer:
                             return {"success": False, "error": "Empty payload"}
 
                         # Check for wrapper key if configured
-                        if hasattr(config, "full_key") and config.full_key:
-                            if config.full_key in payload:
-                                payload = payload[config.full_key]
+                        if hasattr(config.api, "full_key") and config.api.full_key:
+                            if config.api.full_key in payload:
+                                payload = payload[config.api.full_key]
                             else:
                                 logger.warning(
-                                    f"Expected wrapper key '{config.full_key}' not found in payload"
+                                    f"Expected wrapper key '{config.api.full_key}' not found in payload"
                                 )
                                 return {
                                     "success": False,
-                                    "error": f"Missing wrapper key: {config.full_key}",
+                                    "error": f"Missing wrapper key: {config.api.full_key}",
                                 }
 
                         # Get record ID using configured field
@@ -434,9 +564,15 @@ class StreamlinedNormalizer:
                         flat_data = self._flatten_dict(payload)
                         flat_data[config.id_field] = record_id
 
-                        # Extract lists to separate tables
-                        extracted_lists = self._extract_lists(
-                            payload, record_id, config
+                        # # Add deterministic ID to the main record (no parent - this is the main table)
+                        # flat_data = self._add_hierarchical_ids(
+                        #     flat_data, config.table_name
+                        # )
+
+                        # Extract lists to separate tables with hierarchical IDs
+                        # Use the deterministic ID of this main table row as the parent
+                        extracted_lists = self._extract_lists_with_hierarchical_ids(
+                            payload, record_id, config.table_name, config
                         )
 
                         # Add common metadata
@@ -527,11 +663,11 @@ class StreamlinedNormalizer:
         checkpoint = staging_checkpoint.cm.get_or_create_checkpoint(
             ProcessingStage.STAGING,
             StagingPhase.JSONB_TO_STAGING.value,
-            f"{data_type}_{related_table}",
+            f"{data_type}_{related_table}".lower(),
         )
 
         source_table = f"{data_type}_{related_table}_raw"
-        target_table = f"{data_type}_{related_table}"
+        target_table = f"{data_type}_{related_table}".lower()
 
         try:
             # Get total count
@@ -539,16 +675,36 @@ class StreamlinedNormalizer:
                 count_result = await conn.fetchval(
                     f"SELECT COUNT(*) FROM {source_schema}.{source_table}"
                 )
+                logger.debug(
+                    f"Found {count_result} records in {source_schema}.{source_table}"
+                )
                 checkpoint.total_items = count_result
                 staging_checkpoint.save_checkpoint(checkpoint)
+
+                if count_result == 0:
+                    logger.debug(
+                        f"No records found in {source_schema}.{source_table} - skipping processing"
+                    )
+                    return stats
         except Exception as e:
-            logger.error(
+            logger.debug(
                 f"Could not count records in {source_schema}.{source_table}: {e}"
             )
             return stats
 
         # Process in batches with offset for resume
-        offset = checkpoint.current_offset
+        # If we're starting fresh (no processed items), start at offset 0
+        logger.info(
+            f"Checkpoint state: processed_items={checkpoint.processed_items}, current_offset={checkpoint.current_offset}, total_items={checkpoint.total_items}"
+        )
+        if checkpoint.processed_items == 0:
+            offset = 0
+            checkpoint.current_offset = 0
+            staging_checkpoint.save_checkpoint(checkpoint)
+            logger.info("Starting fresh, reset offset to 0")
+        else:
+            offset = checkpoint.current_offset
+            logger.info(f"Resuming from offset {offset}")
 
         while True:
             # Fetch batch
@@ -561,14 +717,20 @@ class StreamlinedNormalizer:
             try:
                 async with db_pool.acquire() as conn:
                     rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Fetched {len(rows)} rows from {source_schema}.{source_table} at offset {offset}"
+                    )
             except Exception as e:
-                logger.error(
+                logger.debug(
                     f"Could not fetch records from {source_schema}.{source_table}: {e}"
                 )
                 stats["errors"] += 1
                 break
 
             if not rows:
+                logger.debug(
+                    f"No more rows to process from {source_schema}.{source_table} at offset {offset}"
+                )
                 break
 
             # Process records
@@ -577,22 +739,72 @@ class StreamlinedNormalizer:
             async def process_record(record):
                 async with semaphore:  # noqa: B023
                     try:
+                        source_doc_id = record.get("source_doc_id")
+
+                        # Check if already processed
+                        is_processed = staging_checkpoint.cm.is_item_processed(
+                            ProcessingStage.STAGING,
+                            StagingPhase.JSONB_TO_STAGING.value,
+                            f"{data_type}_{related_table}".lower(),
+                            source_doc_id,
+                        )
+                        if is_processed:
+                            logger.debug(
+                                f"Skipping already processed record: {source_doc_id}"
+                            )
+                            return {"success": True, "skipped": True}
+
+                        # Standard processing - all data comes from "payload" field
                         payload = record.get("payload", {})
                         if isinstance(payload, str):
                             payload = json.loads(payload)
 
-                        # For related tables, generate ID if needed
-                        source_doc_id = record.get("source_doc_id")
-                        record_id = (
-                            f"{source_doc_id}_{related_table}_{record.get('id', '')}"
+                        if not payload:
+                            logger.warning(f"Empty payload for {source_doc_id}")
+                            return {"success": False, "error": "Empty payload"}
+
+                        # Check for wrapper key if configured
+                        if hasattr(config.api, "full_key") and config.api.full_key:
+                            if config.api.full_key in payload:
+                                payload = payload[config.api.full_key]
+                            else:
+                                logger.warning(
+                                    f"Expected wrapper key '{config.api.full_key}' not found in payload"
+                                )
+                                return {
+                                    "success": False,
+                                    "error": f"Missing wrapper key: {config.api.full_key}",
+                                }
+
+                        # Get record ID using configured field
+                        record_id = payload.get(config.id_field) or source_doc_id
+                        if not record_id:
+                            logger.warning(f"No {config.id_field} found in payload")
+                            return {
+                                "success": False,
+                                "error": f"No {config.id_field} found",
+                            }
+
+                        # Flatten the data
+                        flat_data = self._flatten_dict(payload)
+                        flat_data[config.id_field] = record_id
+
+                        # Add hierarchical IDs to the main record (no parent - this is a related table)
+                        flat_data = self._add_hierarchical_ids(
+                            flat_data, target_table, config=config
                         )
 
-                        # Flatten and add foreign key
-                        flat_data = self._flatten_dict(payload)
-                        flat_data["id"] = record_id
-                        flat_data[config.id_field] = source_doc_id
+                        # Extract lists to separate tables with hierarchical IDs
+                        # Use the deterministic ID of this related table row as the parent
+                        extracted_lists = self._extract_lists_with_hierarchical_ids(
+                            payload, flat_data["id"], target_table, config
+                        )
 
-                        # Store using optimized normalizer storage
+                        # Add common metadata
+                        flat_data["processed_at"] = datetime.now(UTC).isoformat()
+                        flat_data["source_doc_id"] = source_doc_id
+
+                        # Store main record using optimized normalizer storage
                         await self.normalizer_storage.store_normalized_records(
                             table_name=target_table,
                             records=[flat_data],
@@ -601,23 +813,48 @@ class StreamlinedNormalizer:
                             checkpoint=False,
                         )
 
+                        # Store extracted lists
+                        if extracted_lists:
+                            await self.normalizer_storage.store_multiple_tables(
+                                table_records=extracted_lists,
+                                checkpoint=False,
+                            )
+
+                        # Mark as processed
+                        staging_checkpoint.cm.mark_item_processed(
+                            ProcessingStage.STAGING,
+                            StagingPhase.JSONB_TO_STAGING.value,
+                            f"{data_type}_{related_table}".lower(),
+                            source_doc_id,
+                        )
+
                         return {"success": True}
 
                     except Exception as e:
-                        logger.error(f"Error processing related record: {e}")
+                        logger.error(
+                            f"Error processing related record {source_doc_id}: {e}"
+                        )
+                        staging_checkpoint.cm.log_error(
+                            ProcessingStage.STAGING,
+                            StagingPhase.JSONB_TO_STAGING.value,
+                            f"{data_type}_{related_table}".lower(),
+                            record.get("source_doc_id", "unknown"),
+                            str(e),
+                            error_type="processing_error",
+                        )
                         return {"success": False, "error": str(e)}
 
             # Process batch
             results = await asyncio.gather(
                 *[process_record(r) for r in rows], return_exceptions=True
             )
-
             # Update stats
             for result in results:
                 if isinstance(result, Exception):
                     stats["errors"] += 1
                 elif isinstance(result, dict) and result.get("success"):
-                    stats["processed"] += 1
+                    if not result.get("skipped"):
+                        stats["processed"] += 1
                 else:
                     stats["errors"] += 1
 
@@ -645,33 +882,13 @@ class StreamlinedNormalizer:
         max_concurrent: int,
         rerun: bool,
     ) -> dict[str, Any]:
-        """Extract all list fields to separate tables."""
+        """Extract all list fields to separate tables, including recursively from extracted tables."""
         stats = {"lists_extracted": 0, "records_processed": 0, "errors": 0}
 
-        # Get all tables to process lists from
-        tables_to_process = []
-
-        # Always process the main table if it exists
-        main_table_exists = await self._check_table_exists(
-            db_pool, target_schema, config.table_name
+        # Get all tables to process lists from (including recursively extracted tables)
+        tables_to_process = await self._get_all_tables_for_extraction(
+            db_pool, data_type, target_schema, config
         )
-        if main_table_exists:
-            tables_to_process.append(config.table_name)
-        else:
-            logger.warning(
-                f"Main table {target_schema}.{config.table_name} does not exist"
-            )
-
-        # Process related tables (only those that actually exist in staging)
-        if hasattr(config, "related_tables") and config.related_tables:
-            for rt in config.related_tables:
-                table_name = f"{data_type}_{rt}"
-                if await self._check_table_exists(db_pool, target_schema, table_name):
-                    tables_to_process.append(table_name)
-                else:
-                    logger.info(
-                        f"Skipping list extraction for {table_name} - table does not exist in staging"
-                    )
 
         for table_name in tables_to_process:
             # Get columns that are JSON arrays
@@ -681,7 +898,7 @@ class StreamlinedNormalizer:
 
             for column_name in list_columns:
                 # Create target table name for this list
-                target_table = f"{table_name}_{column_name}"
+                target_table = f"{table_name}_{column_name}".lower()
 
                 # Check if the target list table already exists and has data
                 # This indicates lists were already extracted in Phase 1
@@ -716,14 +933,35 @@ class StreamlinedNormalizer:
                 logger.info(f"Extracting list from {table_name}.{column_name}")
 
                 # Extract this list
+                # Determine which ID field to use based on table type
+                # Main tables use config.id_field, related/extracted tables use 'id'
+                parent_id_field = (
+                    config.id_field if table_name == config.table_name else "id"
+                )
+
+                # Get the appropriate config for this table
+                table_config = None
+                if table_name == config.table_name:
+                    # Main table - use main config
+                    table_config = config
+                else:
+                    # Related table - try to get related table config
+                    # Extract the related table name from the full table name
+                    # e.g., "amendments_links" -> "links"
+                    if table_name.startswith(f"{data_type}_"):
+                        related_table_name = table_name[len(f"{data_type}_") :]
+                        table_config = self.registry.get_related_table_config(
+                            data_type, related_table_name
+                        )
+
                 extract_stats = await self._extract_list_column(
                     db_pool,
                     target_schema,
                     table_name,
                     column_name,
-                    config,
                     batch_size,
-                    data_type,
+                    parent_id_field,
+                    config=table_config,
                 )
 
                 stats["records_processed"] += extract_stats["records"]
@@ -746,6 +984,98 @@ class StreamlinedNormalizer:
 
         return stats
 
+    async def _get_all_tables_for_extraction(
+        self, db_pool, data_type: str, target_schema: str, config
+    ) -> list[str]:
+        """Get all tables that need list extraction, including recursively extracted tables."""
+        tables_to_process = set()
+
+        # Get source schema (raw schema)
+        source_schema = self.registry.get_schema_names(data_type)["raw"]
+
+        # Always process the main table if it exists
+        main_table_exists = await self._check_table_exists(
+            db_pool, target_schema, config.table_name
+        )
+        if main_table_exists:
+            tables_to_process.add(config.table_name)
+        else:
+            logger.warning(
+                f"Main table {target_schema}.{config.table_name} does not exist"
+            )
+
+        # Process related tables (check if they exist in raw schema first, then staging)
+        if hasattr(config, "related_tables") and config.related_tables:
+            for rt in config.related_tables:
+                table_name = f"{data_type}_{rt}".lower()
+
+                # First check if the raw table exists
+                raw_table_name = f"{data_type}_{rt}_raw"
+                raw_table_exists = await self._check_raw_table_exists(
+                    db_pool, source_schema, raw_table_name
+                )
+
+                if raw_table_exists:
+                    # Raw table exists, so this table should be processed
+                    # Check if it already exists in staging (may have been processed in Phase 2)
+                    if await self._check_table_exists(
+                        db_pool, target_schema, table_name
+                    ):
+                        tables_to_process.add(table_name)
+                        logger.debug(
+                            f"Found existing staging table {table_name}, will process for list extraction"
+                        )
+                    else:
+                        # Raw table exists but staging table doesn't - this means Phase 2 didn't process it
+                        # We should still include it in case it gets created during list extraction
+                        logger.warning(
+                            f"Raw table {source_schema}.{raw_table_name} exists but staging table {target_schema}.{table_name} does not"
+                        )
+                        # Don't add it to tables_to_process since it doesn't exist in staging yet
+                else:
+                    logger.info(
+                        f"Skipping list extraction for {table_name} - raw table {source_schema}.{raw_table_name} does not exist"
+                    )
+
+        # Recursively find all extracted list tables that need further extraction
+        processed_tables = set()
+        tables_to_check = list(tables_to_process)
+
+        while tables_to_check:
+            current_table = tables_to_check.pop(0)
+            if current_table in processed_tables:
+                continue
+
+            processed_tables.add(current_table)
+
+            # Get list columns from current table
+            list_columns = await self._get_list_columns(
+                db_pool, target_schema, current_table
+            )
+
+            # Check if any of these list columns have been extracted to separate tables
+            for column_name in list_columns:
+                extracted_table = f"{current_table}_{column_name}".lower()
+
+                # Check if the extracted table exists and has data
+                if await self._check_table_exists(
+                    db_pool, target_schema, extracted_table
+                ):
+                    async with db_pool.acquire() as conn:
+                        count = await conn.fetchval(
+                            f"SELECT COUNT(*) FROM {target_schema}.{extracted_table}"
+                        )
+
+                    if count > 0:
+                        # This table was extracted and has data, so we need to process it too
+                        tables_to_process.add(extracted_table)
+                        tables_to_check.append(extracted_table)
+                        logger.debug(
+                            f"Found extracted table {extracted_table} with {count} records, will process for list extraction"
+                        )
+
+        return list(tables_to_process)
+
     async def _cleanup_extracted_json_columns(
         self,
         db_pool,
@@ -759,30 +1089,10 @@ class StreamlinedNormalizer:
         """Clean up JSON columns that were already extracted to separate tables."""
         stats = {"columns_cleaned": 0, "errors": 0}
 
-        # Get all tables to process
-        tables_to_process = []
-
-        # Always process the main table if it exists
-        main_table_exists = await self._check_table_exists(
-            db_pool, target_schema, config.table_name
+        # Get all tables to process (including recursively extracted tables)
+        tables_to_process = await self._get_all_tables_for_cleanup(
+            db_pool, data_type, target_schema, config
         )
-        if main_table_exists:
-            tables_to_process.append(config.table_name)
-        else:
-            logger.warning(
-                f"Main table {target_schema}.{config.table_name} does not exist"
-            )
-
-        # Process related tables (only those that actually exist in staging)
-        if hasattr(config, "related_tables") and config.related_tables:
-            for rt in config.related_tables:
-                table_name = f"{data_type}_{rt}"
-                if await self._check_table_exists(db_pool, target_schema, table_name):
-                    tables_to_process.append(table_name)
-                else:
-                    logger.info(
-                        f"Skipping cleanup for {table_name} - table does not exist in staging"
-                    )
 
         for table_name in tables_to_process:
             # Get columns that are JSON arrays
@@ -792,7 +1102,7 @@ class StreamlinedNormalizer:
 
             for column_name in list_columns:
                 # Create target table name for this list
-                target_table = f"{table_name}_{column_name}"
+                target_table = f"{table_name}_{column_name}".lower()
 
                 # Check if the target list table exists and has data
                 list_table_exists = await self._check_table_exists(
@@ -848,6 +1158,97 @@ class StreamlinedNormalizer:
                 staging_checkpoint.save_checkpoint(checkpoint)
 
         return stats
+
+    async def _get_all_tables_for_cleanup(
+        self, db_pool, data_type: str, target_schema: str, config
+    ) -> list[str]:
+        """Get all tables that need cleanup, including recursively extracted tables."""
+        tables_to_process = set()
+
+        # Get source schema (raw schema)
+        source_schema = self.registry.get_schema_names(data_type)["raw"]
+
+        # Always process the main table if it exists
+        main_table_exists = await self._check_table_exists(
+            db_pool, target_schema, config.table_name
+        )
+        if main_table_exists:
+            tables_to_process.add(config.table_name)
+        else:
+            logger.warning(
+                f"Main table {target_schema}.{config.table_name} does not exist"
+            )
+
+        # Process related tables (check if they exist in raw schema first, then staging)
+        if hasattr(config, "related_tables") and config.related_tables:
+            for rt in config.related_tables:
+                table_name = f"{data_type}_{rt}".lower()
+
+                # First check if the raw table exists
+                raw_table_name = f"{data_type}_{rt}_raw"
+                raw_table_exists = await self._check_raw_table_exists(
+                    db_pool, source_schema, raw_table_name
+                )
+
+                if raw_table_exists:
+                    # Raw table exists, so this table should be processed
+                    # Check if it already exists in staging (may have been processed in Phase 2)
+                    if await self._check_table_exists(
+                        db_pool, target_schema, table_name
+                    ):
+                        tables_to_process.add(table_name)
+                        logger.debug(
+                            f"Found existing staging table {table_name}, will process for cleanup"
+                        )
+                    else:
+                        # Raw table exists but staging table doesn't - this means Phase 2 didn't process it
+                        logger.warning(
+                            f"Raw table {source_schema}.{raw_table_name} exists but staging table {target_schema}.{table_name} does not"
+                        )
+                        # Don't add it to tables_to_process since it doesn't exist in staging yet
+                else:
+                    logger.info(
+                        f"Skipping cleanup for {table_name} - raw table {source_schema}.{raw_table_name} does not exist"
+                    )
+
+        # Recursively find all extracted list tables
+        processed_tables = set()
+        tables_to_check = list(tables_to_process)
+
+        while tables_to_check:
+            current_table = tables_to_check.pop(0)
+            if current_table in processed_tables:
+                continue
+
+            processed_tables.add(current_table)
+
+            # Get list columns from current table
+            list_columns = await self._get_list_columns(
+                db_pool, target_schema, current_table
+            )
+
+            # Check if any of these list columns have been extracted to separate tables
+            for column_name in list_columns:
+                extracted_table = f"{current_table}_{column_name}".lower()
+
+                # Check if the extracted table exists and has data
+                if await self._check_table_exists(
+                    db_pool, target_schema, extracted_table
+                ):
+                    async with db_pool.acquire() as conn:
+                        count = await conn.fetchval(
+                            f"SELECT COUNT(*) FROM {target_schema}.{extracted_table}"
+                        )
+
+                    if count > 0:
+                        # This table was extracted and has data, so we need to process it too
+                        tables_to_process.add(extracted_table)
+                        tables_to_check.append(extracted_table)
+                        logger.debug(
+                            f"Found extracted table {extracted_table} with {count} records, will process for cleanup"
+                        )
+
+        return list(tables_to_process)
 
     async def _check_table_exists(self, db_pool, schema: str, table_name: str) -> bool:
         """Check if a table exists in the database."""
@@ -932,28 +1333,29 @@ class StreamlinedNormalizer:
         schema: str,
         table_name: str,
         column_name: str,
-        config,
         batch_size: int,
-        data_type: str,
+        parent_id_field: str = None,
+        config: Any = None,
     ) -> dict[str, int]:
         """Extract a single list column to a separate table."""
         stats = {"records": 0, "errors": 0}
 
         # Create target table name
-        target_table = f"{table_name}_{column_name}"
+        target_table = f"{table_name}_{column_name}".lower()
 
         # Process in batches
         offset = 0
 
         while True:
             # Get batch of records with non-null list values
+            # Use the specified parent_id_field (config.id_field for main tables, 'id' for related/extracted tables)
             query = f"""
-                SELECT {config.id_field}, {column_name}
+                SELECT {parent_id_field}, {column_name}
                 FROM {schema}.{table_name}
                 WHERE {column_name} IS NOT NULL
                 AND {column_name} != 'null'
                 AND {column_name} != '[]'
-                ORDER BY {config.id_field}
+                ORDER BY {parent_id_field}
                 LIMIT {batch_size} OFFSET {offset}
             """
 
@@ -968,7 +1370,7 @@ class StreamlinedNormalizer:
 
             # Process each row
             for row in rows:
-                parent_id = row[config.id_field]
+                parent_id = row[parent_id_field]  # Use the specified ID field as parent
                 list_data = row[column_name]
 
                 try:
@@ -990,9 +1392,15 @@ class StreamlinedNormalizer:
                             # Simple value
                             flat_item = {"value": str(item)}
 
-                        # Add foreign key and ID
-                        flat_item[config.id_field] = parent_id
-                        flat_item["id"] = f"{parent_id}_{column_name}_{idx}"
+                        # Add hierarchical IDs
+                        # Use the deterministic ID of the parent row as the foreign key
+                        flat_item = self._add_hierarchical_ids(
+                            flat_item,
+                            target_table,
+                            parent_id,
+                            table_name,
+                            config=config,
+                        )
                         flat_item["list_index"] = idx
 
                         batch_records.append(flat_item)
@@ -1040,6 +1448,60 @@ class StreamlinedNormalizer:
 
         return flattened
 
+    def _extract_lists_with_hierarchical_ids(
+        self, data: dict[str, Any], parent_id: str, parent_table_name: str, config
+    ) -> dict[str, list[dict[str, Any]]]:
+        """
+        Extract list fields to separate table records with hierarchical IDs.
+
+        Args:
+            data: Data dictionary containing lists
+            parent_id: ID of parent record
+            parent_table_name: Name of parent table
+            config: Configuration object
+
+        Returns:
+            Dictionary mapping table names to lists of records
+        """
+        extracted = {}
+
+        for key, value in data.items():
+            # Only extract lists, not dictionaries (dicts are flattened in _flatten_dict)
+            if not isinstance(value, list) or not value:
+                continue
+
+            table_name = f"{parent_table_name}_{key}".lower()
+            records = []
+
+            for idx, item in enumerate(value):
+                if isinstance(item, dict):
+                    flat_item = self._flatten_dict(item)
+                    # Add hierarchical IDs
+                    flat_item = self._add_hierarchical_ids(
+                        flat_item,
+                        table_name,
+                        parent_id,
+                        parent_table_name,
+                        config=config,
+                    )
+                    flat_item["list_index"] = idx
+                    records.append(flat_item)
+                else:
+                    record = {
+                        "value": str(item),
+                        "list_index": idx,
+                    }
+                    # Add hierarchical IDs
+                    record = self._add_hierarchical_ids(
+                        record, table_name, parent_id, parent_table_name, config=config
+                    )
+                    records.append(record)
+
+            if records:
+                extracted[table_name] = records
+
+        return extracted
+
     def _extract_lists(
         self, data: dict[str, Any], parent_id: str, config
     ) -> dict[str, list[dict[str, Any]]]:
@@ -1047,10 +1509,11 @@ class StreamlinedNormalizer:
         extracted = {}
 
         for key, value in data.items():
+            # Only extract lists, not dictionaries (dicts are flattened in _flatten_dict)
             if not isinstance(value, list) or not value:
                 continue
 
-            table_name = f"{config.table_name}_{key}"
+            table_name = f"{config.table_name}_{key}".lower()
             records = []
 
             for idx, item in enumerate(value):

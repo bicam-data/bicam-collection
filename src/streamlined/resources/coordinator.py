@@ -28,6 +28,7 @@ class ResourceCoordinator:
     def __init__(
         self,
         config: StreamlinedConfig | None = None,
+        source: str = None,
         db_config: dict[str, Any] | None = None,
         api_keys: list[str] | None = None,
         parallelization_config: dict[str, Any] | None = None,
@@ -79,6 +80,7 @@ class ResourceCoordinator:
             self.config.infrastructure.use_optimized_storage = use_optimized_storage
             self.config.infrastructure.use_dynamic_pool = use_dynamic_pool
 
+        self.source = source
         # Create managers
         self.db_manager = DatabaseManager(
             host=self.config.database.host,
@@ -184,7 +186,7 @@ class ResourceCoordinator:
         """Get API clients for a data type."""
         sessions = await self.get_parallel_sessions(data_type, "fetcher")
         return await self.client_manager.get_clients_for_parallel_sessions(
-            data_type, sessions
+            data_type, sessions, self.source
         )
 
     def get_checkpoint_manager_instance(self):

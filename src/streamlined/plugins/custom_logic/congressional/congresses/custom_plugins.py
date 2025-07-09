@@ -14,8 +14,7 @@ import re
 from typing import Any
 
 # Import the base class that provides shared functionality
-from ....base import BaseCleaningUtilities as utils
-from ....base import CongressionalBaseFetcherLogic
+from ....base import CongressionalBaseCleanerLogic, CongressionalBaseFetcherLogic
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +56,8 @@ class CongressesFetcherLogic(CongressionalBaseFetcherLogic):
         else:
             return "ID_ERROR"
 
-class CongressesCleanerLogic:
+
+class CongressesCleanerLogic(CongressionalBaseCleanerLogic):
     """
     Congresses-specific cleaner logic extracted from CongressesCleaner class.
     Contains all the custom cleaning methods for congresses data.
@@ -70,6 +70,7 @@ class CongressesCleanerLogic:
         staging_schema: str = "bicam_staging_congressional",
         production_schema: str = "bicam_congressional",
     ):
+        super().__init__()
         self.data_type_name = data_type_name
         self.system_name = system_name
         self.staging_schema = staging_schema
@@ -82,44 +83,44 @@ class CongressesCleanerLogic:
         }
 
     async def _clean_congresses_singular(
-            self, record_data: dict[str, Any]
-        ) -> dict[str, Any]:
-            """
-            Custom cleaning logic for individual congresses records.
+        self, record_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Custom cleaning logic for individual congresses records.
 
-            FINAL COLUMNS:
-            - congress_number TEXT PRIMARY KEY,
-            - name TEXT,
-            - start_year INTEGER,
-            - end_year INTEGER,
-            - updated_at TIMESTAMP WITH TIME ZONE
+        FINAL COLUMNS:
+        - congress_number TEXT PRIMARY KEY,
+        - name TEXT,
+        - start_year INTEGER,
+        - end_year INTEGER,
+        - updated_at TIMESTAMP WITH TIME ZONE
 
-            STAGING COLUMNS:
-            Based on Congressional API congress structure, typically includes:
-            - url             text,
-            - name            text,
-            - number          text,
-            - endyear         text,
-            - batch_id        text,
-            - startyear       text,
-            - updatedate      text,
-            - congress_number text
+        STAGING COLUMNS:
+        Based on Congressional API congress structure, typically includes:
+        - url             text,
+        - name            text,
+        - number          text,
+        - endyear         text,
+        - batch_id        text,
+        - startyear       text,
+        - updatedate      text,
+        - congress_number text
 
-            Args:
-                record_data: Raw congresses record from staging
-            Returns:
-                Cleaned congresses record
-            """
-            cleaned = record_data.copy()
+        Args:
+            record_data: Raw congresses record from staging
+        Returns:
+            Cleaned congresses record
+        """
+        cleaned = record_data.copy()
 
-            filtered_cleaned = {
-                "congress_number": utils.safe_int(cleaned.get("congress_number", 0), 0),
-                "name": cleaned.get("name"),
-                "start_year": utils.safe_int(cleaned.get("startyear")),
-                "end_year": utils.safe_int(cleaned.get("endyear")),
-                "updated_at": utils.standardize_date(cleaned.get("updatedate")),
-            }
-            return filtered_cleaned
+        filtered_cleaned = {
+            "congress_number": self.safe_int(cleaned.get("congress_number", 0), 0),
+            "name": cleaned.get("name"),
+            "start_year": self.safe_int(cleaned.get("startyear")),
+            "end_year": self.safe_int(cleaned.get("endyear")),
+            "updated_at": self.standardize_date(cleaned.get("updatedate")),
+        }
+        return filtered_cleaned
 
     async def _clean_congresses_sessions_singular(
         self, record_data: dict[str, Any]
@@ -157,11 +158,11 @@ class CongressesCleanerLogic:
         logger.info(f"Cleaned for sessions: {cleaned}")
 
         filtered_cleaned = {
-            "congress_number": utils.safe_int(cleaned.get("congress_number", 0), 0),
-            "session": utils.safe_int(cleaned.get("number")),
-            "chamber": utils.standardize_chamber(cleaned.get("chamber")),
+            "congress_number": self.safe_int(cleaned.get("congress_number", 0), 0),
+            "session": self.safe_int(cleaned.get("number")),
+            "chamber": self.standardize_chamber(cleaned.get("chamber")),
             "type": session_type,
-            "start_date": utils.standardize_date(cleaned.get("startdate")),
-            "end_date": utils.standardize_date(cleaned.get("enddate")),
+            "start_date": self.standardize_date(cleaned.get("startdate")),
+            "end_date": self.standardize_date(cleaned.get("enddate")),
         }
         return filtered_cleaned

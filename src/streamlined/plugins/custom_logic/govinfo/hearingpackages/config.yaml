@@ -1,0 +1,37 @@
+- name: hearingpackages
+  description: GovInfo Hearing Packages main data
+
+  api:
+    api_endpoint: CHRG
+    page_size: 1000
+    retry_attempts: 3
+
+  schema:
+    table_name: hearingpackages
+
+    is_main: true
+    create_raw: true
+    id_fields: [package_id]
+    related_tables:
+    - granules
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+    has_granules: true
+
+- name: granules
+  description: Hearing Packages granule data
+
+  api:
+    page_size: 1000
+    retry_attempts: 3
+
+  schema:
+    table_name: granules
+    is_main: false
+    create_raw: true
+    id_fields: [granule_id]
+
+  processing:
+    batch_size: 100

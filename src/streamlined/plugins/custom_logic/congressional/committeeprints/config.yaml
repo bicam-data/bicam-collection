@@ -1,0 +1,66 @@
+- name: committeeprints
+  description: Congressional committee prints main data
+
+  api:
+    list_key: committeePrints
+    full_key: committeePrint
+    api_endpoint: committee-print
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: committeeprints
+    is_main: true
+    create_raw: true
+    id_fields: [print_id]
+    related_tables:
+      - texts
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
+
+- name: committeeprints_committees
+  description: Committee prints committees data
+
+  schema:
+    table_name: committeeprints_committees
+    is_main: false
+    create_raw: false
+    id_fields: [print_id, committee_code]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeeprints_bills
+  description: Committee prints bills data
+
+  schema:
+    table_name: committeeprints_bills
+    is_main: false
+    create_raw: false
+    id_fields: [print_id, bill_id]
+
+  processing:
+    batch_size: 500
+    checkpoint_frequency: 250
+
+- name: committeeprints_texts
+  description: Committee prints texts data
+
+  api:
+    api_endpoint: text
+    list_key: text
+    page_size: 250
+    retry_attempts: 3
+
+  schema:
+    table_name: committeeprints_texts
+    is_main: false
+    create_raw: true
+    id_fields: [print_id, formatted_text, pdf, html, xml, png]
+
+  processing:
+    batch_size: 200
+    checkpoint_frequency: 100

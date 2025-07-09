@@ -13,8 +13,8 @@ All existing custom methods are preserved with no code changes required.
 """
 
 from .base import (
-    BaseCleaningUtilities,
     CleanerPlugin,
+    CongressionalBaseCleanerLogic,
     CongressionalBaseFetcherLogic,
     FetcherPlugin,
     NormalizerPlugin,
@@ -23,14 +23,10 @@ from .congressional import (
     CongressionalFetcherPlugin,
 )
 from .consolidated_registry import get_consolidated_registry
-from .govinfo import (
-    GovInfoCleanerPlugin,
-    GovInfoFetcherPlugin,
-    GovInfoNormalizerPlugin,
-)
+from .govinfo import GovInfoFetcherPlugin
 
 __all__ = [
-    "BaseCleaningUtilities",
+    "CongressionalBaseCleanerLogic",
     "CongressionalBaseFetcherLogic",
     "FetcherPlugin",
     "CleanerPlugin",
@@ -38,6 +34,4 @@ __all__ = [
     "get_consolidated_registry",
     "CongressionalFetcherPlugin",
     "GovInfoFetcherPlugin",
-    "GovInfoCleanerPlugin",
-    "GovInfoNormalizerPlugin",
 ]

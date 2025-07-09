@@ -14,7 +14,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -82,62 +82,54 @@ class GovInfoAPIClient(BaseAPIClient):
         """Get the appropriate last processed dates table name for GovInfo API."""
         return "govinfo_last_processed_dates"
 
-    def _format_date_for_api(self, date_str: str) -> str:
-        """Convert date string to GovInfo API format (YYYY-MM-DDTHH:MM:SSZ)."""
-        if not date_str:
+    def _format_date_for_api(self, date: str | None) -> str | None:
+        """Format date for GovInfo API (ISO8601: YYYY-MM-DDTHH:MM:SSZ)."""
+        if not date:
             return None
 
         # If already in correct format, return as-is
-        if "T" in date_str and "Z" in date_str and "+00:00" not in date_str:
-            return date_str
+        if "T" in date and date.endswith("Z"):
+            return date
 
-        # If in YYYY-MM-DD format, convert to YYYY-MM-DDTHH:MM:SSZ
-        if len(date_str) == 10 and date_str.count("-") == 2:
-            return f"{date_str}T00:00:00Z"
+        # If in YYYY-MM-DD format, convert to YYYY-MM-DDT00:00:00Z
+        if len(date) == 10 and date.count("-") == 2:
+            return f"{date}T00:00:00Z"
 
-        # Handle various datetime formats including timezone info
+        # Handle various datetime formats
         try:
-            # Handle format like "2025-07-01T22:58:15+00:00" (ISO with timezone)
-            if "T" in date_str and "+00:00" in date_str:
-                clean_date = date_str.replace("+00:00", "")
-                dt = datetime.strptime(clean_date, "%Y-%m-%dT%H:%M:%S")
-                return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            # Try parsing as ISO8601 with or without timezone
+            dt = None
 
-            # Handle format like "2025-07-01 22:58:15+00:00" (space-separated with timezone)
-            elif "+00:00" in date_str:
-                clean_date = date_str.replace("+00:00", "")
-                dt = datetime.strptime(clean_date, "%Y-%m-%d %H:%M:%S")
-                return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            # Handle other timezone formats (like -05:00, +02:00, etc.)
-            tz_pattern = r"[+-]\d{2}:\d{2}$"
-            if re.search(tz_pattern, date_str):
-                clean_date = re.sub(tz_pattern, "", date_str)
-                if "T" in clean_date:
-                    dt = datetime.strptime(clean_date, "%Y-%m-%dT%H:%M:%S")
-                else:
-                    dt = datetime.strptime(clean_date, "%Y-%m-%d %H:%M:%S")
-                return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            # Try parsing as simple YYYY-MM-DD
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        except ValueError as e:
-            logger.warning(f"Could not parse date format '{date_str}': {e}")
-            # Last resort: if it looks like a date, try to extract just the date part
-            if len(date_str) >= 10 and date_str[:10].count("-") == 2:
+            # Handle space-separated datetime format: "2025-07-08 19:53:27"
+            if " " in date and len(date) > 10:
                 try:
-                    date_part = date_str[:10]  # Just take YYYY-MM-DD part
-                    dt = datetime.strptime(date_part, "%Y-%m-%d")
-                    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    dt = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
-                    pass
+                    # Try without seconds
+                    try:
+                        dt = datetime.strptime(date, "%Y-%m-%d %H:%M")
+                    except ValueError:
+                        dt = None
 
-            logger.error(
-                f"Unable to convert date '{date_str}' to GovInfo API format, returning None"
-            )
-            return None
+            # Handle T-separated datetime format
+            elif "T" in date:
+                # Remove Z or timezone info for parsing
+                clean = date.replace("Z", "").replace("+00:00", "")
+                try:
+                    dt = datetime.fromisoformat(clean)
+                except Exception:
+                    dt = None
+
+            # Handle date-only format
+            if not dt:
+                dt = datetime.strptime(date, "%Y-%m-%d")
+
+            # Always output as UTC Zulu in the exact format GovInfo expects
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception as e:
+            logger.warning(f"Could not parse date '{date}': {e}")
+            # Fallback: try to return the original date if it looks like it might work
+            return date
 
     def _construct_collection_url(
         self,
@@ -149,8 +141,53 @@ class GovInfoAPIClient(BaseAPIClient):
         page_size: int = 1000,
     ) -> str:
         """Construct URL for GovInfo collections with proper date formatting."""
-        formatted_start = quote(self._format_date_for_api(start_date))
-        formatted_end = quote(self._format_date_for_api(end_date))
+        # Provide default dates if None is passed
+        if start_date is None:
+            # Default to 30 days ago if no start date provided
+            from datetime import datetime, timedelta
+
+            start_date = (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d")
+            logger.info(f"No start_date provided, using default: {start_date}")
+
+        if end_date is None:
+            # Default to today if no end date provided
+            from datetime import datetime
+
+            end_date = datetime.now(UTC).strftime("%Y-%m-%d")
+            logger.info(f"No end_date provided, using default: {end_date}")
+
+        # Check for None values before calling quote
+        start_date_formatted = self._format_date_for_api(start_date)
+        end_date_formatted = self._format_date_for_api(end_date)
+
+        if start_date_formatted is None:
+            raise ValueError(f"Could not format start_date: {start_date}")
+        if end_date_formatted is None:
+            raise ValueError(f"Could not format end_date: {end_date}")
+
+        formatted_start = quote(start_date_formatted)
+        formatted_end = quote(end_date_formatted)
+
+        # Defensive: ensure all are strings
+        if isinstance(collection_code, bytes):
+            logger.warning("collection_code is bytes, decoding to str")
+            collection_code = collection_code.decode("utf-8")
+        if isinstance(formatted_start, bytes):
+            logger.warning("formatted_start is bytes, decoding to str")
+            formatted_start = formatted_start.decode("utf-8")
+        if isinstance(formatted_end, bytes):
+            logger.warning("formatted_end is bytes, decoding to str")
+            formatted_end = formatted_end.decode("utf-8")
+
+        logger.debug(
+            f"collection_code type: {type(collection_code)} value: {collection_code}"
+        )
+        logger.debug(
+            f"formatted_start type: {type(formatted_start)} value: {formatted_start}"
+        )
+        logger.debug(
+            f"formatted_end type: {type(formatted_end)} value: {formatted_end}"
+        )
 
         path = f"/collections/{collection_code}/{formatted_start}/{formatted_end}"
 
@@ -282,8 +319,8 @@ class GovInfoAPIClient(BaseAPIClient):
     async def retrieve_collection_data(
         self,
         collection_code: str,
-        start_date: str,
-        end_date: str,
+        start_date: str = None,
+        end_date: str = None,
         doc_class: str = None,
         limit: int = None,
         offset_mark: str = "*",
@@ -315,10 +352,25 @@ class GovInfoAPIClient(BaseAPIClient):
                 f"collection_code cannot be None or empty. Got: {collection_code}"
             )
 
+        # Provide default dates if None is passed
+        if start_date is None:
+            # Default to 30 days ago if no start date provided
+            from datetime import datetime, timedelta
+
+            start_date = (datetime.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d")
+            logger.info(f"No start_date provided, using default: {start_date}")
+
+        if end_date is None:
+            # Default to today if no end date provided
+            from datetime import datetime
+
+            end_date = datetime.now(UTC).strftime("%Y-%m-%d")
+            logger.info(f"No end_date provided, using default: {end_date}")
+
         url = self._construct_collection_url(
             collection_code, start_date, end_date, doc_class, offset_mark
         )
-
+        logger.debug(f"GovInfo API request: {url}")
         total_processed = 0
         page_number = 1
 
@@ -329,7 +381,6 @@ class GovInfoAPIClient(BaseAPIClient):
                 # Extract pagination metadata
                 count = response.get("count", 0)
                 next_page = response.get("nextPage")
-
                 # Convert count to integer if possible
                 parsed_count = None
                 if count != "unknown" and count is not None:
@@ -342,6 +393,9 @@ class GovInfoAPIClient(BaseAPIClient):
                 self.last_response_metadata = {
                     "pagination": {"count": parsed_count, "next": next_page}
                 }
+                logger.debug(
+                    f"Collection data response metadata: {self.last_response_metadata}"
+                )
 
                 # Extract packages from response
                 packages = response.get("packages", [])
@@ -623,103 +677,3 @@ class GovInfoAPIClient(BaseAPIClient):
                     return None
 
         return None
-
-    # =============================================================================
-    # INCREMENTAL FETCHING METHODS
-    # =============================================================================
-
-    async def retrieve_incremental_collection_data(
-        self,
-        collection_code: str,
-        data_type: str,
-        fallback_days: int = 30,
-        doc_class: str = None,
-        limit: int = None,
-        **kwargs,
-    ) -> AsyncIterator[tuple[list[dict[str, Any]], str | None]]:
-        """
-        Get collection data incrementally using the last processed date from database.
-
-        This method automatically:
-        1. Retrieves the last processed date from the database
-        2. Fetches data updated since that date
-        3. Tracks the newest date for the next run
-
-        Args:
-            collection_code: GovInfo collection code (BILLS, CRPT, CHRG, etc.)
-            data_type: Type of data for tracking ('congressional_directories', 'bills_collection', etc.)
-            fallback_days: If no last processed date, fetch data from this many days ago
-            doc_class: Document class filter (optional)
-            limit: Maximum number of results total
-            **kwargs: Additional parameters
-
-        Yields:
-            Tuples of (data_batch, latest_date_in_batch)
-        """
-        # Get the last processed date
-        last_processed = await self.access_last_processed_date(data_type)
-
-        if last_processed:
-            start_date = last_processed
-            logger.info(f"Fetching {data_type} data updated since: {start_date}")
-        else:
-            if fallback_days is None or fallback_days <= 0:
-                # No fallback limit – fetch a reasonable default range
-                fallback_date = datetime.now(UTC) - timedelta(
-                    days=365
-                )  # 1 year fallback
-                start_date = fallback_date.strftime("%Y-%m-%d")
-                logger.info(
-                    f"No last processed date found for {data_type}, fetching from 1 year ago: {start_date}"
-                )
-            else:
-                # Fallback: get data from the last N days
-                fallback_date = datetime.now(UTC) - timedelta(days=fallback_days)
-                start_date = fallback_date.strftime("%Y-%m-%d")
-                logger.info(
-                    f"No last processed date found for {data_type}, fetching from {fallback_days} days ago: {start_date}"
-                )
-
-        # Use current date as end date
-        end_date = datetime.now(UTC).strftime("%Y-%m-%d")
-
-        latest_date = None
-
-        async for batch in self.retrieve_collection_data(
-            collection_code=collection_code,
-            start_date=start_date,
-            end_date=end_date,
-            doc_class=doc_class,
-            limit=limit,
-            **kwargs,
-        ):
-            if batch:
-                # Extract the latest date from this batch
-                batch_latest = self._extract_latest_date(batch)
-                if batch_latest and (not latest_date or batch_latest > latest_date):
-                    latest_date = batch_latest
-
-                yield batch, latest_date
-            else:
-                yield batch, latest_date
-
-    def _extract_latest_date(self, data_batch: list[dict[str, Any]]) -> str | None:
-        """
-        Extract the latest date from a batch of GovInfo data.
-
-        Args:
-            data_batch: List of data items
-
-        Returns:
-            Latest date string or None
-        """
-        latest_date = None
-
-        for item in data_batch:
-            # GovInfo typically uses 'lastModified' or 'dateIssued'
-            date_value = item.get("lastModified") or item.get("dateIssued")
-
-            if date_value and (not latest_date or date_value > latest_date):
-                latest_date = date_value
-
-        return latest_date

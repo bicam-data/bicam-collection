@@ -132,12 +132,11 @@ class CongressionalDirectoriesDatabaseNormalizer(BaseDatabaseNormalizer):
             return []
 
         async with self.db_pool.acquire() as conn:
-            # Get granule data from members_raw table
-            granule_table = f"{self.granule_name}_raw"
+            # Get granule data from congressional_directories_granules_raw table
             result = await conn.fetch(
                 f"""
                 SELECT *
-                FROM {self.source_schema}.{granule_table}
+                FROM {self.source_schema}.congressional_directories_granules_raw
                 WHERE JSON_EXTRACT_PATH_TEXT(payload::json, 'parent_package_id') = ANY($1)
                    OR source_doc_id = ANY($1)
                 ORDER BY scraped_at DESC

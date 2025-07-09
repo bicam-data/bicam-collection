@@ -35,6 +35,7 @@ class FetchingPhase(str, Enum):
     LIST_ITEMS = "list_items"
     FULL_DATA = "full_data"
     RELATED_DATA = "related_data"
+    FULL_RELATED_DATA = "full_related_data"
 
 
 class StagingPhase(str, Enum):
@@ -581,14 +582,27 @@ class FetchingCheckpoint:
             self.stage, FetchingPhase.FULL_DATA.value, self.data_type, item_id
         )
 
-    def mark_related_endpoint_processed(self, item_id: str, endpoint: str):
+    def mark_related_endpoint_processed(
+        self,
+        item_id: str,
+        endpoint: str,
+        data_source: str | None = None,
+    ):
         """Mark a related endpoint as processed."""
+        # Use consistent naming scheme
+        if data_source == "govinfo":
+            checkpoint_data_type = self.data_type
+            sub_item = endpoint  # Use endpoint as sub_item for consistency
+        else:
+            checkpoint_data_type = self.data_type
+            sub_item = endpoint  # Congressional uses endpoint as sub_item
+
         self.cm.mark_item_processed(
             self.stage,
             FetchingPhase.RELATED_DATA.value,
-            self.data_type,
+            checkpoint_data_type,
             item_id,
-            sub_item=endpoint,
+            sub_item=sub_item,
         )
 
     def should_skip_list_item(self, item_id: str) -> bool:
@@ -603,14 +617,42 @@ class FetchingCheckpoint:
             self.stage, FetchingPhase.FULL_DATA.value, self.data_type, item_id
         )
 
-    def should_skip_related_endpoint(self, item_id: str, endpoint: str) -> bool:
+    def should_skip_related_endpoint(
+        self,
+        item_id: str,
+        endpoint: str,
+        data_source: str,
+    ) -> bool:
         """Check if related endpoint was already processed."""
+        # Use consistent naming scheme
+        if data_source == "govinfo":
+            checkpoint_data_type = self.data_type
+            sub_item = endpoint  # Use endpoint as sub_item for consistency
+        else:
+            checkpoint_data_type = self.data_type
+            sub_item = endpoint  # Congressional uses endpoint as sub_item
+
         return self.cm.is_item_processed(
             self.stage,
             FetchingPhase.RELATED_DATA.value,
-            self.data_type,
+            checkpoint_data_type,
             item_id,
-            sub_item=endpoint,
+            sub_item=sub_item,
+        )
+
+    def should_skip_full_related_data(self, item_id: str, data_source: str) -> bool:
+        """Check if full related data was already fetched."""
+        # Use consistent naming scheme
+        if data_source == "govinfo":
+            checkpoint_data_type = f"{self.data_type}_granules"
+        else:
+            checkpoint_data_type = self.data_type
+
+        return self.cm.is_item_processed(
+            self.stage,
+            FetchingPhase.FULL_RELATED_DATA.value,
+            checkpoint_data_type,
+            item_id,
         )
 
     def get_checkpoint(self, phase: FetchingPhase) -> CheckpointState:

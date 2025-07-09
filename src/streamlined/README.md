@@ -60,7 +60,7 @@ results = await cleaner.clean_data_type("bills", batch_size=50)
 ```
 
 ### 4. StreamlinedNormalizer
-Focused database normalization with batch processing.
+Focused database normalization with batch processing and recursive list extraction.
 
 ```python
 from bicam_collection.streamlined import StreamlinedNormalizer
@@ -68,6 +68,30 @@ from bicam_collection.streamlined import StreamlinedNormalizer
 normalizer = StreamlinedNormalizer(coordinator)
 results = await normalizer.normalize_data_type("bills", batch_size=100)
 ```
+
+**Key Features:**
+- **Recursive List Extraction**: Automatically extracts nested lists from extracted tables
+- **4-Phase Processing**: Main records → Related records → List extraction → JSON cleanup
+- **Dynamic Schema**: Creates tables with all TEXT columns for maximum flexibility
+- **Bulk Operations**: Uses PostgreSQL COPY for high-performance inserts
+
+**Example Recursive Extraction:**
+```
+amendments (main table from amendments_raw)
+├── amendments_sponsors (extracted from amendments.sponsors)
+│   └── amendments_sponsors_links (extracted from amendments_sponsors.links)
+├── amendments_actions (from amendments_actions_raw)
+│   ├── amendments_actions_recordedvotes (extracted from amendments_actions.recordedvotes)
+│   └── amendments_actions_committees (extracted from amendments_actions.committees)
+└── amendments_texts (from amendments_texts_raw)
+    └── amendments_texts_versions (extracted from amendments_texts.versions)
+```
+
+**Key Features:**
+- **Dict Flattening**: Dictionaries like `latestAction` become `latestaction_text`, `latestaction_actiondate`, etc.
+- **Related Table Processing**: Processes all raw tables (amendments_actions_raw, amendments_texts_raw, etc.)
+- **Recursive List Extraction**: Extracts lists from all tables, including those extracted from other tables
+- **Smart Table Discovery**: Checks raw schema first, then staging schema for proper processing order
 
 ## 🔌 Plugin System
 
@@ -336,6 +360,43 @@ See `examples/usage_example.py` for comprehensive usage examples including:
 - Configuration options
 - Error handling
 - Plugin testing
+
+### Recursive List Extraction Demo
+
+See `examples/recursive_list_extraction_demo.py` for a detailed demonstration of how the normalizer handles nested list extraction:
+
+```bash
+python examples/recursive_list_extraction_demo.py
+```
+
+This demo shows how complex nested data structures like amendments with actions, recorded votes, and committees are automatically normalized into separate tables.
+
+### Amendments Normalization Demo
+
+See `examples/amendments_normalization_demo.py` for a detailed demonstration of the fixed normalizer processing amendments data:
+
+```bash
+python examples/amendments_normalization_demo.py
+```
+
+This demo shows how the normalizer:
+- Flattens dictionaries (like `latestAction` → `latestaction_*` fields)
+- Processes all raw tables (amendments_raw, amendments_actions_raw, etc.)
+- Extracts lists recursively from all tables
+- Maintains proper foreign key relationships
+
+### Fixed Table Processing Demo
+
+See `examples/fixed_table_processing_demo.py` for a demonstration of the improved table discovery logic:
+
+```bash
+python examples/fixed_table_processing_demo.py
+```
+
+This demo shows how the normalizer now properly:
+- Checks raw schema first before looking in staging
+- Processes all related tables that have raw data
+- Handles the correct order of operations
 
 ## 🤝 Contributing
 

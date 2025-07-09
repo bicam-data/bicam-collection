@@ -58,6 +58,12 @@ class StreamlinedExecutor:
                         self.coordinator.config.api.keys
                     ),  # All keys
                 },
+                "govinfo": {
+                    "num_sessions": 1,  # Ignored by OptimizedParallelProcessor
+                    "keys_per_session": len(
+                        self.coordinator.config.api.keys
+                    ),  # All keys
+                },
             }
 
         # Initialize streamlined components using proper constructors
@@ -67,6 +73,14 @@ class StreamlinedExecutor:
         self.normalizer = StreamlinedNormalizer(resource_coordinator)
 
         logger.info("StreamlinedExecutor initialized with direct execution path")
+
+    def _get_data_source(self, data_type: str) -> str:
+        """Get the data source for a given data type."""
+        try:
+            return self.plugin_registry.get_data_source(data_type)
+        except Exception as e:
+            logger.warning(f"Could not determine data source for {data_type}: {e}")
+            return "unknown"
 
     async def execute_data_type(
         self,
@@ -95,8 +109,13 @@ class StreamlinedExecutor:
             f"Starting streamlined execution for {data_type} with phases: {phases}"
         )
 
+        # Get the data source for this data type
+        data_source = self._get_data_source(data_type)
+        logger.info(f"Data source for {data_type}: {data_source}")
+
         results = {
             "data_type": data_type,
+            "data_source": data_source,
             "phases": phases,
             "status": "started",
             "metrics": {},
@@ -115,7 +134,7 @@ class StreamlinedExecutor:
                     if phase == "raw":
                         # Raw data fetching
                         phase_results = await self._execute_raw_phase(
-                            data_type, from_date, to_date, limit, **kwargs
+                            data_type, data_source, from_date, to_date, limit, **kwargs
                         )
                     elif phase == "staging":
                         # Data normalization to staging
@@ -135,7 +154,7 @@ class StreamlinedExecutor:
 
                 except Exception as e:
                     error_msg = f"Phase {phase} failed: {str(e)}"
-                    logger.error(error_msg)
+                    logger.error(error_msg, exc_info=True)
                     results["errors"].append(error_msg)
                     results["status"] = "failed"
                     break
@@ -174,18 +193,19 @@ class StreamlinedExecutor:
     async def _execute_raw_phase(
         self,
         data_type: str,
+        data_source: str,
         from_date: str | None = None,
         to_date: str | None = None,
         limit: int | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """Execute raw data fetching phase."""
-        logger.info(f"Executing raw phase for {data_type}")
+        logger.info(f"Executing raw phase for {data_type} (source: {data_source})")
 
         # Initialize fetcher lazily if not already done
         if self.fetcher is None:
             self.fetcher = await StreamlinedFetcher.from_coordinator(
-                self.coordinator, data_type_name=data_type
+                self.coordinator, data_type_name=data_type, data_source=data_source
             )
 
         # Use streamlined fetcher with plugin system

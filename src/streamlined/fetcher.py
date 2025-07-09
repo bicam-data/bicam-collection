@@ -49,6 +49,7 @@ class StreamlinedFetcher:
         config=None,
         resource_coordinator=None,
         checkpoint_db_path: str = "hierarchical_checkpoints.db",
+        data_source: str | None = None,
     ):
         self.client = client
         self.db_pool = db_pool
@@ -58,6 +59,7 @@ class StreamlinedFetcher:
         self.api_keys = api_keys or []
         self.config = config
         self.resource_coordinator = resource_coordinator
+        self._data_source = data_source
 
         # Initialize hierarchical checkpoint manager
         self.hierarchical_checkpoint_manager = HierarchicalCheckpointManager(
@@ -72,10 +74,14 @@ class StreamlinedFetcher:
         if hasattr(client, "api_keys"):
             self.api_keys = client.api_keys
 
-        logger.info(f"StreamlinedFetcher initialized for {data_type_name}")
+        logger.info(
+            f"StreamlinedFetcher initialized for {data_type_name} (source: {data_source})"
+        )
 
     @classmethod
-    async def from_coordinator(cls, resource_coordinator, data_type_name=None):
+    async def from_coordinator(
+        cls, resource_coordinator, data_type_name=None, data_source: str | None = None
+    ):
         """
         Create a StreamlinedFetcher from a ResourceCoordinator.
 
@@ -121,6 +127,7 @@ class StreamlinedFetcher:
             run_manager=run_manager,
             api_keys=api_keys,
             resource_coordinator=resource_coordinator,
+            data_source=data_source,
         )
 
         return fetcher
@@ -230,6 +237,34 @@ class StreamlinedFetcher:
         """
         logger.info(f"Starting {self.data_type_name} processing")
 
+        # Always get last processed date from metadata if from_date is not provided
+        if not from_date and hasattr(self.client, "access_last_processed_date"):
+            last_processed = await self.client.access_last_processed_date(
+                self.data_type_name
+            )
+            logger.info(
+                f"Retrieved last processed date from database: '{last_processed}'"
+            )
+            if last_processed:
+                from_date = last_processed
+                logger.info(
+                    f"Using last processed date for {self.data_type_name}: {from_date}"
+                )
+            else:
+                from datetime import datetime, timedelta
+
+                from_date = (datetime.now(UTC) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                )
+                logger.info(
+                    f"No last processed date for {self.data_type_name}, using fallback: {from_date}"
+                )
+        if not to_date:
+            from datetime import datetime
+
+            to_date = datetime.now(UTC).strftime("%Y-%m-%d")
+            logger.info(f"Using current date as end date: {to_date}")
+
         # Check for existing checkpoint
         can_resume = (
             await self.resume_from_checkpoint() if resume_from_checkpoint else False
@@ -310,7 +345,6 @@ class StreamlinedFetcher:
                 single_page_only=single_page_only,
                 **kwargs,
             )
-
             if data_batches:
                 # Filter out already-processed items
                 filtered_batch = []
@@ -384,7 +418,9 @@ class StreamlinedFetcher:
 
         try:
             # Get item ID for checkpoint checking
-            item_id = await self.extract_item_id(detailed_data)
+            item_id = await self.extract_item_id(
+                detailed_data, granule=self.data_source == "govinfo"
+            )
             fetching_checkpoint = self.get_fetching_checkpoint()
 
             # Get all available methods
@@ -398,7 +434,9 @@ class StreamlinedFetcher:
                 endpoint = related_item.get("type", "unknown")
 
                 # Check if this endpoint was already processed
-                if fetching_checkpoint.should_skip_related_endpoint(item_id, endpoint):
+                if fetching_checkpoint.should_skip_related_endpoint(
+                    item_id, endpoint, self.data_source
+                ):
                     logger.debug(
                         f"Skipping already processed endpoint {endpoint} for {item_id}"
                     )
@@ -418,18 +456,32 @@ class StreamlinedFetcher:
             logger.error(f"Phase 3 fetch failed: {e}")
             return []
 
-    async def fetch_phase_4_data(
+    async def fetch_phase_4_data_with_client(
         self, related_data: dict[str, Any], client
     ) -> list[dict[str, Any]]:
-        """Fetch Phase 4 data."""
-        if not self._plugin or not related_data:
-            return []
+        if not self._plugin:
+            return None
 
         try:
+            # Extract item ID from URL to check checkpoint
+            # This is a bit tricky since we don't have the full item yet
+            # We could parse the URL or maintain a mapping
+            item_id = await self.extract_item_id(related_data, granule=True)
+
+            if item_id:
+                fetching_checkpoint = self.get_fetching_checkpoint()
+                if fetching_checkpoint.should_skip_full_related_data(
+                    item_id, self.data_source
+                ):
+                    logger.debug(f"Skipping already processed Phase 4 item: {item_id}")
+                    return None
+
+            # Fetch the data
             return await self._plugin.fetch_full_related_data(client, related_data)
+
         except Exception as e:
-            logger.error(f"Phase 4 fetch failed: {e}")
-            return []
+            logger.error(f"Phase 4 fetch failed for {related_data}: {e}")
+            return None
 
     # =============================================================================
     # STORAGE METHODS (called by OptimizedParallelProcessor)
@@ -526,14 +578,23 @@ class StreamlinedFetcher:
                 continue
 
             # Double-check this endpoint wasn't already processed
-            if fetching_checkpoint.should_skip_related_endpoint(parent_id, method_name):
+            if fetching_checkpoint.should_skip_related_endpoint(
+                parent_id, method_name, self.data_source
+            ):
                 logger.warning(
                     f"Attempted to store already-processed endpoint {method_name} for {parent_id}"
                 )
                 continue
 
-            # Extract table suffix from method name
-            table_suffix = self._get_table_suffix_from_method(method_name)
+            # Handle table naming for different data sources
+            if self.data_source == "govinfo" and method_name.endswith("_granules"):
+                # For GovInfo, the method_name is already the full granule type
+                # Just add "_list_raw" for Phase 3 (granule list data)
+                table_name = f"{method_name}_list_raw"
+            else:
+                # For Congressional data, use the existing logic
+                table_suffix = self._get_table_suffix_from_method(method_name)
+                table_name = f"{self.data_type_name}_{table_suffix}_raw"
 
             # Add parent reference to each item
             for record in data_items:
@@ -541,7 +602,6 @@ class StreamlinedFetcher:
                     record[self.id_field] = parent_id
 
             schema_name = self.get_default_schema()
-            table_name = f"{self.data_type_name}_{table_suffix}_raw"
 
             # Store the data
             await self.store_raw_data(
@@ -553,7 +613,9 @@ class StreamlinedFetcher:
             )
 
             # Mark endpoint as processed AFTER successful storage
-            fetching_checkpoint.mark_related_endpoint_processed(parent_id, method_name)
+            fetching_checkpoint.mark_related_endpoint_processed(
+                parent_id, method_name, self.data_source
+            )
             logger.debug(f"Marked endpoint {method_name} as processed for {parent_id}")
 
     async def store_phase_4_data(
@@ -563,10 +625,13 @@ class StreamlinedFetcher:
         if not self.db_pool or not related_data_list:
             return
 
+        # Use consistent naming scheme
+        granule_table_name = f"{self.data_type_name}_granules"
+
         schema_name = self.get_default_schema()
         await self.store_raw_data(
             schema=schema_name,
-            table=f"{self.data_type_name}_raw_granules",
+            table=f"{granule_table_name}_raw",
             items=related_data_list,
             batch_id=batch_id,
             parent_source_doc_id=parent_id,
@@ -576,10 +641,10 @@ class StreamlinedFetcher:
     # UTILITY METHODS
     # =============================================================================
 
-    async def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    async def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract ID from item data using plugin."""
         if self._plugin and hasattr(self._plugin, "extract_item_id"):
-            result = self._plugin.extract_item_id(item_data)
+            result = self._plugin.extract_item_id(item_data, **kwargs)
             if hasattr(result, "__await__"):
                 return await result
             return result
@@ -620,6 +685,10 @@ class StreamlinedFetcher:
         This is called by the processor to determine work distribution.
         """
         try:
+            logger.info(
+                f"Getting pagination metadata for {self.data_type_name} from {from_date} to {to_date}"
+            )
+
             # Fetch first page to get total count
             async for first_batch in self.fetch_phase_1_data_with_client(
                 self.client,
@@ -629,36 +698,67 @@ class StreamlinedFetcher:
                 single_page_only=True,
                 **kwargs,
             ):
+                logger.info(
+                    f"First batch received: {len(first_batch) if first_batch else 0} items"
+                )
+
                 # Extract pagination info from response
                 if hasattr(self.client, "last_response_metadata"):
                     metadata = self.client.last_response_metadata
-                    if metadata and "pagination" in metadata:
-                        return {
+                    logger.info(f"Client metadata: {metadata}")
+                    if metadata and metadata.get("pagination"):
+                        result = {
                             "total_count": metadata["pagination"].get("count", 0),
                             "count_per_page": limit or 250,
                             "has_data": True,
                         }
+                        logger.info(f"Returning pagination metadata: {result}")
+                        return result
+                    else:
+                        logger.warning(f"Metadata missing pagination info: {metadata}")
 
                 # Fallback: estimate from first batch
-                return {
+                result = {
                     "total_count": len(first_batch) * 100,  # Rough estimate
                     "count_per_page": limit or 250,
                     "has_data": len(first_batch) > 0,
                 }
+                logger.info(f"Returning fallback metadata: {result}")
+                return result
 
         except Exception as e:
             logger.error(f"Failed to get pagination metadata: {e}")
-            return {
+            result = {
                 "total_count": 0,
                 "count_per_page": limit or 250,
                 "has_data": False,
                 "error": str(e),
             }
+            logger.info(f"Returning error metadata: {result}")
+            return result
 
     @property
     def id_field(self):
         """Get the ID field name for this data type."""
         return f"{self.data_type_name}_id" if self.data_type_name else "id"
+
+    @property
+    def data_source(self) -> str | None:
+        """Return the data source for this fetcher."""
+        if self._data_source:
+            return self._data_source
+
+        # Fallback to registry if not set
+        if self.data_type_name:
+            try:
+                registry = get_consolidated_registry()
+                return registry.get_data_source(self.data_type_name)
+            except Exception as e:
+                logger.warning(
+                    f"Could not get data source from registry for {self.data_type_name}: {e}"
+                )
+
+        return None
 
     def _get_table_suffix_from_method(self, method_name: str) -> str:
         """Extract table suffix from method name."""
@@ -864,6 +964,228 @@ class StreamlinedFetcher:
             logger.error(f"Sequential processing failed: {e}")
             stats["error"] = str(e)
             return stats
+
+    async def cleanup(self):
+        """Cleanup resources and update metadata tables."""
+        logger.info("StreamlinedFetcher cleanup started")
+
+        try:
+            # Flush checkpoint caches
+            if hasattr(self, "hierarchical_checkpoint_manager"):
+                self.hierarchical_checkpoint_manager.flush_all_caches()
+                logger.debug("Flushed checkpoint caches to disk")
+
+            # Update metadata tables with last processed count and total count
+            if (
+                self.data_type_name
+                and self.client
+                and hasattr(self.client, "update_last_processed_date")
+            ):
+                try:
+                    # Get checkpoint stats to determine total count
+                    checkpoint_stats = self.get_checkpoint_stats()
+                    list_checkpoint = checkpoint_stats.get("list_items", {})
+
+                    # Extract counts from checkpoint data
+                    last_processed_count = list_checkpoint.get("processed_items", 0)
+                    last_total_count = list_checkpoint.get("total_items", 0)
+
+                    # If we don't have total count from checkpoint, try to get it from pagination metadata
+                    if last_total_count == 0:
+                        try:
+                            # Get pagination metadata to determine total count
+                            pagination_metadata = await self._get_pagination_metadata(
+                                from_date=None, to_date=None, limit=250
+                            )
+                            last_total_count = pagination_metadata.get("total_count", 0)
+
+                            # For GovInfo data types, if there's no data, we should still update the count
+                            # to indicate that we've processed 0 items (no new data)
+                            if last_total_count == 0 and not pagination_metadata.get(
+                                "has_data"
+                            ):
+                                logger.info(
+                                    f"No data available for {self.data_type_name}, updating count to 0"
+                                )
+                                last_total_count = (
+                                    0  # Explicitly set to 0 to indicate no data
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                f"Could not get pagination metadata for total count: {e}"
+                            )
+
+                    # Get the latest processed date from the most recent items
+                    latest_date = await self._get_latest_processed_date()
+
+                    # For GovInfo data types, if there's no data but we have a total count of 0,
+                    # we should still update the metadata to indicate we checked
+                    if latest_date:
+                        # Update the metadata table with the latest date
+                        success = await self.client.update_last_processed_date(
+                            data_type=self.data_type_name,
+                            date=latest_date,
+                            total_count=last_total_count,
+                        )
+
+                        if success:
+                            logger.info(
+                                f"Updated metadata for {self.data_type_name}: "
+                                f"last_processed_count={last_processed_count}, "
+                                f"last_total_count={last_total_count}, "
+                                f"latest_date={latest_date}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Failed to update metadata for {self.data_type_name}"
+                            )
+                    elif last_total_count == 0 and self.data_source == "govinfo":
+                        # For GovInfo data types with no data, use current date to indicate we checked
+                        from datetime import datetime, UTC
+
+                        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
+
+                        success = await self.client.update_last_processed_date(
+                            data_type=self.data_type_name,
+                            date=current_date,
+                            total_count=0,
+                        )
+
+                        if success:
+                            logger.info(
+                                f"Updated metadata for {self.data_type_name} (no data found): "
+                                f"last_processed_count={last_processed_count}, "
+                                f"last_total_count=0, "
+                                f"latest_date={current_date}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Failed to update metadata for {self.data_type_name}"
+                            )
+                    else:
+                        logger.info(
+                            f"No new processed date found for {self.data_type_name}, "
+                            f"keeping existing metadata unchanged"
+                        )
+
+                except Exception as e:
+                    logger.warning(f"Error updating metadata during cleanup: {e}")
+
+            logger.info("StreamlinedFetcher cleanup completed")
+
+        except Exception as e:
+            logger.error(f"Error during StreamlinedFetcher cleanup: {e}")
+
+    async def _get_latest_processed_date(self) -> str | None:
+        """
+        Get the latest update_date from the most recent processed items.
+
+        Returns:
+            Latest date as a string in the format expected by the metadata table, or None if no dates found
+        """
+        if not self.db_pool or not self.data_type_name:
+            return None
+
+        try:
+            # Determine the correct schema based on data source
+            schema = (
+                "bicam_raw_congressional"
+                if self.data_source == "congressional"
+                else "bicam_raw_govinfo"
+            )
+
+            # Query the raw data table to find the most recent update_date
+            async with self.db_pool.acquire() as conn:
+                # Try to find the latest date from the raw data
+                # Look for common date fields in the payload
+                query = f"""
+                SELECT
+                    payload->>'updateDate' as update_date,
+                    payload->>'lastModified' as last_modified,
+                    payload->>'updatedate' as updatedate,
+                    payload->>'updated' as updated,
+                    payload->>'date' as date
+                FROM {schema}.{self.data_type_name}_list_raw
+                WHERE payload IS NOT NULL
+                ORDER BY
+                    COALESCE(
+                        payload->>'updateDate',
+                        payload->>'lastModified',
+                        payload->>'updatedate',
+                        payload->>'updated',
+                        payload->>'date'
+                    ) DESC
+                LIMIT 1
+                """
+
+                result = await conn.fetchrow(query)
+
+                if result:
+                    # Find the first non-null date value
+                    for field in [
+                        "update_date",
+                        "last_modified",
+                        "updatedate",
+                        "updated",
+                        "date",
+                    ]:
+                        if result[field]:
+                            latest_date = result[field]
+                            logger.debug(
+                                f"Found latest date from {field}: {latest_date}"
+                            )
+                            return latest_date
+
+                # If no date found in raw data, try the full data table
+                query = f"""
+                SELECT
+                    payload->>'updateDate' as update_date,
+                    payload->>'lastModified' as last_modified,
+                    payload->>'updatedate' as updatedate,
+                    payload->>'updated' as updated,
+                    payload->>'date' as date
+                FROM {schema}.{self.data_type_name}_raw
+                WHERE payload IS NOT NULL
+                ORDER BY
+                    COALESCE(
+                        payload->>'updateDate',
+                        payload->>'lastModified',
+                        payload->>'updatedate',
+                        payload->>'updated',
+                        payload->>'date'
+                    ) DESC
+                LIMIT 1
+                """
+
+                result = await conn.fetchrow(query)
+
+                if result:
+                    # Find the first non-null date value
+                    for field in [
+                        "update_date",
+                        "last_modified",
+                        "updatedate",
+                        "updated",
+                        "date",
+                    ]:
+                        if result[field]:
+                            latest_date = result[field]
+                            logger.debug(
+                                f"Found latest date from {field}: {latest_date}"
+                            )
+                            return latest_date
+
+                # No dates found in processed data
+                logger.info(
+                    f"No date fields found in processed data for {self.data_type_name}"
+                )
+                return None
+
+        except Exception as e:
+            logger.warning(
+                f"Error getting latest processed date for {self.data_type_name}: {e}"
+            )
+            return None
 
 
 # Add periodic checkpoint flushing

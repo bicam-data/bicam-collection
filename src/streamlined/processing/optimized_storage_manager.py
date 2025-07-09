@@ -222,7 +222,7 @@ class OptimizedStorageManager:
         if not records:
             return
 
-        table_key = f"{schema}.{table}"
+        table_key = f"{schema}.{table.lower()}"
 
         # Add to buffer
         self.buffers[table_key].extend(records)
@@ -710,6 +710,10 @@ class OptimizedFetcherStorage:
     ):
         """Store Phase 2 data with fixed schema and checkpoint support."""
         # Create record with fixed schema
+        if isinstance(data, list):
+            logger.debug(f"PHASE 2 STORAGE: Data is a list: {data}")
+            data = data[0]
+
         record = {
             "id_uuid": data.get("id_uuid", str(uuid.uuid4())),
             "url": data.get("url"),
@@ -901,6 +905,71 @@ class OptimizedFetcherStorage:
                 "PHASE 3 STORAGE: This indicates an issue with data structure parsing"
             )
 
+    async def store_phase_4_data(
+        self, data: dict[str, Any], parent_id: str, batch_id: str | None = None
+    ):
+        """Store Phase 4 full related data with fixed schema and checkpoint support."""
+        # Create record with fixed schema
+        record = {
+            "id_uuid": data.get("id_uuid", str(uuid.uuid4())),
+            "url": data.get("granuleLink"),
+            "batch_id": batch_id or str(uuid.uuid4()),
+            "scraped_at": datetime.now(UTC),
+            "etl_batch_id": batch_id or str(uuid.uuid4()),
+        }
+
+        # Use fetcher's ID extraction method for source_doc_id
+        if self.fetcher and hasattr(self.fetcher, "extract_item_id"):
+            try:
+                # Check if the method is async by trying to call it
+                result = self.fetcher.extract_item_id(data, granule=True)
+                if hasattr(result, "__await__"):
+                    # It's a coroutine, we need to await it
+                    record["source_doc_id"] = await result
+                else:
+                    # It's a regular return value
+                    record["source_doc_id"] = result
+            except Exception as e:
+                logger.warning(f"Error extracting item ID: {e}")
+                record["source_doc_id"] = str(uuid.uuid4())
+        elif "granuleLink" in data and data["granuleLink"]:
+            record["source_doc_id"] = data["granuleLink"].split("/")[-1]
+        else:
+            record["source_doc_id"] = str(uuid.uuid4())
+
+        # Store original data in payload (everything except metadata fields)
+        metadata_fields = {
+            "id_uuid",
+            "url",
+            "batch_id",
+            "scraped_at",
+            "source_doc_id",
+            "etl_batch_id",
+        }
+
+        # Store payload data (everything except metadata fields)
+        payload_data = {k: v for k, v in data.items() if k not in metadata_fields}
+
+        # we do not need to add a parent ID because packageId is built into the payload already
+
+        record["payload"] = payload_data
+
+        # Buffer it
+        self.phase_buffers["phase4"].append(record)
+
+        # Use consistent naming scheme for checkpoint and table name
+        data_type_name = getattr(self.fetcher, "data_type_name", "unknown")
+        granule_table_name = f"{data_type_name}_granules"
+
+        # Add to storage manager (non-blocking) with checkpoint support
+        await self.storage.add_records(
+            "bicam_raw_govinfo",
+            f"{granule_table_name}_raw",
+            [record],
+            data_type=granule_table_name,  # Use consistent naming for checkpointing
+            checkpoint_table=True,
+        )
+
     def should_checkpoint(self, total_processed: int) -> bool:
         """Check if we should save a checkpoint."""
         if total_processed - self.last_checkpoint >= self.checkpoint_interval:
@@ -927,6 +996,9 @@ class OptimizedFetcherStorage:
         elif phase == "related_data":
             stage = ProcessingStage.FETCHING
             phase_name = FetchingPhase.RELATED_DATA.value
+        elif phase == "full_related_data":
+            stage = ProcessingStage.FETCHING
+            phase_name = FetchingPhase.FULL_RELATED_DATA.value
         else:
             # Default to fetching stage for unknown phases
             stage = ProcessingStage.FETCHING
@@ -1012,7 +1084,7 @@ class OptimizedNormalizerStorage:
             normalized_records.append(normalized_record)
 
         # Add to batch accumulator
-        key = f"{self.target_schema}.{table_name}"
+        key = f"{self.target_schema}.{table_name.lower()}"
         self.batch_accumulator[key].extend(normalized_records)
         self.batch_sizes[key] += len(normalized_records)
 
@@ -1032,7 +1104,7 @@ class OptimizedNormalizerStorage:
         self, table_name: str, ensure_table: bool = True, checkpoint: bool = True
     ) -> dict[str, int]:
         """Flush a specific table's buffer to PostgreSQL."""
-        key = f"{self.target_schema}.{table_name}"
+        key = f"{self.target_schema}.{table_name.lower()}"
         records = self.batch_accumulator.get(key, [])
 
         if not records:
@@ -1255,11 +1327,7 @@ class OptimizedNormalizerStorage:
             return 0
 
         # Get all unique columns from all records
-        all_columns = set()
-        for record in records:
-            all_columns.update(record.keys())
-
-        # Sort columns for consistent ordering
+        all_columns = set().union(*(record.keys() for record in records))
         columns = sorted(all_columns)
 
         # Create tab-separated values
@@ -1436,6 +1504,8 @@ class OptimizedCleanerStorage:
         order_by: str = None,
         where_clause: str = None,
         checkpoint_offset: int = 0,
+        multi_table_data_types: dict[str, list[str]] = None,
+        custom_logic=None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         """
         Stream data from staging table in batches.
@@ -1445,10 +1515,187 @@ class OptimizedCleanerStorage:
             batch_size: Number of records per batch
             order_by: Column to order by (auto-detected if None)
             where_clause: Optional WHERE clause
-            checkpoint_offset: Starting offset for resume
+            checkpoint_offset: Start offset for checkpoint-based streaming
+            multi_table_data_types: Multi-table configuration for complex joins
+            custom_logic: Custom logic instance that may have custom streaming methods
 
         Yields:
-            Batches of records as dictionaries
+            Batches of records as list of dictionaries
+        """
+        # First, check if custom logic has a specific streaming method for this table
+        if custom_logic and hasattr(
+            custom_logic, f"_stream_{table_name}_joined_chunks"
+        ):
+            logger.info(f"Using custom streaming method for {table_name}")
+            custom_stream_method = getattr(
+                custom_logic, f"_stream_{table_name}_joined_chunks"
+            )
+
+            # Call the custom streaming method with batch_size
+            async for chunk in custom_stream_method(batch_size):
+                yield chunk
+            return
+
+        # Check if this is a multi-table data type that needs special handling
+        if multi_table_data_types and table_name in multi_table_data_types:
+            logger.info(f"Using multi-table streaming for {table_name}")
+            async for chunk in self._stream_multi_table_data(
+                table_name,
+                batch_size,
+                checkpoint_offset,
+                multi_table_data_types[table_name],
+            ):
+                yield chunk
+            return
+
+        # Fall back to standard single-table streaming
+        logger.info(f"Using standard streaming for {table_name}")
+        async for chunk in self._stream_single_table_data(
+            table_name, batch_size, order_by, where_clause, checkpoint_offset
+        ):
+            yield chunk
+
+    async def _stream_multi_table_data(
+        self,
+        table_name: str,
+        batch_size: int,
+        checkpoint_offset: int,
+        multi_table_data_types: dict[str, list[str]],
+    ) -> AsyncIterator[list[dict[str, Any]]]:
+        """
+        Stream data from multiple related tables with basic joins.
+
+        This is for simple multi-table relationships. For complex aggregations,
+        use custom streaming methods in custom logic.
+
+        If there's only one table in the list, it streams from that table directly.
+        """
+        async with self.storage.pg_pool.acquire() as conn:
+            # Get the related tables for this data type
+            related_tables = multi_table_data_types.get(table_name, [])
+            if not related_tables:
+                logger.warning(f"No related tables found for {table_name}")
+                return
+
+            # If there's only one table, stream from it directly (like _stream_multi_table_chunks)
+            if len(related_tables) == 1:
+                main_table = related_tables[0]
+                logger.info(
+                    f"Single table multi-table streaming for {table_name} from {main_table}"
+                )
+
+                # Check if table exists
+                table_exists = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = $1 AND table_name = $2
+                    )
+                    """,
+                    self.staging_schema,
+                    main_table,
+                )
+
+                if not table_exists:
+                    logger.warning(
+                        f"Table {self.staging_schema}.{main_table} does not exist"
+                    )
+                    return
+
+                # Stream from main table directly
+                offset = checkpoint_offset
+                while True:
+                    query = f"""
+                        SELECT * FROM {self.staging_schema}.{main_table}
+                        LIMIT {batch_size} OFFSET {offset}
+                    """
+
+                    try:
+                        rows = await conn.fetch(query)
+                        if not rows:
+                            break
+
+                        batch = [dict(row) for row in rows]
+                        yield batch
+
+                        offset += len(batch)
+                        if len(batch) < batch_size:
+                            break
+
+                    except Exception as e:
+                        logger.error(
+                            f"Error streaming {main_table} at offset {offset}: {e}"
+                        )
+                        raise
+
+            # If there are multiple tables, try a simple join
+            elif len(related_tables) >= 2:
+                # Build a simple join query
+                # For now, assume the first table is the main table and others are related
+                main_table = table_name
+                related_table = related_tables[0] if related_tables else None
+
+                if not related_table:
+                    logger.warning(f"No related table specified for {table_name}")
+                    return
+
+                # Check if both tables exist
+                tables_exist_query = """
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = $1
+                AND table_name = ANY($2)
+                """
+                tables_count = await conn.fetchval(
+                    tables_exist_query, self.staging_schema, [main_table, related_table]
+                )
+
+                if tables_count < 2:
+                    logger.warning(
+                        f"One or both tables {main_table}, {related_table} do not exist"
+                    )
+                    return
+
+                # Simple LEFT JOIN - assumes they share a common key (usually the main table's primary key)
+                # This is a basic implementation - custom logic should handle complex cases
+                query = f"""
+                SELECT mt.*, rt.*
+                FROM {self.staging_schema}.{main_table} mt
+                LEFT JOIN {self.staging_schema}.{related_table} rt
+                    ON mt.id = rt.{main_table}_id
+                ORDER BY mt.id
+                LIMIT {batch_size} OFFSET {checkpoint_offset}
+                """
+
+                offset = checkpoint_offset
+                while True:
+                    try:
+                        rows = await conn.fetch(query, batch_size, offset)
+                        if not rows:
+                            break
+
+                        batch = [dict(row) for row in rows]
+                        yield batch
+
+                        offset += len(batch)
+                        if len(batch) < batch_size:
+                            break
+
+                    except Exception as e:
+                        logger.error(
+                            f"Error streaming multi-table data for {table_name}: {e}"
+                        )
+                        raise
+
+    async def _stream_single_table_data(
+        self,
+        table_name: str,
+        batch_size: int,
+        order_by: str = None,
+        where_clause: str = None,
+        checkpoint_offset: int = 0,
+    ) -> AsyncIterator[list[dict[str, Any]]]:
+        """
+        Stream data from a single staging table.
         """
         async with self.storage.pg_pool.acquire() as conn:
             # Check table existence
@@ -1527,7 +1774,10 @@ class OptimizedCleanerStorage:
                             )
                         )
                         checkpoint.current_offset = offset
-                        checkpoint.current_item_id = batch[-1].get(self.id_field, "")
+                        checkpoint.current_item_id = batch[-1].get(
+                            "source_doc_id",
+                            batch[-1].get(self.id_field, batch[-1].get("id", "")),
+                        )
                         checkpoint.processed_items = records_yielded
                         checkpoint.current_table = table_name
                         self.storage.checkpoint_manager.save_checkpoint(checkpoint)

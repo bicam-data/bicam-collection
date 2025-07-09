@@ -34,16 +34,12 @@ class CongressionalDirectoriesFetcher(GovInfoBaseFetcher):
         # Load config to get granule settings
         try:
             self.config = get_global_registry().get_data_type_config(
-                "congressional_directories"
+                "congressionaldirectories"
             )
             self.has_granules = getattr(self.config.processing, "has_granules", False)
-            self.granule_name = getattr(
-                self.config.processing, "granule_name", "members"
-            )
         except Exception as e:
             logger.warning(f"Could not load config for congressional_directories: {e}")
             self.has_granules = True
-            self.granule_name = "members"
 
     def extract_item_id(self, item_data: dict[str, Any]) -> str:
         """Extract package ID from Congressional Directories data."""

@@ -15,8 +15,9 @@ import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
+# CongressionalBaseCleanerLogic provides utility methods and table override support
 # Import the base class that provides shared functionality
-from ....base import CongressionalBaseFetcherLogic
+from ....base import CongressionalBaseCleanerLogic, CongressionalBaseFetcherLogic
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +89,9 @@ class AmendmentsFetcherLogic(CongressionalBaseFetcherLogic):
         )
 
 
-class AmendmentsCleanerLogic:
+class AmendmentsCleanerLogic(CongressionalBaseCleanerLogic):
     """
-    Amendments-specific cleaner that extends CongressionalBaseCleaner with amendments-specific cleaning logic.
+    Amendments-specific cleaner that extends CongressionalBaseCleanerLogic with amendments-specific cleaning logic.
 
     Provides specialized cleaning methods for all amendments-related data types
     and handles multi-table processing for complex relationships.
@@ -103,6 +104,7 @@ class AmendmentsCleanerLogic:
         staging_schema: str = "bicam_staging_congressional",
         production_schema: str = "bicam_congressional",
     ):
+        super().__init__()
         self.data_type_name = data_type_name
         self.system_name = system_name
         self.staging_schema = staging_schema
@@ -121,6 +123,9 @@ class AmendmentsCleanerLogic:
         """
         Stream joined data from amendments_texts_staging and amendments_texts_formats_staging.
         Properly aggregates multiple formats per text record.
+
+        This is a custom streaming method for complex JSON aggregation that the generic
+        multi-table streaming cannot handle.
 
         Args:
             chunk_size: Size of each chunk
@@ -180,7 +185,7 @@ class AmendmentsCleanerLogic:
                     FROM {self.staging_schema}.amendments_texts         at
                     LEFT JOIN {self.staging_schema}.amendments_texts_formats atf
                             ON at.amendment_id = atf.amendment_id
-                    GROUP BY at.id
+                    GROUP BY at.id, at.date, at.type, at.batch_id, at.processed_at, at.source_doc_id, at.amendment_id
                     ORDER BY at.date DESC
                     LIMIT {chunk_size} OFFSET {offset}
                     """
@@ -307,12 +312,12 @@ class AmendmentsCleanerLogic:
             amended_bill_type = cleaned.get("amendedbill_type", "").lower()
             amended_bill_number = cleaned.get("amendedbill_number", "")
             amended_bill_congress = cleaned.get("amendedbill_congress", "")
-            amended_bill_originchamber = cleaned.get(
-                "amendedbill_originchamber", ""
-            )
+            amended_bill_originchamber = cleaned.get("amendedbill_originchamber", "")
             amended_bill_title = cleaned.get("amendedbill_title", "")
             if all([amended_bill_type, amended_bill_number, amended_bill_congress]):
-                amended_bill_id = f"{amended_bill_type}{amended_bill_number}-{amended_bill_congress}"
+                amended_bill_id = (
+                    f"{amended_bill_type}{amended_bill_number}-{amended_bill_congress}"
+                )
 
         amended_amendment_id = None
         amended_amendment_type = None
@@ -324,26 +329,20 @@ class AmendmentsCleanerLogic:
         if cleaned.get("amendedamendment_url"):
             is_amendment_amendment = True
             amended_amendment_type = cleaned.get("amendedamendment_type", "").lower()
-            amended_amendment_number = cleaned.get(
-                "amendedamendment_number", ""
-            )
-            amended_amendment_congress = cleaned.get(
-                "amendedamendment_congress", ""
-            )
-            amended_amendment_purpose = cleaned.get(
-                    "amendedamendment_purpose", ""
-            )
+            amended_amendment_number = cleaned.get("amendedamendment_number", "")
+            amended_amendment_congress = cleaned.get("amendedamendment_congress", "")
+            amended_amendment_purpose = cleaned.get("amendedamendment_purpose", "")
             amended_amendment_description = cleaned.get(
                 "amendedamendment_description", ""
             )
             if all(
-                    [
-                        amended_amendment_type,
-                        amended_amendment_number,
-                        amended_amendment_congress,
-                    ]
-                ):
-                    amended_amendment_id = f"{amended_amendment_type}{amended_amendment_number}-{amended_amendment_congress}"
+                [
+                    amended_amendment_type,
+                    amended_amendment_number,
+                    amended_amendment_congress,
+                ]
+            ):
+                amended_amendment_id = f"{amended_amendment_type}{amended_amendment_number}-{amended_amendment_congress}"
 
         is_treaty_amendment = False
         amended_treaty_id = None
@@ -354,7 +353,9 @@ class AmendmentsCleanerLogic:
             amended_treaty_number = cleaned.get("amendedtreaty_number", "")
             amended_treaty_congress = cleaned.get("amendedtreaty_congress", "")
             if all([amended_treaty_number, amended_treaty_congress]):
-                amended_treaty_id = f"td{amended_treaty_congress}-{amended_treaty_number}"
+                amended_treaty_id = (
+                    f"td{amended_treaty_congress}-{amended_treaty_number}"
+                )
 
         filtered_cleaned = {
             "amendment_id": str(cleaned.get("amendment_id", "ID_ERROR")),
@@ -451,7 +452,7 @@ class AmendmentsCleanerLogic:
         cleaned = record_data.copy()
 
         filtered_cleaned = {
-            "action_id": str(cleaned.get("id", "ID_ERROR")),
+            "action_id": str(cleaned.get("source_doc_id", "ID_ERROR")),
             "amendment_id": str(cleaned.get("amendment_id", "ID_ERROR")),
             "action_code": str(cleaned.get("actioncode", None)),
             "action_date": self.standardize_date(cleaned.get("actiondate", None)),
@@ -840,85 +841,161 @@ class AmendmentsCleanerLogic:
     # AMENDMENTS-SPECIFIC POST-PROCESSING METHODS
     # =============================================================================
 
-    async def _post_process_amendments(self) -> dict[str, Any]:
+    async def _post_process_amendments(
+        self, storage_manager=None, cleaner_storage=None
+    ) -> dict[str, Any]:
         """
         Post-processing for amendments:
           • split *_id* columns that point to other artefacts
             into separate link-tables.
+
+        Uses the optimized column splitting method for better performance.
         """
+        logger.info("=== STARTING AMENDMENTS POST-PROCESSING ===")
+        logger.info(f"storage_manager: {storage_manager}")
+        logger.info(f"cleaner_storage: {cleaner_storage}")
+
         if not self.db_pool:
             raise ValueError("Database pool not configured")
 
+        if not cleaner_storage:
+            raise ValueError("cleaner_storage is required for post-processing")
+
+        logger.info(
+            f"cleaner_storage.production_schema: {cleaner_storage.production_schema}"
+        )
+        logger.info(f"cleaner_storage.staging_schema: {cleaner_storage.staging_schema}")
+
         results: dict[str, Any] = {"status": "success", "operations": []}
 
-        async with self.db_pool.acquire() as conn:
-            # ------------------------------------------------------------------ #
-            # 1.  Amendments ↔ Bills                                             #
-            # ------------------------------------------------------------------ #
-            moved = await self.split_columns_to_new_table(
-                conn,
-                source_table="amendments",
-                dest_table="amendments_amended_bills",
-                columns={
-                    "bill_id": "bill_id",
-                    "bill_type": "bill_type",
-                    "bill_number": "bill_number",
-                    "bill_congress": "congress",
-                    "bill_origin_chamber": "origin_chamber",
-                    "bill_title": "bill_title",
-                },
-                src_schema=self.production_schema,
-                dst_schema=self.production_schema,
-                create_if_missing=True,
-                drop_from_source=False,
-            )
-            results["operations"].append(
-                {"table": "amendments_amended_bills", "rows": moved}
-            )
+        # Debug: Check what columns exist in the production amendments table
+        logger.info("=== CHECKING PRODUCTION TABLE SCHEMA ===")
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Check if table exists
+                table_exists = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = $1 AND table_name = $2
+                    )
+                    """,
+                    cleaner_storage.production_schema,
+                    "amendments",
+                )
+                logger.info(f"Production amendments table exists: {table_exists}")
 
-            # ------------------------------------------------------------------ #
-            # 2.  Amendments ↔ Treaties                                          #
-            # ------------------------------------------------------------------ #
-            moved = await self.split_columns_to_new_table(
-                conn,
-                source_table="amendments",
-                dest_table="amendments_amended_treaties",
-                columns={
-                    "treaty_id": "treaty_id",
-                    "treaty_congress": "congress",
-                    "treaty_number": "treaty_number",
-                },
-                src_schema=self.production_schema,
-                dst_schema=self.production_schema,
-                create_if_missing=True,
-                drop_from_source=False,
-            )
-            results["operations"].append(
-                {"table": "amendments_amended_treaties", "rows": moved}
-            )
+                if table_exists:
+                    # Get all columns in the table
+                    columns = await conn.fetch(
+                        """
+                        SELECT column_name, data_type
+                        FROM information_schema.columns
+                        WHERE table_schema = $1 AND table_name = $2
+                        ORDER BY ordinal_position
+                        """,
+                        cleaner_storage.production_schema,
+                        "amendments",
+                    )
+                    logger.info("Production amendments table columns:")
+                    for col in columns:
+                        logger.info(f"  - {col['column_name']}: {col['data_type']}")
+                else:
+                    logger.error("Production amendments table does not exist!")
+                    return {
+                        "status": "failed",
+                        "error": "Production amendments table does not exist",
+                    }
 
-            # ------------------------------------------------------------------ #
-            # 3.  Amendments ↔ Amendments (self-link)                            #
-            # ------------------------------------------------------------------ #
-            moved = await self.split_columns_to_new_table(
-                conn,
-                source_table="amendments",
-                dest_table="amendments_amended_amendments",
-                columns={
-                    "amended_amendment_id": "amended_amendment_id",
-                    "amended_amendment_type": "amendment_type",
-                    "amended_amendment_number": "amendment_number",
-                    "amended_amendment_congress": "congress",
-                    "amended_amendment_purpose": "purpose",
-                    "amended_amendment_description": "description",
-                },
-                src_schema=self.production_schema,
-                dst_schema=self.production_schema,
-                create_if_missing=True,
-                drop_from_source=False,
-            )
-            results["operations"].append(
-                {"table": "amendments_amended_amendments", "rows": moved}
-            )
+        except Exception as e:
+            logger.error(f"Error checking production table schema: {e}")
+            return {"status": "failed", "error": f"Schema check failed: {str(e)}"}
+
+        # ------------------------------------------------------------------ #
+        # 1.  Amendments ↔ Bills                                             #
+        # ------------------------------------------------------------------ #
+        logger.info("=== STARTING AMENDMENTS ↔ BILLS SPLIT ===")
+        logger.info(f"Source table: {cleaner_storage.production_schema}.amendments")
+        logger.info(
+            f"Destination table: {cleaner_storage.production_schema}.amendments_amended_bills"
+        )
+        logger.info(
+            "Columns to split: bill_id, bill_type, bill_number, bill_congress, bill_origin_chamber, bill_title"
+        )
+
+        moved = await self.split_columns_to_new_table(
+            source_table="amendments",
+            dest_table="amendments_amended_bills",
+            columns={
+                "bill_id": "bill_id",
+                "bill_type": "bill_type",
+                "bill_number": "bill_number",
+                "bill_congress": "congress",
+                "bill_origin_chamber": "origin_chamber",
+                "bill_title": "bill_title",
+            },
+            data_type="amendments",
+            src_schema=cleaner_storage.production_schema,
+            dst_schema=cleaner_storage.production_schema,
+            create_if_missing=True,
+            drop_from_source=False,
+            batch_size=1000,
+            storage_manager=storage_manager,
+            cleaner_storage=cleaner_storage,
+        )
+        results["operations"].append(
+            {"table": "amendments_amended_bills", "rows": moved}
+        )
+
+        # ------------------------------------------------------------------ #
+        # 2.  Amendments ↔ Treaties                                          #
+        # ------------------------------------------------------------------ #
+        moved = await self.split_columns_to_new_table(
+            source_table="amendments",
+            dest_table="amendments_amended_treaties",
+            columns={
+                "treaty_id": "treaty_id",
+                "treaty_congress": "congress",
+                "treaty_number": "treaty_number",
+            },
+            data_type="amendments",
+            src_schema=cleaner_storage.production_schema,
+            dst_schema=cleaner_storage.production_schema,
+            create_if_missing=True,
+            drop_from_source=False,
+            batch_size=1000,
+            storage_manager=storage_manager,
+            cleaner_storage=cleaner_storage,
+        )
+        results["operations"].append(
+            {"table": "amendments_amended_treaties", "rows": moved}
+        )
+
+        # ------------------------------------------------------------------ #
+        # 3.  Amendments ↔ Amendments (self-link)                            #
+        # ------------------------------------------------------------------ #
+        moved = await self.split_columns_to_new_table(
+            source_table="amendments",
+            dest_table="amendments_amended_amendments",
+            columns={
+                "amended_amendment_id": "amended_amendment_id",
+                "amended_amendment_type": "amendment_type",
+                "amended_amendment_number": "amendment_number",
+                "amended_amendment_congress": "congress",
+                "amended_amendment_purpose": "purpose",
+                "amended_amendment_description": "description",
+            },
+            data_type="amendments",
+            src_schema=cleaner_storage.production_schema,
+            dst_schema=cleaner_storage.production_schema,
+            create_if_missing=True,
+            drop_from_source=False,
+            batch_size=1000,
+            storage_manager=storage_manager,
+            cleaner_storage=cleaner_storage,
+        )
+        results["operations"].append(
+            {"table": "amendments_amended_amendments", "rows": moved}
+        )
 
         return results

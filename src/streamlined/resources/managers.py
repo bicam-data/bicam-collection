@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import asyncpg
 import yaml
 
-from streamlined.api_clients import CongressionalAPIClient
+from streamlined.api_clients import CongressionalAPIClient, GovInfoAPIClient
 from streamlined.libs.api_key_manager import APIKeySession, SystemAPIKeyManager
 from streamlined.libs.hierarchical_checkpoint_system import (
     HierarchicalCheckpointManager,
@@ -367,8 +367,8 @@ class APIKeyManager:
                     "keys_per_session", len(self.api_keys)
                 )
             else:
-                # For non-parallelized mode, still limit to 2 keys for compatibility
-                keys_per_session = min(2, len(self.api_keys))
+                # Use all available keys for maximum performance, even in non-parallelized mode
+                keys_per_session = len(self.api_keys)
 
             self._system_manager = SystemAPIKeyManager(
                 api_keys=self.api_keys,
@@ -450,8 +450,37 @@ class APIKeyManager:
         except Exception as e:
             logger.warning(f"Error getting data source for {data_type}: {e}")
 
-        num_sessions = data_source_config.get("num_sessions", 1)
-        keys_per_session = data_source_config.get("keys_per_session", 2)
+        # For fetcher operations, calculate optimal number of sessions based on available keys
+        if processing_type == "fetcher":
+            available_keys = len(
+                [
+                    k
+                    for k, s in system_manager.key_status.items()
+                    if s.assigned_to is None
+                ]
+            )
+            keys_per_session = data_source_config.get("keys_per_session", 2)
+
+            # Calculate optimal number of sessions: use all available keys efficiently
+            if available_keys >= 4:
+                # If we have 4+ keys, create multiple sessions
+                num_sessions = max(2, available_keys // keys_per_session)
+            elif available_keys >= 2:
+                # If we have 2-3 keys, create 1 session with all keys
+                num_sessions = 1
+                keys_per_session = available_keys
+            else:
+                # If we have 1 key, create 1 session
+                num_sessions = 1
+                keys_per_session = 1
+
+            logger.info(
+                f"Calculated optimal sessions for {data_type}: {num_sessions} sessions with {keys_per_session} keys each (from {available_keys} available keys)"
+            )
+        else:
+            # For non-fetcher operations, use configured values
+            num_sessions = data_source_config.get("num_sessions", 1)
+            keys_per_session = data_source_config.get("keys_per_session", 2)
 
         sessions = system_manager.assign_parallel_sessions_for_data_type(
             data_type, num_sessions, keys_per_session
@@ -593,11 +622,11 @@ class ClientManager:
     def __init__(self, api_rate_limit: float = 1.5, db_manager: DatabaseManager = None):
         self.api_rate_limit = api_rate_limit
         self.db_manager = db_manager
-        self._api_clients: dict[str, CongressionalAPIClient] = {}
+        self._api_clients: dict[str, CongressionalAPIClient | GovInfoAPIClient] = {}
 
     async def get_clients_for_parallel_sessions(
-        self, data_type: str, sessions: list
-    ) -> list[CongressionalAPIClient]:
+        self, data_type: str, sessions: list, source: str
+    ) -> list[CongressionalAPIClient | GovInfoAPIClient]:
         """Create API clients for parallel sessions."""
         clients = []
         db_pool = await self.db_manager.get_pool() if self.db_manager else None
@@ -609,12 +638,20 @@ class ClientManager:
                 clients.append(self._api_clients[client_key])
                 continue
 
-            client = CongressionalAPIClient(
-                api_keys=session.api_keys,
-                rate_limit_per_second=self.api_rate_limit,
-                db_pool=db_pool,
-            )
-
+            if source == "congressional":
+                client = CongressionalAPIClient(
+                    api_keys=session.api_keys,
+                    rate_limit_per_second=self.api_rate_limit,
+                    db_pool=db_pool,
+                )
+            elif source == "govinfo":
+                client = GovInfoAPIClient(
+                    api_keys=session.api_keys,
+                    rate_limit_per_second=self.api_rate_limit,
+                    db_pool=db_pool,
+                )
+            else:
+                raise ValueError(f"Invalid source: {source}")
             await client.__aenter__()
             self._api_clients[client_key] = client
             clients.append(client)

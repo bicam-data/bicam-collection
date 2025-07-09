@@ -326,14 +326,14 @@ CREATE TABLE IF NOT EXISTS bicam_congressional.amendments_links(
     amendment_id TEXT,
     url TEXT,
     name TEXT,
-    PRIMARY KEY (amendment_id, url)
+    UNIQUE (amendment_id, name, url)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_congressional.amendments_amended_bills(
     amendment_id TEXT,
     bill_id TEXT,
     bill_type TEXT,
-    bill_number FLOAT,
+    bill_number INTEGER,
     congress INTEGER,
     origin_chamber TEXT,
     bill_title TEXT,
@@ -343,17 +343,20 @@ CREATE TABLE IF NOT EXISTS bicam_congressional.amendments_amended_bills(
 CREATE TABLE IF NOT EXISTS bicam_congressional.amendments_amended_treaties(
     amendment_id TEXT,
     treaty_id TEXT,
-    treaty_number TEXT,
-    congress TEXT,
+    treaty_number INTEGER,
+    congress INTEGER,
     PRIMARY KEY (amendment_id, treaty_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_congressional.amendments_amended_amendments(
+CREATE TABLE IF NOT EXISTS bicam_congressional.amendmentd_a
+
+
+
     amendment_id TEXT,
     amended_amendment_id TEXT,
     amendment_type TEXT,
-    amendment_number TEXT,
-    congress TEXT,
+    amendment_number INTEGER,
+    congress INTEGER,
     purpose TEXT,
     description TEXT,
     PRIMARY KEY (amendment_id, amended_amendment_id)

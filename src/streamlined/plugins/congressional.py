@@ -73,10 +73,9 @@ class CongressionalFetcherPlugin:
 
         if self._custom_logic is None:
             registry = get_consolidated_registry()
-            self._custom_logic = registry.get_custom_logic_plugin(data_type, "cleaning")
+            self._custom_logic = registry.get_custom_logic_plugin(data_type, "fetching")
 
         return self._custom_logic
-
 
     async def fetch_list_data(
         self,
@@ -104,6 +103,18 @@ class CongressionalFetcherPlugin:
             List of items from the API
         """
         config = await self._get_config()
+
+        # Validate that we have a valid data_type
+        if not self.data_type:
+            logger.error(f"data_type is None or empty: {self.data_type}")
+            return []
+
+        # Validate that we have a valid api_endpoint
+        if not config.api.api_endpoint:
+            logger.error(
+                f"api_endpoint is None or empty for data_type {self.data_type}: {config.api.api_endpoint}"
+            )
+            return []
 
         try:
             # Handle single page requests (used in parallel processing)
@@ -200,7 +211,10 @@ class CongressionalFetcherPlugin:
             # Extract using full_key if configured
             full_key = config.api.full_key
             if full_key and full_key in full_data:
-                return full_data[full_key]
+                if isinstance(full_data[full_key], list) and len(full_data[full_key]) == 1:
+                    return full_data[full_key][0]
+                else:
+                    return full_data[full_key]
             else:
                 return full_data
 
@@ -224,7 +238,7 @@ class CongressionalFetcherPlugin:
         if not detailed_data:
             return []
 
-        custom_logic = self._get_custom_logic()
+        custom_logic = self._get_custom_logic_plugin(self.data_type)
         related_data = []
 
         try:
@@ -275,7 +289,7 @@ class CongressionalFetcherPlugin:
         Returns:
             List of method names that can be used for Phase 3 data fetching
         """
-        custom_logic = self._get_custom_logic()
+        custom_logic = self._get_custom_logic_plugin(self.data_type)
 
         try:
             # Get all methods starting with get_ from the custom logic
@@ -316,7 +330,7 @@ class CongressionalFetcherPlugin:
             async def wrapper(
                 item_data: dict[str, Any], client
             ) -> list[dict[str, Any]]:
-                custom_logic = self._get_custom_logic()
+                custom_logic = self._get_custom_logic_plugin(self.data_type)
                 if custom_logic is None:
                     return []
 
@@ -344,7 +358,7 @@ class CongressionalFetcherPlugin:
 
     async def extract_item_id(self, item_data: dict[str, Any]) -> str:
         """Extract item ID by delegating to custom logic."""
-        custom_logic = self._get_custom_logic()
+        custom_logic = self._get_custom_logic_plugin(self.data_type)
         if custom_logic and hasattr(custom_logic, "extract_item_id"):
             return custom_logic.extract_item_id(item_data)
 
@@ -352,7 +366,7 @@ class CongressionalFetcherPlugin:
 
     async def _extract_preliminary_item_id(self, list_item: dict[str, Any]) -> str:
         """Extract preliminary item ID for checkpoint tracking."""
-        custom_logic = self._get_custom_logic()
+        custom_logic = self._get_custom_logic_plugin(self.data_type)
         if custom_logic and hasattr(custom_logic, "_extract_preliminary_item_id"):
             result = custom_logic._extract_preliminary_item_id(list_item)
             if hasattr(result, "__await__"):

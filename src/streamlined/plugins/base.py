@@ -12,11 +12,10 @@ import re
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
+import asyncpg
 from dateutil.parser import parse as parse_date
 
 logger = logging.getLogger(__name__)
-
-
 
 
 @runtime_checkable
@@ -83,214 +82,6 @@ class NormalizerPlugin(Protocol):
         """Extract list data from normalized tables."""
         ...
 
-
-
-class BaseCleaningUtilities:
-    """Static utility methods for data cleaning operations."""
-
-    @staticmethod
-    def standardize_date(date_value: Any) -> datetime | None:
-        """
-        Standardize date values to consistent timezone-aware datetime objects.
-
-        Args:
-            date_value: Raw date value in various formats
-
-        Returns:
-            Standardized timezone-aware datetime object (UTC) or None if invalid
-        """
-        if not date_value or date_value in ["", "null", "None"]:
-            return None
-
-        if isinstance(date_value, datetime):
-            # Ensure existing datetime objects are timezone-aware
-            if date_value.tzinfo is None:
-                # Assume timezone-naive datetime is in UTC
-                return date_value.replace(tzinfo=UTC)
-            return date_value
-
-        if isinstance(date_value, str):
-            try:
-                parsed_date = parse_date(date_value)
-                # Ensure parsed datetime is timezone-aware
-                if parsed_date.tzinfo is None:
-                    # Assume timezone-naive datetime is in UTC
-                    return parsed_date.replace(tzinfo=UTC)
-                return parsed_date
-            except Exception:
-                logger.warning(f"Could not parse date: {date_value}")
-                return None
-
-        return None
-
-    @staticmethod
-    def clean_long_text(text: str | None) -> str | None:
-        """
-        Clean and normalize long text fields, including HTML content.
-
-        Args:
-            text: Raw text to clean (may contain HTML)
-
-        Returns:
-            Cleaned text or None
-        """
-        if not text:
-            return None
-
-        # Store original for fallback
-        original_text = text
-
-        try:
-            # First, handle HTML content if present
-            if "<" in text and ">" in text:
-                # Remove DOCTYPE declarations and XML namespaces
-                cleaned = re.sub(r"<!DOCTYPE[^>]*>", "", text, flags=re.IGNORECASE)
-                cleaned = re.sub(r"<\?xml[^>]*\?>", "", cleaned, flags=re.IGNORECASE)
-
-                # Convert HTML paragraph and line break tags to newlines for structure preservation
-                cleaned = re.sub(r"</p>", "\n\n", cleaned, flags=re.IGNORECASE)
-                cleaned = re.sub(r"<br\s*/?>", "\n", cleaned, flags=re.IGNORECASE)
-                cleaned = re.sub(r"</div>", "\n", cleaned, flags=re.IGNORECASE)
-                cleaned = re.sub(r"</section>", "\n\n", cleaned, flags=re.IGNORECASE)
-
-                # Remove all remaining HTML tags
-                cleaned = re.sub(r"<[^>]+>", "", cleaned)
-
-                # Decode HTML entities (like &nbsp;, &lt;, &gt;, etc.)
-                cleaned = html.unescape(cleaned)
-            else:
-                cleaned = text
-
-            # Remove common artifacts
-            cleaned = cleaned.replace("\x00", "")  # Null bytes
-            cleaned = cleaned.replace("\ufffd", "")  # Unicode replacement character
-            cleaned = cleaned.replace("\u00ad", "")  # Soft hyphens
-
-            # Normalize line endings
-            cleaned = cleaned.replace("\r\n", "\n")
-            cleaned = cleaned.replace("\r", "\n")
-
-            # Clean up excessive whitespace while preserving paragraph structure
-            # First normalize multiple newlines (preserve double newlines for paragraphs)
-            cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-
-            # Remove spaces at the beginning/end of lines
-            cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
-            cleaned = re.sub(r"\n[ \t]+", "\n", cleaned)
-
-            # Replace multiple spaces/tabs with single space
-            cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
-
-            # Clean up any remaining excessive whitespace
-            cleaned = cleaned.strip()
-
-            # Remove common legislative document artifacts
-            cleaned = re.sub(r"\[\[Page\s+[^\]]+\]\]", "", cleaned)  # Page markers
-            cleaned = re.sub(r"¿+", "", cleaned)  # Strange characters sometimes in congressional docs
-
-            # Final whitespace cleanup
-            cleaned = re.sub(r"\n\s*\n\s*\n", "\n\n", cleaned)  # Normalize paragraph breaks
-
-            return cleaned if cleaned else None
-
-        except Exception as e:
-            # If cleaning fails for any reason, fall back to basic cleaning
-            logger.warning(f"Advanced text cleaning failed, using basic cleaning: {e}")
-            basic_cleaned = re.sub(r"\s+", " ", original_text.strip())
-            basic_cleaned = basic_cleaned.replace("\x00", "")
-            return basic_cleaned if basic_cleaned else None
-
-    @staticmethod
-    def standardize_chamber(chamber: str | None) -> str | None:
-        """
-        Standardize chamber values to consistent format.
-
-        Args:
-            chamber: Raw chamber value
-
-        Returns:
-            Standardized chamber value
-        """
-        if not chamber:
-            return None
-
-        chamber_lower = chamber.lower().strip()
-
-        if chamber_lower in ["house", "h", "house of representatives"]:
-            return "house"
-        elif chamber_lower in ["senate", "s"]:
-            return "senate"
-        elif chamber_lower in ["joint", "both"]:
-            return "joint"
-        elif chamber_lower in ["nochamber", "no chamber"]:
-            return "nochamber"
-        else:
-            return chamber  # Return original if not recognized
-
-    @staticmethod
-    def safe_int(
-        value: Any, default: int | None = None
-    ) -> int | float | None:
-        """
-        Safely convert value to integer.
-
-        Args:
-            value: Value to convert
-            default: Default value if conversion fails
-
-        Returns:
-            Integer value or default
-        """
-        if value is None or value == "":
-            return default
-
-        try:
-            if isinstance(value, str):
-                # Remove common non-numeric characters
-                cleaned = re.sub(r"[^\d-]", "", value)
-                if cleaned:
-                    return int(cleaned)
-            else:
-                return int(value)
-        except (ValueError, TypeError):
-            pass
-
-        return default
-
-    @staticmethod
-    def safe_float(value: Any, default: float | None = None) -> float | None:
-        """
-        Safely convert value to float.
-
-        Args:
-            value: Value to convert
-            default: Default value if conversion fails
-
-        Returns:
-            Float value or default
-        """
-        if value is None or value == "":
-            return default
-
-        try:
-            if isinstance(value, str):
-                # Remove common non-numeric characters except decimal point
-                cleaned = re.sub(r"[^\d.-]", "", value)
-                if cleaned:
-                    return float(cleaned)
-            else:
-                return float(value)
-        except (ValueError, TypeError):
-            pass
-
-        return default
-
-# Convenience functions that can be imported directly
-standardize_date = BaseCleaningUtilities.standardize_date
-clean_long_text = BaseCleaningUtilities.clean_long_text
-standardize_chamber = BaseCleaningUtilities.standardize_chamber
-safe_int = BaseCleaningUtilities.safe_int
-safe_float = BaseCleaningUtilities.safe_float
 
 # =============================================================================
 # BASE IMPLEMENTATION CLASSES
@@ -404,3 +195,521 @@ class CongressionalBaseFetcherLogic:
                 f"Failed to fetch related data '{related_table_name}' for {self.data_type}: {e}"
             )
             return []
+
+class CongressionalBaseCleanerLogic:
+    """
+    Base cleaner logic for congressional data with table override registration.
+
+    This class provides utility methods for data cleaning operations and includes
+    the ability to register target table overrides for use in the streamlined cleaner.
+    """
+
+    def __init__(self):
+        """Initialize the cleaner logic with table override support."""
+        self._target_table_override: str | None = None
+
+    # =============================================================================
+    # TARGET TABLE OVERRIDE METHODS
+    # =============================================================================
+
+    def _register_target_table_override(self, target_table: str) -> None:
+        """Register a target table override for the next processing operation."""
+        self._target_table_override = target_table
+
+    def _clear_target_table_override(self) -> None:
+        """Clear the target table override."""
+        self._target_table_override = None
+
+    @property
+    def target_table_override(self) -> str | None:
+        """Get the current target table override."""
+        return self._target_table_override
+
+    # =============================================================================
+    # STATIC UTILITY METHODS
+    # =============================================================================
+
+    @staticmethod
+    def standardize_date(date_value: Any) -> datetime | None:
+        """
+        Standardize date values to consistent timezone-aware datetime objects.
+
+        Args:
+            date_value: Raw date value in various formats
+
+        Returns:
+            Standardized timezone-aware datetime object (UTC) or None if invalid
+        """
+        if not date_value or date_value in ["", "null", "None"]:
+            return None
+
+        if isinstance(date_value, datetime):
+            # Ensure existing datetime objects are timezone-aware
+            if date_value.tzinfo is None:
+                # Assume timezone-naive datetime is in UTC
+                return date_value.replace(tzinfo=UTC)
+            return date_value
+
+        if isinstance(date_value, str):
+            try:
+                parsed_date = parse_date(date_value)
+                # Ensure parsed datetime is timezone-aware
+                if parsed_date.tzinfo is None:
+                    # Assume timezone-naive datetime is in UTC
+                    return parsed_date.replace(tzinfo=UTC)
+                return parsed_date
+            except Exception:
+                logger.warning(f"Could not parse date: {date_value}")
+                return None
+
+        return None
+
+    @staticmethod
+    def clean_long_text(text: str | None) -> str | None:
+        """
+        Clean and normalize long text fields, including HTML content.
+
+        Args:
+            text: Raw text to clean (may contain HTML)
+
+        Returns:
+            Cleaned text or None
+        """
+        if not text:
+            return None
+
+        # Store original for fallback
+        original_text = text
+
+        try:
+            # First, handle HTML content if present
+            if "<" in text and ">" in text:
+                # Remove DOCTYPE declarations and XML namespaces
+                cleaned = re.sub(r"<!DOCTYPE[^>]*>", "", text, flags=re.IGNORECASE)
+                cleaned = re.sub(r"<\?xml[^>]*\?>", "", cleaned, flags=re.IGNORECASE)
+
+                # Convert HTML paragraph and line break tags to newlines for structure preservation
+                cleaned = re.sub(r"</p>", "\n\n", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"<br\s*/?>", "\n", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"</div>", "\n", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"</section>", "\n\n", cleaned, flags=re.IGNORECASE)
+
+                # Remove all remaining HTML tags
+                cleaned = re.sub(r"<[^>]+>", "", cleaned)
+
+                # Decode HTML entities (like &nbsp;, &lt;, &gt;, etc.)
+                cleaned = html.unescape(cleaned)
+            else:
+                cleaned = text
+
+            # Remove common artifacts
+            cleaned = cleaned.replace("\x00", "")  # Null bytes
+            cleaned = cleaned.replace("\ufffd", "")  # Unicode replacement character
+            cleaned = cleaned.replace("\u00ad", "")  # Soft hyphens
+
+            # Normalize line endings
+            cleaned = cleaned.replace("\r\n", "\n")
+            cleaned = cleaned.replace("\r", "\n")
+
+            # Clean up excessive whitespace while preserving paragraph structure
+            # First normalize multiple newlines (preserve double newlines for paragraphs)
+            cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+            # Remove spaces at the beginning/end of lines
+            cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+            cleaned = re.sub(r"\n[ \t]+", "\n", cleaned)
+
+            # Replace multiple spaces/tabs with single space
+            cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+
+            # Clean up any remaining excessive whitespace
+            cleaned = cleaned.strip()
+
+            # Remove common legislative document artifacts
+            cleaned = re.sub(r"\[\[Page\s+[^\]]+\]\]", "", cleaned)  # Page markers
+            cleaned = re.sub(
+                r"¿+", "", cleaned
+            )  # Strange characters sometimes in congressional docs
+
+            # Final whitespace cleanup
+            cleaned = re.sub(
+                r"\n\s*\n\s*\n", "\n\n", cleaned
+            )  # Normalize paragraph breaks
+
+            return cleaned if cleaned else None
+
+        except Exception as e:
+            # If cleaning fails for any reason, fall back to basic cleaning
+            logger.warning(f"Advanced text cleaning failed, using basic cleaning: {e}")
+            basic_cleaned = re.sub(r"\s+", " ", original_text.strip())
+            basic_cleaned = basic_cleaned.replace("\x00", "")
+            return basic_cleaned if basic_cleaned else None
+
+    @staticmethod
+    def standardize_chamber(chamber: str | None) -> str | None:
+        """
+        Standardize chamber values to consistent format.
+
+        Args:
+            chamber: Raw chamber value
+
+        Returns:
+            Standardized chamber value
+        """
+        if not chamber:
+            return None
+
+        chamber_lower = chamber.lower().strip()
+
+        if chamber_lower in ["house", "h", "house of representatives"]:
+            return "house"
+        elif chamber_lower in ["senate", "s"]:
+            return "senate"
+        elif chamber_lower in ["joint", "both"]:
+            return "joint"
+        elif chamber_lower in ["nochamber", "no chamber"]:
+            return "nochamber"
+        else:
+            return chamber  # Return original if not recognized
+
+    @staticmethod
+    def safe_int(value: Any, default: int | None = None) -> int | float | None:
+        """
+        Safely convert value to integer.
+
+        Args:
+            value: Value to convert
+            default: Default value if conversion fails
+
+        Returns:
+            Integer value or default
+        """
+        if value is None or value == "":
+            return default
+
+        try:
+            if isinstance(value, str):
+                # Remove common non-numeric characters
+                cleaned = re.sub(r"[^\d-]", "", value)
+                if cleaned:
+                    return int(cleaned)
+            else:
+                return int(value)
+        except (ValueError, TypeError):
+            pass
+
+        return default
+
+    @staticmethod
+    def safe_float(value: Any, default: float | None = None) -> float | None:
+        """
+        Safely convert value to float.
+
+        Args:
+            value: Value to convert
+            default: Default value if conversion fails
+
+        Returns:
+            Float value or default
+        """
+        if value is None or value == "":
+            return default
+
+        try:
+            if isinstance(value, str):
+                # Remove common non-numeric characters except decimal point
+                cleaned = re.sub(r"[^\d.-]", "", value)
+                if cleaned:
+                    return float(cleaned)
+            else:
+                return float(value)
+        except (ValueError, TypeError):
+            pass
+
+        return default
+
+    # =============================================================================
+    # TABLE-SPLITTING HELPERS
+    # =============================================================================
+
+    async def split_columns_to_new_table(
+        self,
+        source_table: str,
+        dest_table: str,
+        columns: list[str] | dict[str, str],
+        *,
+        data_type: str | None = None,
+        src_schema: str | None = None,
+        dst_schema: str | None = None,
+        create_if_missing: bool = False,
+        drop_from_source: bool = False,
+        batch_size: int = 1000,
+        storage_manager=None,
+        cleaner_storage=None,
+    ) -> int:
+        """
+        Move columns from *source_table* → *dest_table* using optimized storage managers.
+
+        This is a modernized version of split_columns_to_new_table that works with:
+        - OptimizedStorageManager for efficient data transfer
+        - OptimizedCleanerStorage for staging table operations
+        - New configuration structure
+        - Batch processing for large datasets
+
+        Args:
+            source_table: Source table name
+            dest_table: Destination table name
+            columns: Either a list of column names or dict mapping {source_col: dest_col}
+            data_type: Data type for checkpoint tracking
+            src_schema: Source schema (defaults to production schema if None)
+            dst_schema: Destination schema (defaults to production schema if None)
+            create_if_missing: Whether to create destination table if missing
+            drop_from_source: Whether to drop columns from source after copy
+            batch_size: Batch size for processing
+            storage_manager: OptimizedStorageManager instance
+            cleaner_storage: OptimizedCleanerStorage instance
+
+        Returns:
+            Number of records inserted
+        """
+        # Auto-detect schemas if not provided
+        if src_schema is None:
+            src_schema = getattr(self, "production_schema", "bicam_congressional")
+        if dst_schema is None:
+            dst_schema = getattr(self, "production_schema", "bicam_congressional")
+
+        logger.info(
+            f"Splitting columns from {src_schema}.{source_table} to {dst_schema}.{dest_table}"
+        )
+
+        # Normalize columns parameter
+        if isinstance(columns, dict):
+            src_cols = list(columns.keys())
+            dest_cols = list(columns.values())
+            col_pairs = list(columns.items())  # preserve order
+        else:
+            src_cols = columns
+            dest_cols = columns
+            col_pairs = [(c, c) for c in src_cols]
+
+        # Get database connection from storage manager
+        if not storage_manager or not cleaner_storage:
+            raise ValueError(
+                "Both storage_manager and cleaner_storage must be provided"
+            )
+
+        async with storage_manager.pg_pool.acquire() as conn:
+            # Discover primary key(s) of the source table
+            pk_cols = await conn.fetch(
+                """
+                SELECT a.attname
+                FROM pg_index i
+                JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                WHERE i.indrelid = $1::regclass AND i.indisprimary
+                ORDER BY a.attnum
+                """,
+                f"{src_schema}.{source_table}",
+            )
+            primary_keys = [r["attname"] for r in pk_cols] or []
+
+            # Determine which of the requested source columns actually exist
+            existing_cols_rows = await conn.fetch(
+                """
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_schema = $1 AND table_name = $2
+                ORDER BY ordinal_position
+                """,
+                src_schema,
+                source_table,
+            )
+            existing_src_cols = {r["column_name"] for r in existing_cols_rows}
+
+            # Abort early if none of the requested columns exist in the source
+            if not any(col in existing_src_cols for col in src_cols):
+                logger.error(
+                    f"None of the requested columns {src_cols} exist in {src_schema}.{source_table}; skipping split into {dest_table}"
+                )
+                return 0
+
+            # Build column lists for INSERT
+            dest_insert_cols = primary_keys + dest_cols
+
+            # Create destination table if requested
+            if create_if_missing:
+                await self._ensure_destination_table(conn, dst_schema, dest_table)
+
+            # Process data in batches using optimized storage
+            total_inserted = await self._process_column_split_batches(
+                conn=conn,
+                src_schema=src_schema,
+                source_table=source_table,
+                dest_table=dest_table,
+                src_cols=src_cols,
+                col_pairs=col_pairs,
+                existing_src_cols=existing_src_cols,
+                primary_keys=primary_keys,
+                dest_insert_cols=dest_insert_cols,
+                batch_size=batch_size,
+                data_type=data_type,
+                storage_manager=storage_manager,
+                cleaner_storage=cleaner_storage,
+            )
+
+            # Optionally drop the columns from the source table
+            if drop_from_source and src_cols:
+                await self._drop_source_columns(
+                    conn, src_schema, source_table, src_cols
+                )
+
+            return total_inserted
+
+    async def _ensure_destination_table(
+        self, conn: asyncpg.Connection, dst_schema: str, dest_table: str
+    ):
+        """Ensure destination table exists with proper schema."""
+        existing = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = $1 AND table_name = $2
+            )""",
+            dst_schema,
+            dest_table,
+        )
+
+        if not existing:
+            raise ValueError(
+                f"Destination table {dst_schema}.{dest_table} does not exist"
+            )
+
+    async def _process_column_split_batches(
+        self,
+        conn: asyncpg.Connection,
+        src_schema: str,
+        source_table: str,
+        dest_table: str,
+        src_cols: list[str],
+        col_pairs: list[tuple[str, str]],
+        existing_src_cols: set[str],
+        primary_keys: list[str],
+        dest_insert_cols: list[str],
+        batch_size: int,
+        data_type: str | None,
+        storage_manager,
+        cleaner_storage,
+    ) -> int:
+        """Process column split in batches using optimized storage."""
+        total_inserted = 0
+        offset = 0
+
+        # Build WHERE clause for non-null conditions
+        # Use column names without table alias to avoid the PostgreSQL issue
+        non_null_conds = [
+            f"{col} IS NOT NULL" for col in src_cols if col in existing_src_cols
+        ]
+        where_clause = f" WHERE {' OR '.join(non_null_conds)}" if non_null_conds else ""
+
+        # Build SELECT expressions
+        select_exprs: list[str] = [f"{pk}" for pk in primary_keys]
+
+        for src_col, dest_col in col_pairs:
+            if src_col in existing_src_cols:
+                select_exprs.append(f"{src_col}")
+            else:
+                logger.warning(
+                    f"Column '{src_col}' not found in {src_schema}.{source_table}; using NULL for '{dest_col}'"
+                )
+                select_exprs.append(f"NULL AS {dest_col}")
+
+        select_cols_sql = ", ".join(select_exprs)
+
+        while True:
+            # Process batch
+            batch_query = f"""
+                SELECT {select_cols_sql}
+                FROM {src_schema}.{source_table}{where_clause}
+                LIMIT {batch_size} OFFSET {offset}
+            """
+
+            try:
+                # Wrap in explicit transaction to isolate any transaction state issues
+                async with conn.transaction():
+                    rows = await conn.fetch(batch_query)
+                if not rows:
+                    break
+
+                batch_data = []
+                for row in rows:
+                    record = {}
+                    # Add primary keys as-is (convert to string)
+                    for pk in primary_keys:
+                        value = row[pk]
+                        record[pk] = value
+
+                    # Add mapped columns with destination names (convert to string)
+                    for src_col, dest_col in col_pairs:
+                        if src_col in row:
+                            value = row[src_col]
+                            record[dest_col] = value
+
+                    batch_data.append(record)
+                # Use optimized cleaner storage for bulk insert to production tables
+                inserted_count = await cleaner_storage.bulk_insert_production(
+                    table_name=dest_table,
+                    records=batch_data,
+                    upsert=False,  # Simple insert for column splits
+                )
+
+                total_inserted += inserted_count
+                offset += len(batch_data)
+
+                logger.debug(
+                    f"Processed batch: {len(batch_data)} records, total: {total_inserted}"
+                )
+
+                # Update checkpoint if data type is provided
+                if data_type and total_inserted % 10000 == 0:
+                    staging_checkpoint = storage_manager.get_staging_checkpoint(
+                        data_type
+                    )
+                    checkpoint = staging_checkpoint.cm.get_or_create_checkpoint(
+                        "cleaning",  # Use string literal instead of enum
+                        "column_split",
+                        data_type,
+                    )
+                    checkpoint.processed_items = total_inserted
+                    checkpoint.current_table = dest_table
+                    staging_checkpoint.cm.save_checkpoint(checkpoint)
+
+                if len(batch_data) < batch_size:
+                    break
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing batch at offset {offset}: {e}", exc_info=True
+                )
+                raise
+
+        return total_inserted
+
+    async def _drop_source_columns(
+        self,
+        conn: asyncpg.Connection,
+        src_schema: str,
+        source_table: str,
+        src_cols: list[str],
+    ):
+        """Drop columns from source table with error handling."""
+        for col in src_cols:
+            try:
+                # Use CASCADE so that dependent indexes or constraints do not block the drop
+                await conn.execute(
+                    f"ALTER TABLE {src_schema}.{source_table} "
+                    f"DROP COLUMN IF EXISTS {col} CASCADE"
+                )
+                logger.info(f"Dropped column {col} from {src_schema}.{source_table}")
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to drop column {col} from {src_schema}.{source_table}: {exc}"
+                )

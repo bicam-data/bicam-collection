@@ -180,7 +180,7 @@ class GovInfoBaseFetcher(AbstractFetcher):
         Phase 2: Fetch complete GovInfo package data from individual URL.
         """
         try:
-            return await self.client.fetch_package_data(item_url)
+            return await self.client.retrieve_package_data_from_url(item_url)
         except Exception as e:
             logger.error(f"Phase 2 fetch failed for {item_url}: {e}")
             return None
@@ -192,7 +192,7 @@ class GovInfoBaseFetcher(AbstractFetcher):
         Phase 2: Fetch complete GovInfo package data using a specific client.
         """
         try:
-            return await client.fetch_package_data(item_url)
+            return await client.retrieve_package_data_from_url(item_url)
         except Exception as e:
             logger.error(f"Phase 2 fetch with client failed for {item_url}: {e}")
             return None

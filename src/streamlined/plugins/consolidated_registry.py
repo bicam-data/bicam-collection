@@ -25,11 +25,7 @@ from ..libs.data_type_config import (
 )
 from .base import CleanerPlugin, FetcherPlugin, NormalizerPlugin
 from .congressional import CongressionalFetcherPlugin
-from .govinfo import (
-    GovInfoCleanerPlugin,
-    GovInfoFetcherPlugin,
-    GovInfoNormalizerPlugin,
-)
+from .govinfo import GovInfoFetcherPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +162,49 @@ class ConsolidatedRegistry:
                 f"Could not load config for '{data_type}': {e}"
             ) from e
 
+    def get_related_table_config(
+        self, main_data_type: str, related_table: str
+    ) -> DataTypeConfig | None:
+        """Get configuration for a related table from the main data type's config file."""
+        self._ensure_initialized()
+
+        if main_data_type not in self._data_types:
+            return None
+
+        config_file = self._data_types[main_data_type]["config_file"]
+        config_path = Path(config_file)
+
+        try:
+            # Load all configs from the main data type's config file
+            with open(config_path, encoding="utf-8") as fh:
+                raw_yaml = yaml.safe_load(fh)
+
+            if isinstance(raw_yaml, list):
+                # Multi-config file – look for the related table config
+                related_config_name = f"{main_data_type}_{related_table}"
+                for entry in raw_yaml:
+                    if not isinstance(entry, dict):
+                        continue
+                    if (
+                        entry.get("name") == related_config_name
+                        or entry.get("name") == related_table
+                    ):
+                        return self._parse_raw_config(entry, config_path)
+            elif isinstance(raw_yaml, dict):
+                # Single config file - check if it's the related table
+                if (
+                    raw_yaml.get("name") == f"{main_data_type}_{related_table}"
+                    or raw_yaml.get("name") == related_table
+                ):
+                    return self._parse_raw_config(raw_yaml, config_path)
+
+            return None
+        except Exception as e:
+            logger.warning(
+                f"Could not load related table config for {main_data_type}_{related_table}: {e}"
+            )
+            return None
+
     def _load_config_from_yaml(self, path: Path, target_name: str) -> DataTypeConfig:
         """Load configuration from YAML file."""
         with open(path, encoding="utf-8") as fh:
@@ -261,7 +300,9 @@ class ConsolidatedRegistry:
             self._normalizer_plugins[data_type] = plugin
         return plugin
 
-    def get_custom_logic_plugin(self, data_type: str, stage: Literal["fetching", "cleaning"]) -> Any | None:
+    def get_custom_logic_plugin(
+        self, data_type: str, stage: Literal["fetching", "cleaning"]
+    ) -> Any | None:
         """Get or create custom logic plugin for data type."""
         self._ensure_initialized()
 
@@ -303,7 +344,8 @@ class ConsolidatedRegistry:
             if data_source == "congressional":
                 return None
             elif data_source == "govinfo":
-                return GovInfoCleanerPlugin(data_type)
+                # GovInfo cleaner plugin not implemented yet
+                return None
             else:
                 logger.warning(f"Unknown data source for cleaner: {data_source}")
                 return None
@@ -322,7 +364,8 @@ class ConsolidatedRegistry:
             if data_source == "congressional":
                 return None
             elif data_source == "govinfo":
-                return GovInfoNormalizerPlugin(data_type)
+                # GovInfo normalizer plugin not implemented yet
+                return None
             else:
                 logger.warning(f"Unknown data source for normalizer: {data_source}")
                 return None
@@ -330,7 +373,9 @@ class ConsolidatedRegistry:
             logger.warning(f"Error creating normalizer plugin for {data_type}: {e}")
             return None
 
-    def _create_custom_logic_plugin(self, data_type: str, stage: Literal["fetching", "cleaning"]) -> Any | None:
+    def _create_custom_logic_plugin(
+        self, data_type: str, stage: Literal["fetching", "cleaning"]
+    ) -> Any | None:
         """Create custom logic plugin for data type."""
         if data_type not in self._data_types:
             return None
