@@ -325,6 +325,8 @@ class GovInfoAPIClient(BaseAPIClient):
         limit: int = None,
         offset_mark: str = "*",
         single_page_only: bool = False,
+        start_page: int = 0,
+        end_page: int = None,
         **kwargs,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         """
@@ -341,6 +343,8 @@ class GovInfoAPIClient(BaseAPIClient):
             limit: Maximum number of results total
             offset_mark: Pagination offset mark
             single_page_only: If True, only fetch the specified page and stop (for parallel processing)
+            start_page: Starting page number (0-based, default 0)
+            end_page: Ending page number (exclusive, default None for all pages)
             **kwargs: Additional parameters
 
         Yields:
@@ -350,6 +354,16 @@ class GovInfoAPIClient(BaseAPIClient):
         if not collection_code:
             raise GovInfoAPIError(
                 f"collection_code cannot be None or empty. Got: {collection_code}"
+            )
+
+        # Validate page parameters
+        if start_page is None:
+            start_page = 0
+        if start_page < 0:
+            raise GovInfoAPIError(f"start_page must be >= 0, got: {start_page}")
+        if end_page is not None and end_page <= start_page:
+            raise GovInfoAPIError(
+                f"end_page must be > start_page, got: {end_page} <= {start_page}"
             )
 
         # Provide default dates if None is passed
@@ -371,9 +385,39 @@ class GovInfoAPIClient(BaseAPIClient):
             collection_code, start_date, end_date, doc_class, offset_mark
         )
         logger.debug(f"GovInfo API request: {url}")
-        total_processed = 0
-        page_number = 1
 
+        total_processed = 0
+        page_number = 0
+        pages_yielded = 0
+
+        # First, navigate to the start_page if it's not 0
+        if start_page > 0:
+            logger.info(f"Navigating to start page {start_page}...")
+            while page_number < start_page:
+                try:
+                    response = await self._make_request(url)
+                    next_page = response.get("nextPage")
+
+                    if not next_page:
+                        logger.warning(
+                            f"Requested start page {start_page} but only {page_number + 1} pages available"
+                        )
+                        return  # No more pages available
+
+                    # Prepare next URL with API key
+                    url = next_page
+                    if "api_key" not in url:
+                        api_key = self._get_current_api_key()
+                        separator = "&" if "?" in url else "?"
+                        url = f"{url}{separator}api_key={api_key}"
+
+                    page_number += 1
+
+                except Exception as e:
+                    logger.error(f"Error navigating to start page {start_page}: {e}")
+                    return
+
+        # Now start yielding pages from the start_page
         while True:
             try:
                 response = await self._make_request(url)
@@ -413,21 +457,27 @@ class GovInfoAPIClient(BaseAPIClient):
                     logger.info(f"No more packages available for {collection_code}")
                     break
 
+                # Yield the packages for this page
                 yield packages
+                pages_yielded += 1
 
                 total_processed += len(packages)
                 logger.info(
                     f"Page {page_number} - Packages: {len(packages)}, Total processed: {total_processed}/{count}, Has next: {next_page is not None}"
                 )
 
-                # If single_page_only mode, stop after processing one page
+                # Check if we should stop based on parameters
                 if single_page_only:
                     logger.debug("Single page mode: stopping after processing one page")
                     break
 
+                if end_page is not None and page_number >= end_page - 1:
+                    logger.info(f"Reached end page {end_page}, stopping")
+                    break
+
                 if not next_page:
                     logger.info(
-                        f"No next page found. Completed fetching {collection_code} data after {page_number} pages."
+                        f"No next page found. Completed fetching {collection_code} data after {page_number + 1} pages."
                     )
                     break
 

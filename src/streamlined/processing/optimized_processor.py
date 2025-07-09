@@ -108,6 +108,14 @@ class OptimizedParallelProcessor:
         count_per_page = (
             limit or 250
         )  # raw_metadata count_per_page was for metadata fetch only
+
+        # For GovInfo data types, use fixed page size of 1000 (API maximum)
+        if hasattr(fetcher, "data_source") and fetcher.data_source == "govinfo":
+            count_per_page = 1000
+            logger.info(
+                f"GovInfo data type detected: Using fixed page size of {count_per_page}"
+            )
+
         has_data = (raw_metadata or {}).get("has_data", False)
         error = (raw_metadata or {}).get("error")
 
@@ -211,6 +219,7 @@ class OptimizedParallelProcessor:
             initial_chunk_size=self.chunk_size,
             page_size=count_per_page,
         )
+        logger.info(f"Work queue: {self.chunk_size} records per chunk")
 
         # If resuming, adjust work queue to start from resume offset
         if resume_offset > 0:
@@ -285,7 +294,7 @@ class OptimizedParallelProcessor:
                 work_queue=work_queue,
                 from_date=from_date,
                 to_date=to_date,
-                limit=count_per_page,
+                limit=count_per_page,  # This will be 1000 for GovInfo, 250 for Congressional
                 **kwargs,
             )
             workers.append(worker)
@@ -462,7 +471,16 @@ class OptimizedParallelProcessor:
     ) -> int:
         """Process a single work chunk with improved key management and optional Phase 4."""
         processed = 0
-        offset = chunk.start_offset
+        offset = chunk.start_offset if chunk.start_offset is not None else 0
+
+        # Validate offset
+        if offset is None:
+            logger.warning(f"Worker {worker_id} received None offset, using 0")
+            offset = 0
+
+        logger.info(
+            f"Worker {worker_id} processing chunk: start_offset={chunk.start_offset}, end_offset={chunk.end_offset}, using offset={offset}"
+        )
 
         # Check if we should use optimized storage
         optimized_storage = None
@@ -491,8 +509,9 @@ class OptimizedParallelProcessor:
             batch_size = min(limit, remaining_records)
             estimated_requests = max(1, batch_size // limit)  # Pages needed
 
+            # Log processing information
             logger.info(
-                f"Worker {worker_id} processing chunk [{chunk.start_offset}, {chunk.end_offset}] "
+                f"Worker {worker_id} processing chunk [records {chunk.start_offset}-{chunk.end_offset}] "
                 f"at offset {offset}, batch_size={batch_size}, remaining={remaining_records}"
             )
 
@@ -692,9 +711,8 @@ class OptimizedParallelProcessor:
 
                     # Update offset to next page within chunk range
                     old_offset = offset
-                    offset += (
-                        batch_processed  # Use actual processed count, not batch_size
-                    )
+                    # Both Congressional and GovInfo increment by actual processed count
+                    offset += batch_processed
                     logger.info(
                         f"Worker {worker_id} updated offset: {old_offset} -> {offset} "
                         f"(processed {batch_processed} items)"

@@ -83,20 +83,20 @@ class GovInfoFetcherPlugin:
         api_client,
         from_date: str | None = None,
         to_date: str | None = None,
-        limit: int = 250,
+        limit: int = 1000,
         offset: int = 0,
         single_page_only: bool = False,
         **kwargs,
     ) -> list[dict[str, Any]]:
         """
-        Fetch list data using the Congressional API client.
+        Fetch list data using the GovInfo API client.
 
         Args:
             api_client: API client instance
             from_date: Start date filter (YYYY-MM-DD)
             to_date: End date filter (YYYY-MM-DD)
-            limit: Items per page
-            offset: Offset for pagination
+            limit: Items per page (ignored for GovInfo, always uses 1000)
+            offset: Record offset (0 = first record, 1000 = 1001st record, etc.)
             single_page_only: If True, only fetch one page (used in parallel processing)
             **kwargs: Additional parameters
 
@@ -118,54 +118,38 @@ class GovInfoFetcherPlugin:
             return []
 
         try:
-            # Handle single page requests (used in parallel processing)
-            if single_page_only:
-                # For single page requests, fetch a specific page using offset/limit
-                logger.info(f"Fetching single page: offset={offset}, limit={limit}")
+            # For GovInfo API, convert record offset to page number
+            # Each page has 1000 items, so offset 0 = page 0, offset 1000 = page 1, etc.
+            start_page = offset // 1000 if offset is not None else 0
+            page_size = 1000  # GovInfo API maximum page size
 
-                # Use the API client's retrieve_data_list with single page parameters
-                async for batch in api_client.retrieve_collection_data(
-                    collection_code=config.api.api_endpoint,
-                    start_date=api_client._format_date_for_api(from_date)
-                    if from_date
-                    else None,
-                    end_date=api_client._format_date_for_api(to_date)
-                    if to_date
-                    else None,
-                    doc_class=config.api.doc_class,
-                    limit=limit,
-                    offset=offset,
-                    **kwargs,
-                ):
-                    # For single page, return only the first batch's items
-                    items = self._extract_list_items(batch, config)
-                    logger.debug(f"Single page returned {len(items)} items")
-                    return items
+            logger.info(
+                f"GovInfo API: Record offset {offset} -> page {start_page} with page_size={page_size}"
+            )
 
-                # If no data returned
-                return []
-            else:
-                # For multi-page requests, collect all batches
-                logger.debug("Fetching multi-page data")
-                data_batches = []
-                async for batch in api_client.retrieve_collection_data(
-                    collection_code=config.api.api_endpoint,
-                    start_date=api_client._format_date_for_api(from_date)
-                    if from_date
-                    else None,
-                    end_date=api_client._format_date_for_api(to_date)
-                    if to_date
-                    else None,
-                    doc_class=config.api.doc_class,
-                    limit=limit,
-                    offset=offset,
-                    **kwargs,
-                ):
-                    items = self._extract_list_items(batch, config)
-                    data_batches.extend(items)
+            # Use the unified retrieve_collection_data method
+            # This will navigate to start_page and then continue fetching pages until limit is reached
+            data_batches = []
+            async for batch in api_client.retrieve_collection_data(
+                collection_code=config.api.api_endpoint,
+                start_date=api_client._format_date_for_api(from_date)
+                if from_date
+                else None,
+                end_date=api_client._format_date_for_api(to_date) if to_date else None,
+                doc_class=config.api.doc_class,
+                start_page=start_page,
+                limit=limit,  # This controls total items, not pages
+                single_page_only=single_page_only,
+                **kwargs,
+            ):
+                items = self._extract_list_items(batch, config)
+                data_batches.extend(items)
+                logger.debug(f"Batch returned {len(items)} items")
 
-                logger.debug(f"Multi-page returned {len(data_batches)} total items")
-                return data_batches
+            logger.debug(
+                f"Total returned {len(data_batches)} items starting from record offset {offset}"
+            )
+            return data_batches
 
         except Exception as e:
             logger.error(
@@ -319,8 +303,20 @@ class GovInfoFetcherPlugin:
         """Extract item ID by delegating to custom logic."""
         if kwargs.get("granule") is True:
             return item_data.get("granuleId", "ID_ERROR")
-        return item_data.get("packageId", "ID_ERROR")
+
+        # Try multiple possible ID fields for GovInfo data
+        # GovInfo API uses packageId, but config might specify package_id
+        for field in ["packageId", "package_id", "id"]:
+            if field in item_data and item_data[field]:
+                return str(item_data[field])
+
+        return "ID_ERROR"
 
     async def _extract_preliminary_item_id(self, list_item: dict[str, Any]) -> str:
         """Extract preliminary item ID for checkpoint tracking."""
-        return list_item.get("packageId", "ID_ERROR")
+        # Try multiple possible ID fields for GovInfo data
+        for field in ["packageId", "package_id", "id"]:
+            if field in list_item and list_item[field]:
+                return str(list_item[field])
+
+        return "ID_ERROR"
