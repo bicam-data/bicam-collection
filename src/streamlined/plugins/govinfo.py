@@ -256,6 +256,9 @@ class GovInfoFetcherPlugin:
             else:
                 # Use consistent naming scheme
                 granule_type = f"{self.data_type}_granules"
+                logger.info(
+                    f"GovInfo plugin: data_type='{self.data_type}', creating granule_type='{granule_type}'"
+                )
 
                 related_data.append(
                     {
