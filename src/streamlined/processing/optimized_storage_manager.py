@@ -782,11 +782,6 @@ class OptimizedFetcherStorage:
 
         # Log the raw data structure
         logger.debug(f"PHASE 3 STORAGE: Raw data structure: {data}")
-        logger.info(f"PHASE 3 STORAGE: Processing {len(data)} related data items")
-        for i, item in enumerate(data):
-            logger.info(
-                f"PHASE 3 STORAGE: Item {i}: type='{item.get('type', 'unknown')}', keys={list(item.keys())}"
-            )
 
         # Get data type for checkpoint
         data_type = getattr(self.fetcher, "data_type_name", "unknown")
@@ -892,7 +887,7 @@ class OptimizedFetcherStorage:
                 table = f"{item_type}_list_raw"
             else:
                 table = f"{table_prefix}_{table_suffix}_raw"
-            logger.info(
+            logger.debug(
                 f"PHASE 3 STORAGE: Storing {len(items)} items of type '{item_type}' -> table '{table}'"
             )
 

@@ -689,6 +689,25 @@ class StreamlinedFetcher:
                 f"Getting pagination metadata for {self.data_type_name} from {from_date} to {to_date}"
             )
 
+            # Get doc_class from plugin config if available
+            doc_class = None
+            if self._plugin and hasattr(self._plugin, "_get_config"):
+                try:
+                    config = await self._plugin._get_config()
+                    if hasattr(config, "api") and hasattr(config.api, "doc_class"):
+                        doc_class = config.api.doc_class
+                        if doc_class:
+                            logger.info(f"Using doc_class from config: {doc_class}")
+                            logger.info(
+                                f"This will filter API results to only include documents with doc_class={doc_class}"
+                            )
+                        else:
+                            logger.info(
+                                "No doc_class specified in config - will fetch all documents"
+                            )
+                except Exception as e:
+                    logger.debug(f"Could not get doc_class from plugin config: {e}")
+
             # Fetch first page to get total count
             async for first_batch in self.fetch_phase_1_data_with_client(
                 self.client,
@@ -696,6 +715,7 @@ class StreamlinedFetcher:
                 to_date=to_date,
                 limit=1,  # Just need metadata
                 single_page_only=True,
+                doc_class=doc_class,  # Pass doc_class to the plugin
                 **kwargs,
             ):
                 logger.info(
