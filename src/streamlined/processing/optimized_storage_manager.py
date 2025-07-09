@@ -878,7 +878,12 @@ class OptimizedFetcherStorage:
                 if table_suffix.startswith(f"{table_prefix}_"):
                     table_suffix = table_suffix[len(f"{table_prefix}_") :]
 
-            table = f"{table_prefix}_{table_suffix}_raw"
+            # For GovInfo granules, use the item_type directly as the table name
+            # e.g., "hearingpackages_granules" -> "hearingpackages_granules_raw"
+            if item_type.endswith("_granules"):
+                table = f"{item_type}_list_raw"
+            else:
+                table = f"{table_prefix}_{table_suffix}_raw"
             logger.debug(
                 f"PHASE 3 STORAGE: Storing {len(items)} items of type '{item_type}' -> table '{table}'"
             )
