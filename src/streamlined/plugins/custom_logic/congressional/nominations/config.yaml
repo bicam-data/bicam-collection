@@ -45,6 +45,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: nominations_actions_committees
   description: Nomination actions committees data
@@ -58,7 +59,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
-
+    scaling_factor: 50
 
 - name: nominations_nominees
   description: Nomination positions data - will be routed into nominations_positions
@@ -74,6 +75,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: nominations_individualnominees
   description: Nomination nominees data - will be routed into nominations_nominees
@@ -93,6 +95,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: nominations_hearings
   description: Nomination hearings data
@@ -106,6 +109,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: nominations_committeeactivities
   description: Nomination committee activities data
@@ -125,3 +129,4 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50

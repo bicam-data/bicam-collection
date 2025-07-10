@@ -35,3 +35,4 @@
 
   processing:
     batch_size: 100
+    scaling_factor: 50

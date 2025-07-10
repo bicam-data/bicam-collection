@@ -65,3 +65,4 @@
   processing:
     batch_size: 200
     checkpoint_frequency: 100
+    scaling_factor: 50

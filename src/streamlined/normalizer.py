@@ -1055,47 +1055,85 @@ class StreamlinedNormalizer:
         )
         if main_table_exists:
             tables_to_process.add(config.table_name)
+            logger.info(f"Added main table {config.table_name} for list extraction")
         else:
             logger.warning(
                 f"Main table {target_schema}.{config.table_name} does not exist"
             )
 
-        # Process related tables (check if they exist in raw schema first, then staging)
+        # Process related tables - check both raw schema and staging schema
         if hasattr(config, "related_tables") and config.related_tables:
             for rt in config.related_tables:
                 table_name = f"{data_type}_{rt}".lower()
 
-                # First check if the raw table exists
-                raw_table_name = f"{data_type}_{rt}_raw"
-                raw_table_exists = await self._check_raw_table_exists(
-                    db_pool, source_schema, raw_table_name
+                # Check if the staging table exists (this is the primary check)
+                staging_table_exists = await self._check_table_exists(
+                    db_pool, target_schema, table_name
                 )
 
-                if raw_table_exists:
-                    # Raw table exists, so this table should be processed
-                    # Check if it already exists in staging (may have been processed in Phase 2)
-                    if await self._check_table_exists(
+                if staging_table_exists:
+                    # Staging table exists, so we should process it for list extraction
+                    tables_to_process.add(table_name)
+                    logger.info(f"Added related table {table_name} for list extraction")
+                else:
+                    # Check if raw table exists as a fallback
+                    raw_table_name = f"{data_type}_{rt}_raw"
+                    raw_table_exists = await self._check_raw_table_exists(
+                        db_pool, source_schema, raw_table_name
+                    )
+
+                    if raw_table_exists:
+                        logger.info(
+                            f"Raw table {source_schema}.{raw_table_name} exists but staging table {target_schema}.{table_name} does not - will be created during processing"
+                        )
+                        # Don't add it yet since it doesn't exist in staging
+                    else:
+                        logger.info(
+                            f"Skipping {table_name} - neither raw nor staging table exists"
+                        )
+
+        # Discover all tables in staging that start with our data type prefix
+        # This catches tables like amendments_notes that were extracted during main table processing
+        logger.info(
+            f"Discovering all tables in {target_schema} that start with '{data_type}_'..."
+        )
+        async with db_pool.acquire() as conn:
+            # Get all tables in the staging schema that start with the data_type
+            query = """
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name LIKE $2
+            AND table_name NOT LIKE '%_raw'
+            ORDER BY table_name
+            """
+            pattern = f"{data_type}_%"
+            rows = await conn.fetch(query, target_schema, pattern)
+
+            for row in rows:
+                table_name = row["table_name"]
+                if table_name not in tables_to_process:
+                    # Check if this table has list columns that need extraction
+                    list_columns = await self._get_list_columns(
                         db_pool, target_schema, table_name
-                    ):
+                    )
+                    if list_columns:
                         tables_to_process.add(table_name)
-                        logger.debug(
-                            f"Found existing staging table {table_name}, will process for list extraction"
+                        logger.info(
+                            f"Added discovered table {table_name} for list extraction (has list columns: {list_columns})"
                         )
                     else:
-                        # Raw table exists but staging table doesn't - this means Phase 2 didn't process it
-                        # We should still include it in case it gets created during list extraction
-                        logger.warning(
-                            f"Raw table {source_schema}.{raw_table_name} exists but staging table {target_schema}.{table_name} does not"
+                        logger.debug(
+                            f"Discovered table {table_name} but no list columns found"
                         )
-                        # Don't add it to tables_to_process since it doesn't exist in staging yet
-                else:
-                    logger.info(
-                        f"Skipping list extraction for {table_name} - raw table {source_schema}.{raw_table_name} does not exist"
-                    )
 
         # Recursively find all extracted list tables that need further extraction
         processed_tables = set()
         tables_to_check = list(tables_to_process)
+
+        logger.info(
+            f"Starting recursive discovery with initial tables: {tables_to_process}"
+        )
 
         while tables_to_check:
             current_table = tables_to_check.pop(0)
@@ -1103,11 +1141,15 @@ class StreamlinedNormalizer:
                 continue
 
             processed_tables.add(current_table)
+            logger.debug(f"Processing table for list extraction: {current_table}")
 
             # Get list columns from current table
             list_columns = await self._get_list_columns(
                 db_pool, target_schema, current_table
             )
+
+            if list_columns:
+                logger.debug(f"Found list columns in {current_table}: {list_columns}")
 
             # Check if any of these list columns have been extracted to separate tables
             for column_name in list_columns:
@@ -1126,10 +1168,19 @@ class StreamlinedNormalizer:
                         # This table was extracted and has data, so we need to process it too
                         tables_to_process.add(extracted_table)
                         tables_to_check.append(extracted_table)
-                        logger.debug(
+                        logger.info(
                             f"Found extracted table {extracted_table} with {count} records, will process for list extraction"
                         )
+                    else:
+                        logger.debug(
+                            f"Extracted table {extracted_table} exists but is empty, skipping"
+                        )
+                else:
+                    logger.debug(
+                        f"Extracted table {extracted_table} does not exist yet"
+                    )
 
+        logger.info(f"Final tables to process for list extraction: {tables_to_process}")
         return list(tables_to_process)
 
     async def _cleanup_extracted_json_columns(
@@ -1346,6 +1397,10 @@ class StreamlinedNormalizer:
                     logger.debug(f"No text/json columns found in {schema}.{table_name}")
                     return []
 
+                logger.debug(
+                    f"Found {len(columns)} text/json columns in {schema}.{table_name}: {[col['column_name'] for col in columns]}"
+                )
+
                 # Sample the table to check which columns have arrays
                 sample_query = f"""
                     SELECT * FROM {schema}.{table_name}
@@ -1354,12 +1409,16 @@ class StreamlinedNormalizer:
 
                 try:
                     samples = await conn.fetch(sample_query)
+                    logger.debug(
+                        f"Sampled {len(samples)} rows from {schema}.{table_name}"
+                    )
                 except Exception as e:
                     logger.warning(f"Could not sample {schema}.{table_name}: {e}")
                     return []
 
                 for col in columns:
                     col_name = col["column_name"]
+                    col_type = col["data_type"]
 
                     # Check if any sample has an array in this column
                     for sample in samples:
@@ -1367,20 +1426,35 @@ class StreamlinedNormalizer:
                         if value:
                             try:
                                 if isinstance(value, str):
+                                    # Try to parse as JSON
                                     parsed = json.loads(value)
                                     if isinstance(parsed, list):
                                         list_columns.append(col_name)
+                                        logger.debug(
+                                            f"Found list column {col_name} (JSON string) in {schema}.{table_name}"
+                                        )
                                         break
                                 elif isinstance(value, list):
                                     list_columns.append(col_name)
+                                    logger.debug(
+                                        f"Found list column {col_name} (native list) in {schema}.{table_name}"
+                                    )
                                     break
-                            except Exception:
+                                elif col_type in ("json", "jsonb") and isinstance(
+                                    value, dict
+                                ):
+                                    # For JSON columns, check if it's a list-like structure
+                                    # This handles cases where the JSON might be stored as a dict but represents a list
+                                    pass
+                            except (json.JSONDecodeError, TypeError):
+                                # Not valid JSON, continue to next sample
                                 continue
 
         except Exception as e:
             logger.error(f"Error getting list columns for {schema}.{table_name}: {e}")
             return []
 
+        logger.debug(f"Final list columns for {schema}.{table_name}: {list_columns}")
         return list_columns
 
     async def _extract_list_column(
@@ -1462,9 +1536,24 @@ class StreamlinedNormalizer:
                         batch_records.append(flat_item)
                         stats["records"] += 1
 
+                except json.JSONDecodeError as e:
+                    # Log the problematic row data for debugging
+                    logger.error(
+                        f"JSON decode error extracting list from {table_name}.{column_name}: {e}"
+                    )
+                    logger.error(
+                        f"Problematic row - parent_id: {parent_id}, list_data type: {type(list_data)}, "
+                        f"list_data length: {len(str(list_data)) if list_data else 0}, "
+                        f"list_data preview: {str(list_data)[:200] if list_data else 'None'}"
+                    )
+                    stats["errors"] += 1
                 except Exception as e:
                     logger.error(
                         f"Error extracting list from {table_name}.{column_name}: {e}"
+                    )
+                    logger.error(
+                        f"Problematic row - parent_id: {parent_id}, list_data type: {type(list_data)}, "
+                        f"list_data: {list_data}"
                     )
                     stats["errors"] += 1
 

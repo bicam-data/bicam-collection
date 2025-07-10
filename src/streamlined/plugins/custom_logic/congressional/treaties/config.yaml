@@ -40,6 +40,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: treaties_titles
   description: Treaty titles data
@@ -53,7 +54,7 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
-
+    scaling_factor: 50
 - name: treaties_actions
   description: Treaty actions data
 
@@ -72,6 +73,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 5
 
 - name: treaties_countries
   description: Treaty countries data
@@ -85,6 +87,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: treaties_committeeactivities
   description: Treaty committees data
@@ -104,3 +107,4 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50

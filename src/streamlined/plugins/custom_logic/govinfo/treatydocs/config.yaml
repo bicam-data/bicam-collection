@@ -20,6 +20,7 @@
     batch_size: 100
     checkpoint_frequency: 50
     has_granules: true
+    scaling_factor: 50
 
 - name: granules
   description: Treaty Docs granule data
@@ -36,3 +37,4 @@
 
   processing:
     batch_size: 100
+    scaling_factor: 50

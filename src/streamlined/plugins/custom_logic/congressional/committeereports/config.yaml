@@ -33,6 +33,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: committeereports_bills
   description: Committee reports bills data
@@ -46,6 +47,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: committeereports_texts
   description: Committee reports texts data
@@ -65,3 +67,4 @@
   processing:
     batch_size: 200
     checkpoint_frequency: 100
+    scaling_factor: 50

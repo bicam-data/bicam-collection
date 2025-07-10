@@ -128,7 +128,6 @@
     create_raw: true
     id_fields: [amendment_id, date, type]
 
-
   processing:
     batch_size: 200
     checkpoint_frequency: 100
@@ -160,3 +159,4 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50

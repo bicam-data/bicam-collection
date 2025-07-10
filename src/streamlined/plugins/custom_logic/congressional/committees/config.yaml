@@ -33,6 +33,7 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+    scaling_factor: 50
 
 - name: committees_history
   description: Congressional committees history data
@@ -46,6 +47,7 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+    scaling_factor: 50
 
 - name: committees_committeereports
   description: Congressional committees reports data
@@ -63,3 +65,4 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+    scaling_factor: 50

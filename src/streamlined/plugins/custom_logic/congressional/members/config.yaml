@@ -36,6 +36,7 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+    scaling_factor: 50
 
 - name: members_leadershiproles
   description: Congressional members leadership roles data
@@ -49,6 +50,7 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+    scaling_factor: 50
 
 - name: members_partyhistory
   description: Congressional members party history data
@@ -62,4 +64,4 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
-
+    scaling_factor: 50
