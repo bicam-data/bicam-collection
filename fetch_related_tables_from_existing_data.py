@@ -50,6 +50,25 @@ async def fetch_related_tables_from_existing_data(
     logger.info("Loading configuration from environment...")
     config = StreamlinedConfig.from_env()
 
+    # Debug: Check what's in the config
+    logger.info(f"API keys found: {len(config.api.keys) if config.api.keys else 0}")
+    if config.api.keys:
+        logger.info(
+            f"First few API keys: {[key[:8] + '...' for key in config.api.keys[:3]]}"
+        )
+    else:
+        logger.info("No API keys found in configuration")
+        logger.info("Checking environment variables...")
+        import os
+
+        api_keys_env = os.getenv("CONGRESS_API_KEY", "")
+        if api_keys_env:
+            logger.info(
+                f"CONGRESS_API_KEY environment variable found with length: {len(api_keys_env)}"
+            )
+        else:
+            logger.info("CONGRESS_API_KEY environment variable not found")
+
     # Validate configuration
     errors = config.validate()
     if errors:
