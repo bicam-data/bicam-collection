@@ -48,6 +48,34 @@ async def fetch_related_tables_from_existing_data(
 
     # Load configuration from environment
     logger.info("Loading configuration from environment...")
+
+    # Debug: Check if .env file exists and is being loaded
+    import os
+    from pathlib import Path
+
+    env_paths = [
+        Path.cwd() / ".env",  # Current working directory
+        Path(__file__).parent / ".env",  # Script directory
+        Path(__file__).parent.parent / ".env",  # Project root
+        Path.home() / ".env",  # User home directory
+    ]
+
+    logger.info("Checking for .env files:")
+    for env_path in env_paths:
+        exists = "✓" if env_path.exists() else "✗"
+        logger.info(f"  {exists} {env_path}")
+
+    # Check environment variables before loading config
+    logger.info("Environment variables before config loading:")
+    congressional_key = os.getenv("CONGRESSIONAL_API_KEY", "")
+    govinfo_key = os.getenv("GOVINFO_API_KEY", "")
+    logger.info(
+        f"  CONGRESSIONAL_API_KEY: {'✓' if congressional_key else '✗'} ({len(congressional_key)} chars)"
+    )
+    logger.info(
+        f"  GOVINFO_API_KEY: {'✓' if govinfo_key else '✗'} ({len(govinfo_key)} chars)"
+    )
+
     config = StreamlinedConfig.from_env()
 
     # Debug: Check what's in the config
