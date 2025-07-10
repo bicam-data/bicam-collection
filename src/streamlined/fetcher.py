@@ -492,13 +492,13 @@ class StreamlinedFetcher:
         to_date: str = None,
     ) -> dict[str, Any]:
         """
-        Fetch specific related tables from existing Phase 2 data.
+        Fetch specific related tables from existing Phase 2 data using parallel processing.
 
-        This method:
+        This method delegates to OptimizedParallelProcessor for true parallel execution:
         1. Queries the database for existing Phase 2 data
-        2. For each item, fetches only the specified related tables
-        3. Stores the related data using the full storage infrastructure
-        4. Uses proper batching and resource management
+        2. Creates parallel workers to fetch related tables concurrently
+        3. Uses the full optimized storage infrastructure
+        4. Provides proper batching and resource management with parallel execution
 
         Args:
             related_tables: List of related table names to fetch (e.g., ['texts', 'actions'])
@@ -546,120 +546,29 @@ class StreamlinedFetcher:
                 return {"error": f"Failed to create API client: {e}"}
 
         logger.info(
-            f"Fetching related tables {related_tables} for {self.data_type_name}"
+            f"Delegating related tables fetch to OptimizedParallelProcessor for {self.data_type_name}"
         )
 
-        # Get schema name
-        schema_name = self.get_default_schema()
-        table_name = f"{self.data_type_name}_raw"
+        # Import here to avoid circular imports
+        from .processing.optimized_processor import OptimizedParallelProcessor
 
-        # Build query to get existing Phase 2 data
-        query = f"""
-        SELECT
-            payload,
-            source_doc_id
-        FROM {schema_name}.{table_name}
-        WHERE payload IS NOT NULL
-        """
+        # Create OptimizedParallelProcessor for parallel execution
+        processor = OptimizedParallelProcessor(
+            api_keys=self.api_keys,
+            client_class=self.client.__class__ if self.client else None,
+            db_pool=self.db_pool,
+        )
 
-        params = []
-        param_count = 0
-
-        # Add date filters if provided
-        if from_date:
-            param_count += 1
-            query += f" AND payload->>'updatedate' >= ${param_count}"
-            params.append(from_date)
-
-        if to_date:
-            param_count += 1
-            query += f" AND payload->>'updatedate' <= ${param_count}"
-            params.append(to_date)
-
-        query += " ORDER BY payload->>'updatedate' DESC"
-
-        if limit:
-            query += f" LIMIT {limit}"
-
-        logger.info(f"Querying existing Phase 2 data from {schema_name}.{table_name}")
-        logger.info(f"Related tables to fetch: {related_tables}")
-
-        # Get all existing Phase 2 data
-        async with self.db_pool.acquire() as conn:
-            rows = await conn.fetch(query, *params)
-
-        if not rows:
-            logger.info("No existing Phase 2 data found")
-            return {
-                "status": "completed",
-                "items_processed": 0,
-                "related_tables_fetched": related_tables,
-                "message": "No existing Phase 2 data found",
-            }
-
-        logger.info(f"Found {len(rows)} existing Phase 2 items")
-
-        # Process items in batches
-        processed_count = 0
-        error_count = 0
-        total_related_items = 0
-        start_time = datetime.now(UTC)
-
-        for i in range(0, len(rows), batch_size):
-            batch = rows[i : i + batch_size]
-            logger.info(
-                f"Processing batch {i // batch_size + 1}/{(len(rows) + batch_size - 1) // batch_size}"
-            )
-
-            for row in batch:
-                try:
-                    payload = row["payload"]
-                    source_doc_id = row["source_doc_id"]
-
-                    logger.debug(f"Processing item {source_doc_id}")
-
-                    # Fetch related data for this item
-                    related_data = await self._fetch_specific_related_tables_for_item(
-                        payload, related_tables
-                    )
-
-                    if related_data:
-                        # Store the related data using the full storage infrastructure
-                        await self.storage_manager.store_phase_3_data(
-                            related_data, source_doc_id
-                        )
-                        processed_count += 1
-                        total_related_items += len(related_data)
-                        logger.debug(f"Stored related data for {source_doc_id}")
-                    else:
-                        logger.debug(f"No related data found for {source_doc_id}")
-
-                except Exception as e:
-                    logger.error(
-                        f"Error processing item {row.get('source_doc_id', 'unknown')}: {e}"
-                    )
-                    error_count += 1
-                    continue
-
-        duration = (datetime.now(UTC) - start_time).total_seconds()
-
-        logger.info(f"Successfully processed {processed_count} items")
-        logger.info(f"Fetched {total_related_items} related items")
-        if error_count > 0:
-            logger.warning(f"Encountered {error_count} errors")
-
-        return {
-            "status": "completed",
-            "items_processed": processed_count,
-            "related_items_fetched": total_related_items,
-            "related_tables_fetched": related_tables,
-            "errors": error_count,
-            "duration": duration,
-            "batch_size": batch_size,
-            "limit": limit,
-            "from_date": from_date,
-            "to_date": to_date,
-        }
+        # Use the processor's parallel method
+        return await processor.fetch_related_tables_from_existing_data(
+            fetcher=self,
+            data_type=self.data_type_name,
+            related_tables=related_tables,
+            batch_size=batch_size,
+            limit=limit,
+            from_date=from_date,
+            to_date=to_date,
+        )
 
     async def _fetch_specific_related_tables_for_item(
         self, detailed_data: dict, related_tables: list[str]

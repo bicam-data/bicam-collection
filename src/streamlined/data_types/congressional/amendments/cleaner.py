@@ -27,14 +27,14 @@ from typing import Any
 import asyncpg
 
 from ....libs.run_tracking import RunManager
-from ..base import CongressionalBaseCleaner
+from ..base import BaseCleanerLogic
 
 logger = logging.getLogger(__name__)
 
 
-class AmendmentsCleaner(CongressionalBaseCleaner):
+class AmendmentsCleaner(BaseCleanerLogic):
     """
-    Amendments-specific cleaner that extends CongressionalBaseCleaner with amendments-specific cleaning logic.
+    Amendments-specific cleaner that extends BaseCleanerLogic with amendments-specific cleaning logic.
 
     Provides specialized cleaning methods for all amendments-related data types
     and handles multi-table processing for complex relationships.

@@ -54,6 +54,8 @@ class CongressionalDirectoriesCleaner:
             "bills_texts": ["bills_texts", "bills_texts_formats"],
             # Add other bills multi-table data types here as needed
         }
+        
+        #TODO: fix bioguideids, get proper metadata
 
     async def _stream_bills_texts_joined_chunks(
         self, chunk_size: int

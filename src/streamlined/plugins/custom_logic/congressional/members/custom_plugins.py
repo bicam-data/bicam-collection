@@ -3,7 +3,7 @@ import re
 from typing import Any
 
 # Import the base class that provides shared functionality
-from ....base import CongressionalBaseCleanerLogic, CongressionalBaseFetcherLogic
+from ....base import BaseCleanerLogic, CongressionalBaseFetcherLogic
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class MembersFetcherLogic(CongressionalBaseFetcherLogic):
         return self.extract_item_id(list_item)
 
 
-class MembersCleanerLogic(CongressionalBaseCleanerLogic):
+class MembersCleanerLogic(BaseCleanerLogic):
     """
     Members-specific cleaner logic extracted from MembersCleaner class.
     Contains all the custom cleaning methods for members data.

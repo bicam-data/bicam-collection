@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 # Import the base class that provides shared functionality
-from ....base import CongressionalBaseCleanerLogic, CongressionalBaseFetcherLogic
+from ....base import BaseCleanerLogic, CongressionalBaseFetcherLogic
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class CommitteesFetcherLogic(CongressionalBaseFetcherLogic):
             full_committee_data, related_table_name="reports", client=client
         )
 
-class CommitteesCleanerLogic(CongressionalBaseCleanerLogic):
+class CommitteesCleanerLogic(BaseCleanerLogic):
     """
     Committees-specific cleaner logic extracted from CommitteesCleaner class.
     Contains all the custom cleaning methods for committees data.

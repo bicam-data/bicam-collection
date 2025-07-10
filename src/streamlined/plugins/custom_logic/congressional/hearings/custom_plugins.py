@@ -12,9 +12,9 @@ All logic is organized into classes that can be used by the plugin system.
 import logging
 from typing import Any
 
-# CongressionalBaseCleanerLogic provides utility methods and table override support
+# BaseCleanerLogic provides utility methods and table override support
 # Import the base class that provides shared functionality
-from ....base import CongressionalBaseCleanerLogic, CongressionalBaseFetcherLogic
+from ....base import BaseCleanerLogic, CongressionalBaseFetcherLogic
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +58,9 @@ class HearingsFetcherLogic(CongressionalBaseFetcherLogic):
 
         return self.extract_item_id(list_item)
 
-class HearingsCleanerLogic(CongressionalBaseCleanerLogic):
+class HearingsCleanerLogic(BaseCleanerLogic):
     """
-    Hearings-specific cleaner that extends CongressionalBaseCleanerLogic with hearings-specific cleaning logic.
+    Hearings-specific cleaner that extends BaseCleanerLogic with hearings-specific cleaning logic.
 
     Provides specialized cleaning methods for all amendments-related data types
     and handles multi-table processing for complex relationships.

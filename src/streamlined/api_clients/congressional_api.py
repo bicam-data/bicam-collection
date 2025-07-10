@@ -108,6 +108,10 @@ class CongressionalAPIClient(BaseAPIClient):
         query_string = urlencode(request_params)
         url = f"{self.base_url}{endpoint}?{query_string}"
 
+        # Debug logging to show the constructed URL
+        logger.debug(f"Making request to URL: {url}")
+        logger.debug(f"API key being used: {self._get_current_api_key()[:10]}...")
+
         retries = 0
 
         while retries < max_retries:
@@ -131,11 +135,54 @@ class CongressionalAPIClient(BaseAPIClient):
 
                     # Handle Congressional API specific errors
                     if response.status == 403:
-                        # API key might be invalid, try rotating
+                        # API key might be invalid or rate limited, try rotating
                         logger.warning(
                             f"API key failed (403), rotating to next key (attempt {retries + 1})"
                         )
+
+                        # Log the response text to understand what the API is telling us
+                        try:
+                            response_text = await response.text()
+                            logger.warning(f"403 response text: {response_text}")
+                            logger.warning(f"403 request url: {url}")
+                        except Exception as e:
+                            logger.warning(f"Could not read 403 response text: {e}")
+
                         self._rotate_api_key()
+
+                        # Check for Retry-After header (403 might also be rate limiting)
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                # Retry-After can be either seconds or HTTP date
+                                if retry_after.isdigit():
+                                    wait_seconds = int(retry_after)
+                                else:
+                                    # Parse HTTP date format
+                                    from email.utils import parsedate_to_datetime
+
+                                    retry_time = parsedate_to_datetime(retry_after)
+                                    wait_seconds = max(
+                                        0,
+                                        (
+                                            retry_time - datetime.now(UTC)
+                                        ).total_seconds(),
+                                    )
+
+                                logger.info(
+                                    f"API requested wait time for 403: {wait_seconds} seconds"
+                                )
+                                await asyncio.sleep(wait_seconds)
+                            except (ValueError, TypeError) as e:
+                                logger.warning(
+                                    f"Failed to parse Retry-After header '{retry_after}': {e}"
+                                )
+                                # Fall back to short wait
+                                await asyncio.sleep(5)
+                        else:
+                            # No Retry-After header, use short wait
+                            await asyncio.sleep(5)
+
                         retries += 1
                         if retries >= max_retries:
                             await self._log_error_to_db(

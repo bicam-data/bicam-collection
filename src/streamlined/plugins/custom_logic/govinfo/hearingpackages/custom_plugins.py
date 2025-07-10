@@ -14,7 +14,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-class CongressionalDirectoriesFetcher:
+class HearingPackagesFetcher:
     """
     Hearing Packages fetcherogic that extends the base GovInfo fetcher logic.
 
@@ -35,6 +35,12 @@ class HearingPackagesCleaner:
     Hearing Packages cleaner logic extracted from HearingPackagesCleaner class.
     Contains all the custom cleaning methods for hearing packages data.
     """
+    
+    #TODO: for now, skip GOVPUB, but then go back manually for jacketnumbers?
+    #TODO: agencies are valid
+    #TODO: clean committee codes, and fill in empty committees (using fuzzy name matching with other values in the column)
+    #TODO: fill in 5k hearings members without bioguide ids
+    #TODO: granules_committees, committees, granules_references, references, helddates
 
     def __init__(
         self,

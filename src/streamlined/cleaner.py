@@ -26,7 +26,7 @@ class StreamlinedCleaner:
     """
     Enhanced data cleaner with full plugin support and checkpoint management.
 
-    This integrates the comprehensive cleaning logic from CongressionalBaseCleaner
+    This integrates comprehensive cleaning logic
     with the streamlined architecture:
     - Custom logic plugins for data type-specific cleaning
     - Checkpoint-based resume capability

@@ -220,7 +220,7 @@ class CongressionalBaseFetcherLogic:
             return []
 
 
-class CongressionalBaseCleanerLogic:
+class BaseCleanerLogic:
     """
     Base cleaner logic for congressional data with table override registration.
 

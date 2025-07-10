@@ -54,6 +54,8 @@ class CongressionalReportsCleaner:
             "bills_texts": ["bills_texts", "bills_texts_formats"],
             # Add other bills multi-table data types here as needed
         }
+        
+        #TODO: not much id cleaning, seems to be same committees vs granules processing
 
     async def _stream_bills_texts_joined_chunks(
         self, chunk_size: int

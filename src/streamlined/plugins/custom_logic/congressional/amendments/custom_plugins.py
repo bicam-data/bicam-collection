@@ -15,9 +15,9 @@ import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
-# CongressionalBaseCleanerLogic provides utility methods and table override support
+# BaseCleanerLogic provides utility methods and table override support
 # Import the base class that provides shared functionality
-from ....base import CongressionalBaseCleanerLogic, CongressionalBaseFetcherLogic
+from ....base import BaseCleanerLogic, CongressionalBaseFetcherLogic
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,9 @@ class AmendmentsFetcherLogic(CongressionalBaseFetcherLogic):
         )
 
 
-class AmendmentsCleanerLogic(CongressionalBaseCleanerLogic):
+class AmendmentsCleanerLogic(BaseCleanerLogic):
     """
-    Amendments-specific cleaner that extends CongressionalBaseCleanerLogic with amendments-specific cleaning logic.
+    Amendments-specific cleaner that extends BaseCleanerLogic with amendments-specific cleaning logic.
 
     Provides specialized cleaning methods for all amendments-related data types
     and handles multi-table processing for complex relationships.

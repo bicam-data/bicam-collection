@@ -41,6 +41,7 @@ class OptimizedParallelProcessor:
         num_workers: int | None = None,
         chunk_size: int = 5000,
     ):
+        self.api_keys = api_keys  # Store API keys for access in methods
         self.key_pool = DynamicKeyPool(api_keys)
         self.client_class = client_class
         self.db_pool = db_pool
@@ -966,13 +967,13 @@ class OptimizedParallelProcessor:
         to_date: str = None,
     ) -> dict[str, Any]:
         """
-        Fetch specific related tables from existing Phase 2 data using optimized storage.
+        Fetch specific related tables from existing Phase 2 data using TRUE parallel processing.
 
         This method:
         1. Queries the database for existing Phase 2 data
-        2. For each item, fetches only the specified related tables
+        2. Creates parallel workers to fetch related tables concurrently
         3. Uses the full optimized storage infrastructure
-        4. Provides proper batching and resource management
+        4. Provides proper batching and resource management with parallel execution
 
         Args:
             fetcher: The StreamlinedFetcher instance
@@ -989,9 +990,10 @@ class OptimizedParallelProcessor:
         start_time = datetime.now(UTC)
 
         logger.info("=" * 60)
-        logger.info("FETCHING RELATED TABLES FROM EXISTING DATA")
+        logger.info("FETCHING RELATED TABLES FROM EXISTING DATA (PARALLEL)")
         logger.info(f"Data Type: {data_type}")
         logger.info(f"Related Tables: {related_tables}")
+        logger.info(f"API Keys Available: {len(self.api_keys)}")
         logger.info("=" * 60)
 
         if not fetcher.db_pool:
@@ -1061,102 +1063,135 @@ class OptimizedParallelProcessor:
         schema_name = fetcher.get_default_schema()
         table_name = f"{data_type}_raw"
 
-        # Build query to get existing Phase 2 data
-        query = f"""
-        SELECT
-            payload,
-            source_doc_id
+        # First, get the total count of items that need related table fetching
+        count_query = f"""
+        SELECT COUNT(*) as total_count
         FROM {schema_name}.{table_name}
         WHERE payload IS NOT NULL
         """
 
-        params = []
+        count_params = []
         param_count = 0
 
         # Add date filters if provided
         if from_date:
             param_count += 1
-            query += f" AND payload->>'updatedate' >= ${param_count}"
-            params.append(from_date)
+            count_query += f" AND payload->>'updatedate' >= ${param_count}"
+            count_params.append(from_date)
 
         if to_date:
             param_count += 1
-            query += f" AND payload->>'updatedate' <= ${param_count}"
-            params.append(to_date)
+            count_query += f" AND payload->>'updatedate' <= ${param_count}"
+            count_params.append(to_date)
 
-        query += " ORDER BY payload->>'updatedate' DESC"
+        # Add related table filtering conditions
+        for table in related_tables:
+            if table == "texts":
+                param_count += 1
+                count_query += " AND (payload->'textVersions' IS NULL OR jsonb_typeof(payload->'textVersions') != 'array' OR jsonb_array_length(payload->'textVersions') = 0)"
+            # Add more table-specific conditions as needed
 
         if limit:
-            query += f" LIMIT {limit}"
+            count_query += f" LIMIT {limit}"
 
-        logger.info(f"Querying existing Phase 2 data from {schema_name}.{table_name}")
+        logger.info(
+            f"Counting items needing related table fetching from {schema_name}.{table_name}"
+        )
         logger.info(f"Related tables to fetch: {related_tables}")
 
-        # Get all existing Phase 2 data
+        # Get total count
         async with fetcher.db_pool.acquire() as conn:
-            rows = await conn.fetch(query, *params)
+            count_result = await conn.fetchval(count_query, *count_params)
 
-        if not rows:
-            logger.info("No existing Phase 2 data found")
+        total_items_needing_fetch = count_result or 0
+
+        if total_items_needing_fetch == 0:
+            logger.info("No items need related table fetching")
             return {
                 "status": "completed",
-                "items_processed": 0,
-                "related_tables_fetched": related_tables,
-                "message": "No existing Phase 2 data found",
+                "data_type": data_type,
+                "data_source": getattr(fetcher, "data_source", "unknown"),
+                "related_tables": related_tables,
+                "metrics": {
+                    "items_processed": 0,
+                    "related_items_fetched": 0,
+                    "errors": 0,
+                    "duration": 0,
+                    "workers_used": 0,
+                    "api_keys_used": len(self.api_keys),
+                    "items_needing_fetch": 0,
+                    "total_items_checked": 0,
+                },
+                "batch_size": batch_size,
+                "limit": limit,
+                "from_date": from_date,
+                "to_date": to_date,
             }
 
-        logger.info(f"Found {len(rows)} existing Phase 2 items")
+        logger.info(
+            f"Found {total_items_needing_fetch} items that need related table fetching"
+        )
 
-        # Process items in batches
-        processed_count = 0
-        error_count = 0
-        total_related_items = 0
+        # Create work queue for pagination-based processing
+        num_workers = (
+            len(self.api_keys) * 2
+        )  # Use 2x the number of API keys for workers
+        work_queue = AdaptiveWorkQueue(
+            total_records=total_items_needing_fetch,
+            initial_chunk_size=batch_size,
+            page_size=batch_size,
+        )
 
-        for i in range(0, len(rows), batch_size):
-            batch = rows[i : i + batch_size]
-            logger.info(
-                f"Processing batch {i // batch_size + 1}/{(len(rows) + batch_size - 1) // batch_size}"
-            )
+        logger.info(
+            f"Created work queue with {total_items_needing_fetch} items, {work_queue._work_queue.qsize()} chunks"
+        )
+        logger.info(f"Will use {num_workers} parallel workers")
 
-            for row in batch:
-                try:
-                    payload = row["payload"]
-                    source_doc_id = row["source_doc_id"]
+        # Create and start parallel workers
+        worker_tasks = []
+        worker_stats = [
+            {"processed": 0, "errors": 0, "related_items": 0}
+            for _ in range(num_workers)
+        ]
 
-                    logger.debug(f"Processing item {source_doc_id}")
+        # Start status reporting task
+        status_task = asyncio.create_task(self._report_status(work_queue, interval=30))
 
-                    # Fetch related data for this item
-                    related_data = await self._fetch_specific_related_tables_for_item(
-                        fetcher, payload, related_tables
+        # Start key pool maintenance task
+        key_pool_maintenance_task = asyncio.create_task(
+            self._maintain_key_pool(interval=60)
+        )
+
+        try:
+            # Create and start workers
+            for worker_id in range(num_workers):
+                task = asyncio.create_task(
+                    self._process_related_tables_worker(
+                        worker_id=f"related_worker_{worker_id}",
+                        fetcher=fetcher,
+                        work_queue=work_queue,
+                        related_tables=related_tables,
+                        worker_stats=worker_stats[worker_id],
+                        optimized_storage=optimized_storage,
+                        data_type=data_type,
                     )
+                )
+                worker_tasks.append(task)
 
-                    if related_data:
-                        # Store the related data using optimized storage if available
-                        if optimized_storage:
-                            await optimized_storage.store_phase_3_data(
-                                fetcher.get_default_schema(),
-                                data_type,
-                                related_data,
-                                source_doc_id,
-                            )
-                        else:
-                            # Fallback to direct storage
-                            await fetcher.store_phase_3_data(
-                                related_data, source_doc_id
-                            )
+            # Wait for all workers to complete
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
 
-                        processed_count += 1
-                        total_related_items += len(related_data)
-                        logger.debug(f"Stored related data for {source_doc_id}")
-                    else:
-                        logger.debug(f"No related data found for {source_doc_id}")
+            # Cancel background tasks
+            status_task.cancel()
+            key_pool_maintenance_task.cancel()
 
-                except Exception as e:
-                    logger.error(
-                        f"Error processing item {row.get('source_doc_id', 'unknown')}: {e}"
-                    )
-                    error_count += 1
-                    continue
+        except Exception as e:
+            logger.error(f"Error in parallel processing: {e}")
+            # Cancel all tasks
+            for task in worker_tasks:
+                task.cancel()
+            status_task.cancel()
+            key_pool_maintenance_task.cancel()
 
         # Stop storage manager and flush remaining data
         if storage_manager:
@@ -1167,12 +1202,16 @@ class OptimizedParallelProcessor:
             except Exception as e:
                 logger.error(f"Error stopping storage manager: {e}")
 
+        # Calculate final statistics
+        total_processed = sum(stats["processed"] for stats in worker_stats)
+        total_errors = sum(stats["errors"] for stats in worker_stats)
+        total_related_items = sum(stats["related_items"] for stats in worker_stats)
         duration = (datetime.now(UTC) - start_time).total_seconds()
 
-        logger.info(f"Successfully processed {processed_count} items")
+        logger.info(f"Successfully processed {total_processed} items")
         logger.info(f"Fetched {total_related_items} related items")
-        if error_count > 0:
-            logger.warning(f"Encountered {error_count} errors")
+        if total_errors > 0:
+            logger.warning(f"Encountered {total_errors} errors")
 
         return {
             "status": "completed",
@@ -1180,10 +1219,14 @@ class OptimizedParallelProcessor:
             "data_source": getattr(fetcher, "data_source", "unknown"),
             "related_tables": related_tables,
             "metrics": {
-                "items_processed": processed_count,
+                "items_processed": total_processed,
                 "related_items_fetched": total_related_items,
-                "errors": error_count,
+                "errors": total_errors,
                 "duration": duration,
+                "workers_used": num_workers,
+                "api_keys_used": len(self.api_keys),
+                "items_needing_fetch": total_items_needing_fetch,
+                "total_items_checked": total_items_needing_fetch,
             },
             "batch_size": batch_size,
             "limit": limit,
@@ -1191,10 +1234,168 @@ class OptimizedParallelProcessor:
             "to_date": to_date,
         }
 
-    async def _fetch_specific_related_tables_for_item(
-        self, fetcher, detailed_data: dict, related_tables: list[str]
+    async def _process_related_tables_worker(
+        self,
+        worker_id: str,
+        fetcher,
+        work_queue: AdaptiveWorkQueue,
+        related_tables: list[str],
+        worker_stats: dict,
+        optimized_storage,
+        data_type: str,
+    ):
+        """Worker function for processing related tables in parallel using pagination."""
+        logger.info(f"Worker {worker_id} started")
+
+        # Use the shared key pool
+        key_pool = self.key_pool
+
+        try:
+            while True:
+                # Get next chunk of work (page)
+                chunk = await work_queue.get_work(worker_id)
+                if chunk is None:
+                    logger.info(f"Worker {worker_id} finished - no more work")
+                    break
+
+                chunk_id = chunk.chunk_id
+                start_offset = chunk.start_offset
+                end_offset = chunk.end_offset
+                page_size = chunk.page_size
+
+                logger.info(
+                    f"Worker {worker_id} processing chunk {chunk_id} (offset: {start_offset}, limit: {end_offset - start_offset})"
+                )
+
+                # Query the database for this page of items that need related table fetching
+                schema_name = fetcher.get_default_schema()
+                table_name = f"{data_type}_raw"
+
+                # Build query to get items for this page
+                query = f"""
+                SELECT
+                    payload,
+                    source_doc_id
+                FROM {schema_name}.{table_name}
+                WHERE payload IS NOT NULL
+                """
+
+                params = []
+                param_count = 0
+
+                # Add date filters if provided
+                if hasattr(fetcher, "from_date") and fetcher.from_date:
+                    param_count += 1
+                    query += f" AND payload->>'updatedate' >= ${param_count}"
+                    params.append(fetcher.from_date)
+
+                if hasattr(fetcher, "to_date") and fetcher.to_date:
+                    param_count += 1
+                    query += f" AND payload->>'updatedate' <= ${param_count}"
+                    params.append(fetcher.to_date)
+
+                # Add related table filtering conditions
+                for table in related_tables:
+                    if table == "texts":
+                        param_count += 1
+                        query += " AND (payload->'textVersions' IS NULL OR jsonb_typeof(payload->'textVersions') != 'array' OR jsonb_array_length(payload->'textVersions') = 0)"
+                    # Add more table-specific conditions as needed
+
+                query += " ORDER BY payload->>'updatedate' DESC"
+                query += f" LIMIT {end_offset - start_offset} OFFSET {start_offset}"
+
+                # Get items for this page
+                async with fetcher.db_pool.acquire() as conn:
+                    rows = await conn.fetch(query, *params)
+
+                if not rows:
+                    logger.info(
+                        f"Worker {worker_id}: No items found for chunk {chunk_id}"
+                    )
+                    await work_queue.complete_work(worker_id, chunk_id, success=True)
+                    continue
+
+                logger.info(
+                    f"Worker {worker_id}: Processing {len(rows)} items from chunk {chunk_id}"
+                )
+
+                # Process each item in the chunk
+                for row in rows:
+                    try:
+                        payload = row["payload"]
+                        source_doc_id = row["source_doc_id"]
+
+                        # Get API key for this request
+                        pooled_key = await self._acquire_api_key_with_smart_backoff(
+                            worker_id, key_pool, 1, chunk, 0
+                        )
+
+                        if not pooled_key:
+                            logger.warning(
+                                f"Worker {worker_id} could not acquire API key, skipping item"
+                            )
+                            continue
+
+                        # Create client with this API key
+                        client = self.client_class(api_keys=[pooled_key.key])
+
+                        # Fetch related data for this item
+                        related_data = await self._fetch_specific_related_tables_for_item_with_client(
+                            fetcher, payload, related_tables, client
+                        )
+
+                        if related_data:
+                            # Store the related data using optimized storage if available
+                            if optimized_storage:
+                                await optimized_storage.store_phase_3_data(
+                                    fetcher.get_default_schema(),
+                                    data_type,
+                                    related_data,
+                                    source_doc_id,
+                                )
+                            else:
+                                # Fallback to direct storage
+                                await fetcher.store_phase_3_data(
+                                    related_data, source_doc_id
+                                )
+
+                            worker_stats["processed"] += 1
+                            worker_stats["related_items"] += len(related_data)
+                            logger.debug(
+                                f"Worker {worker_id} stored related data for {source_doc_id}"
+                            )
+                        else:
+                            logger.debug(
+                                f"Worker {worker_id} no related data found for {source_doc_id}"
+                            )
+
+                        # Return API key to pool
+                        await key_pool.checkin_key(pooled_key.key, 1)
+
+                    except Exception as e:
+                        logger.error(
+                            f"Worker {worker_id} error processing item {source_doc_id}: {e}"
+                        )
+                        worker_stats["errors"] += 1
+                        # Return API key to pool even on error
+                        if "pooled_key" in locals():
+                            await key_pool.checkin_key(pooled_key.key, 1)
+                        continue
+
+                # Mark chunk as completed
+                await work_queue.complete_work(worker_id, chunk_id, success=True)
+
+        except Exception as e:
+            logger.error(f"Worker {worker_id} encountered fatal error: {e}")
+        finally:
+            logger.info(
+                f"Worker {worker_id} completed. Processed: {worker_stats['processed']}, Errors: {worker_stats['errors']}"
+            )
+
+    async def _fetch_specific_related_tables_for_item_with_client(
+        self, fetcher, detailed_data: dict, related_tables: list[str], client
     ) -> list[dict]:
-        """Fetch only the specified related tables for a single item."""
+        """Fetch only the specified related tables for a single item using a specific client."""
         related_data = []
 
         # Ensure detailed_data is a dictionary (parse JSON if it's a string)
@@ -1231,8 +1432,8 @@ class OptimizedParallelProcessor:
                             f"Calling {method_name} for {fetcher.data_type_name}"
                         )
 
-                        # Call the method with detailed_data and client
-                        result = await method(detailed_data, fetcher.client)
+                        # Call the method with detailed_data and the specific client
+                        result = await method(detailed_data, client)
 
                         if result:
                             # Extract item ID for the parent record

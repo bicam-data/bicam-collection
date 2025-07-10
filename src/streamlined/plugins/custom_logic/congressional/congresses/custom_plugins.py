@@ -14,7 +14,7 @@ import re
 from typing import Any
 
 # Import the base class that provides shared functionality
-from ....base import CongressionalBaseCleanerLogic, CongressionalBaseFetcherLogic
+from ....base import BaseCleanerLogic, CongressionalBaseFetcherLogic
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class CongressesFetcherLogic(CongressionalBaseFetcherLogic):
             return "ID_ERROR"
 
 
-class CongressesCleanerLogic(CongressionalBaseCleanerLogic):
+class CongressesCleanerLogic(BaseCleanerLogic):
     """
     Congresses-specific cleaner logic extracted from CongressesCleaner class.
     Contains all the custom cleaning methods for congresses data.

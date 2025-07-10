@@ -16,6 +16,10 @@ try:
 except ImportError:
     load_dotenv = None
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DatabaseConfig:
@@ -63,15 +67,30 @@ class APIConfig:
             # Try to load from environment variables
             congressional_keys = os.getenv("CONGRESSIONAL_API_KEY")
             if congressional_keys:
+                logger.info(
+                    f"Loading congressional API keys from environment: {congressional_keys[:20]}..."
+                )
                 self.keys.extend(
                     [k.strip() for k in congressional_keys.split(",") if k.strip()]
                 )
+                logger.info(f"Loaded {len(self.keys)} congressional API keys")
 
             govinfo_keys = os.getenv("GOVINFO_API_KEY")
             if govinfo_keys:
+                logger.info(
+                    f"Loading govinfo API keys from environment: {govinfo_keys[:20]}..."
+                )
                 self.keys.extend(
                     [k.strip() for k in govinfo_keys.split(",") if k.strip()]
                 )
+                logger.info(f"Loaded {len(self.keys)} govinfo API keys")
+
+        # Debug logging
+        logger.info(f"APIConfig initialized with {len(self.keys)} total keys")
+        if self.keys:
+            logger.info(f"First key: {self.keys[0][:10]}...")
+            logger.info(f"Keys type: {type(self.keys)}")
+            logger.info(f"Keys content: {[k[:10] + '...' for k in self.keys[:3]]}")
 
 
 @dataclass
@@ -289,3 +308,54 @@ class StreamlinedConfig:
                 "use_dynamic_pool": self.infrastructure.use_dynamic_pool,
             },
         }
+
+
+def get_config() -> dict[str, Any]:
+    """Get configuration as a dictionary with proper API key handling."""
+    config = StreamlinedConfig.from_env()
+
+    # Ensure API keys are properly handled as a list
+    api_keys = config.api.keys
+
+    # If api_keys is a string, split it into a list
+    if isinstance(api_keys, str):
+        api_keys = [k.strip() for k in api_keys.split(",") if k.strip()]
+    elif not isinstance(api_keys, list):
+        api_keys = []
+
+    return {
+        "congressional_api_keys": api_keys,
+        "govinfo_api_keys": [],  # Add if needed
+        "database": {
+            "host": config.database.host,
+            "port": config.database.port,
+            "database": config.database.database,
+            "username": config.database.username,
+            "password": config.database.password,
+        },
+        "api": {
+            "rate_limit_per_second": config.api.rate_limit_per_second,
+            "max_retries": config.api.max_retries,
+            "timeout": config.api.timeout,
+        },
+        "processing": {
+            "batch_size": config.processing.batch_size,
+            "max_workers": config.processing.max_workers,
+            "chunk_size": config.processing.chunk_size,
+            "page_size": config.processing.page_size,
+            "max_concurrent": config.processing.max_concurrent,
+        },
+        "parallelization": {
+            "enabled": config.parallelization.enabled,
+            "fetcher": config.parallelization.fetcher,
+            "normalizer": config.parallelization.normalizer,
+            "cleaner": config.parallelization.cleaner,
+        },
+        "infrastructure": {
+            "checkpoint_db_path": config.infrastructure.checkpoint_db_path,
+            "use_postgres_runs": config.infrastructure.use_postgres_runs,
+            "use_postgres_checkpoints": config.infrastructure.use_postgres_checkpoints,
+            "use_optimized_storage": config.infrastructure.use_optimized_storage,
+            "use_dynamic_pool": config.infrastructure.use_dynamic_pool,
+        },
+    }

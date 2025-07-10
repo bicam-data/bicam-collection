@@ -172,8 +172,38 @@ class BaseAPIClient(ABC):
             # Rotate API key on rate limit
             self._rotate_api_key()
 
-            # Wait before retrying
-            await asyncio.sleep(min(2**self._recent_rate_limits, 60))
+            # Check for Retry-After header
+            retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    # Retry-After can be either seconds or HTTP date
+                    if retry_after.isdigit():
+                        wait_seconds = int(retry_after)
+                    else:
+                        # Parse HTTP date format
+                        from email.utils import parsedate_to_datetime
+
+                        retry_time = parsedate_to_datetime(retry_after)
+                        wait_seconds = max(
+                            0, (retry_time - datetime.now(UTC)).total_seconds()
+                        )
+
+                    logger.info(f"API requested wait time: {wait_seconds} seconds")
+                    await asyncio.sleep(wait_seconds)
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Failed to parse Retry-After header '{retry_after}': {e}"
+                    )
+                    # Fall back to exponential backoff
+                    await asyncio.sleep(min(2**self._recent_rate_limits, 60))
+            else:
+                # No Retry-After header, use exponential backoff
+                wait_time = min(2**self._recent_rate_limits, 60)
+                logger.info(
+                    f"No Retry-After header, using exponential backoff: {wait_time} seconds"
+                )
+                await asyncio.sleep(wait_time)
+
             return True
         return False
 
@@ -214,7 +244,6 @@ class BaseAPIClient(ABC):
 
     def _get_last_processed_dates_table_name(self) -> str:  # noqa: B027
         """Get the appropriate last processed dates table name based on client type."""
-
 
     async def access_last_processed_count(self, data_type: str) -> int | None:
         """Get the last processed count for a specific data type."""

@@ -36,6 +36,8 @@ class BillCollectionsCleaner:
     Contains all the custom cleaning methods for bill collections data.
     """
 
+    #TODO: no granules do everuthing
+
     def __init__(
         self,
         data_type_name: str = "billcollections",
@@ -151,56 +153,128 @@ class BillCollectionsCleaner:
                 logger.error(f"Error streaming bills_texts with formats: {e}")
                 raise
 
-    async def _clean_bills_singular(
+    async def _clean_billcollections_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """
         Custom cleaning logic for individual bills records.
+        STAGING COLUMNS:
+        - pages                                text,
+        - title                                text,
+        - branch                               text,
+        - session                              text,
+        - billtype                             text,
+        - category                             text,
+        - congress                             text,
+        - docclass                             text,
+        - download_pdflink                     text,
+        - download_txtlink                     text,
+        - download_ziplink                     text,
+        - download_modslink                    text,
+        - download_premislink                  text,
+        - isprivate                            text,
+        - packageid                            text,
+        - publisher                            text,
+        - billnumber                           text,
+        - dateissued                           text,
+        - billversion                          text,
+        - detailslink                          text,
+        - relatedlink                          text,
+        - lastmodified                         text,
+        - originchamber                        text,
+        - collectioncode                       text,
+        - collectionname                       text,
+        - currentchamber                       text,
+        - isappropriation                      text,
+        - otheridentifier_stock_number         text,
+        - otheridentifier_child_ils_title      text,
+        - otheridentifier_migrated_doc_id      text,
+        - otheridentifier_parent_ils_title     text,
+        - otheridentifier_child_ils_system_id  text,
+        - otheridentifier_parent_ils_system_id text,
+        - sudocclassnumber                     text,
+        - governmentauthor1                    text,
+        - governmentauthor2                    text,
+        - package_id                           text,
+        - processed_at                         text,
+        - source_doc_id                        text,
+        - billversionextended                  text,
+        - download_xmllink                     text,
+        - related_billstatuslink               text,
+        - download_uslmlink                   text,
+        - otheridentifier_ils_system_id        text
+
+        FINAL COLUMNS:
+        - package_id TEXT PRIMARY KEY,
+        - bill_id TEXT,
+        - bill_version TEXT,
+        - origin_chamber TEXT, -- needs to be lowered
+        - current_chamber TEXT, -- needs to be lowered
+        - is_appropriation BOOLEAN,
+        - is_private BOOLEAN,
+        - pages INTEGER,
+        - issued_at DATE,
+        - government_author1 TEXT,
+        - government_author2 TEXT,
+        - publisher TEXT,
+        - collection_code TEXT,
+        - stock_number TEXT,
+        - su_doc_class_number TEXT,
+        - migrated_doc_id TEXT,
+        - child_ils_system_id TEXT,
+        - parent_ils_system_id TEXT,
+        - mods_url TEXT,
+        - pdf_url TEXT,
+        - premis_url TEXT,
+        - txt_url TEXT,
+        - xml_url TEXT,
+        - zip_url TEXT,
+        - last_modified TIMESTAMP WITH TIME ZONE
         """
         cleaned = record_data.copy()
 
+        # if 'CPRT' not in packageid or if "JCS" in packageid, return None
+        bill_type = cleaned.get("billtype", None)
+        bill_number = cleaned.get("billnumber", None)
+        congress = cleaned.get("congress", None)
+
+        if all([bill_type, bill_number, congress]):
+            bill_id = f"{bill_type}{bill_number}-{congress}"
+        else:
+            raise ValueError(f"Invalid bill_id format: {bill_id}")
+
         # Apply bills-specific cleaning logic
         filtered_cleaned = {
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "bill_type": str(cleaned.get("type", None).lower()),
-            "bill_number": float(cleaned.get("number", None)),
-            "congress": self.safe_int(cleaned.get("congress", None)),
-            "title": str(cleaned.get("title", None)),
+            "package_id": str(cleaned.get("packageid", "ID_ERROR")),
+            "bill_id": str(bill_id),
+            "latest_bill_version": str(cleaned.get("billversion", None)),
             "origin_chamber": str(
                 self.standardize_chamber(cleaned.get("originchamber", None))
             ),
-            "policy_area": str(cleaned.get("policyarea_name", None)),
-            "is_law": None,  # added via postprocessing
-            "introduced_at": self.standardize_date(cleaned.get("introduceddate", None)),
-            "constitutional_authority_statement": self.clean_long_text(
-                cleaned.get("constitutionalauthoritystatementtext", None)
+            "current_chamber": str(
+                self.standardize_chamber(cleaned.get("currentchamber", None))
             ),
-            "actions_count": self.safe_int(cleaned.get("actions_count", 0), 0),
-            "amendments_count": self.safe_int(cleaned.get("amendments_count", 0), 0),
-            "committees_count": self.safe_int(cleaned.get("committees_count", 0), 0),
-            "cosponsors_count": self.safe_int(cleaned.get("cosponsors_count", 0), 0),
-            "cosponsors_withdrawn_count": (
-                self.safe_int(
-                    cleaned.get("cosponsors_countincludingwithdrawncosponsors", 0), 0
-                )
-                - self.safe_int(cleaned.get("cosponsors_count", 0), 0)
-            ),
-            "relatedbills_count": self.safe_int(
-                cleaned.get("relatedbills_count", 0), 0
-            ),
-            "subjects_count": self.safe_int(cleaned.get("subjects_count", 0), 0),
-            "summaries_count": self.safe_int(cleaned.get("summaries_count", 0), 0),
-            "texts_count": self.safe_int(cleaned.get("textversions_count", 0), 0),
-            "titles_count": self.safe_int(cleaned.get("titles_count", 0), 0),
-            "updated_at": self.standardize_date(cleaned.get("updatedate", None)),
+            "is_appropriation": bool(cleaned.get("isappropriation", None)),
+            "is_private": bool(cleaned.get("isprivate", None)),
+            "pages": self.safe_int(cleaned.get("pages", None)),
+            "issued_at": self.standardize_date(cleaned.get("dateissued", None)),
+            "government_author1": str(cleaned.get("governmentauthor1", None)),
+            "government_author2": str(cleaned.get("governmentauthor2", None)),
+            "publisher": str(cleaned.get("publisher", None)),
+            "collection_code": str(cleaned.get("collectioncode", None)),
+            "stock_number": str(cleaned.get("otheridentifier_stock_number", None)),
+            "su_doc_class_number": str(cleaned.get("sudocclassnumber", None)),
+            "migrated_doc_id": str(cleaned.get("otheridentifier_migrated_doc_id", None)),
+            "child_ils_system_id": str(cleaned.get("otheridentifier_child_ils_system_id", None)),
+            "parent_ils_system_id": str(cleaned.get("otheridentifier_parent_ils_system_id", None)),
+            "mods_url": str(cleaned.get("download_modslink", None)),
+            "pdf_url": str(cleaned.get("download_pdflink", None)),
+            "premis_url": str(cleaned.get("download_premislink", None)),
+            "txt_url": str(cleaned.get("download_txtlink", None)),
+            "xml_url": str(cleaned.get("download_xmllink", None)),
+            "zip_url": str(cleaned.get("download_ziplink", None)),
+            "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
         }
-
-        # Validate bill_id format
-        if not re.match(
-            r"^(hr|hres|sres|s|hjres|hconres|sjres|sconres)\d{1,4}(\.5)?-\d{1,3}$",
-            filtered_cleaned["bill_id"],
-        ):
-            raise ValueError(f"Invalid bill_id format: {filtered_cleaned['bill_id']}")
 
         return filtered_cleaned
 

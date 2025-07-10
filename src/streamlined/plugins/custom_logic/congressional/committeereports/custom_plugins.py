@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 # Import the base class that provides shared functionality
-from ....base import CongressionalBaseCleanerLogic, CongressionalBaseFetcherLogic
+from ....base import BaseCleanerLogic, CongressionalBaseFetcherLogic
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class CommitteereportsFetcherLogic(CongressionalBaseFetcherLogic):
         )
 
 
-class CommitteereportsCleanerLogic(CongressionalBaseCleanerLogic):
+class CommitteereportsCleanerLogic(BaseCleanerLogic):
     """
     Committeereports-specific cleaner logic extracted from CommitteereportsCleaner class.
     Contains all the custom cleaning methods for committeereports data.

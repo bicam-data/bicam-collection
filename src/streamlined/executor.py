@@ -326,7 +326,7 @@ class StreamlinedExecutor:
             Dictionary containing execution results and metrics
         """
         logger.info(
-            f"Starting related tables fetch for {data_type} with tables: {related_tables}"
+            f"Starting PARALLEL related tables fetch for {data_type} with tables: {related_tables}"
         )
 
         # Get the data source for this data type
@@ -348,7 +348,10 @@ class StreamlinedExecutor:
                 self.coordinator, data_type_name=data_type, data_source=data_source
             )
 
-            # Create OptimizedParallelProcessor
+            # Create OptimizedParallelProcessor for parallel execution
+            logger.info(
+                f"Creating OptimizedParallelProcessor with {len(fetcher.api_keys)} API keys"
+            )
             processor = OptimizedParallelProcessor(
                 api_keys=fetcher.api_keys,
                 client_class=fetcher.client.__class__ if fetcher.client else None,
