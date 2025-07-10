@@ -955,3 +955,304 @@ class OptimizedParallelProcessor:
                 f"Could not get last processed count for {fetcher.data_type_name}: {e}"
             )
             return 0
+
+    async def fetch_related_tables_from_existing_data(
+        self,
+        fetcher,
+        data_type: str,
+        related_tables: list[str],
+        batch_size: int = 100,
+        limit: int = None,
+        from_date: str = None,
+        to_date: str = None,
+    ) -> dict[str, Any]:
+        """
+        Fetch specific related tables from existing Phase 2 data using optimized storage.
+
+        This method:
+        1. Queries the database for existing Phase 2 data
+        2. For each item, fetches only the specified related tables
+        3. Uses the full optimized storage infrastructure
+        4. Provides proper batching and resource management
+
+        Args:
+            fetcher: The StreamlinedFetcher instance
+            data_type: The data type to process
+            related_tables: List of related table names to fetch (e.g., ['texts', 'actions'])
+            batch_size: Number of items to process in each batch
+            limit: Maximum number of items to process (optional)
+            from_date: Start date filter (optional)
+            to_date: End date filter (optional)
+
+        Returns:
+            Dictionary with processing results and metrics
+        """
+        start_time = datetime.now(UTC)
+
+        logger.info("=" * 60)
+        logger.info(f"FETCHING RELATED TABLES FROM EXISTING DATA")
+        logger.info(f"Data Type: {data_type}")
+        logger.info(f"Related Tables: {related_tables}")
+        logger.info("=" * 60)
+
+        if not fetcher.db_pool:
+            logger.error("No database pool available")
+            return {"error": "No database pool available"}
+
+        if not fetcher._plugin:
+            logger.error("No plugin available for fetching related data")
+            return {"error": "No plugin available"}
+
+        # Ensure we have a client for API calls
+        if not fetcher.client:
+            logger.info("No client available, creating one...")
+            try:
+                if fetcher.resource_coordinator:
+                    clients = await fetcher.resource_coordinator.get_api_clients(
+                        data_type
+                    )
+                    if clients:
+                        fetcher.client = clients[0]
+                        logger.info("Successfully created API client")
+                    else:
+                        logger.error(
+                            "Failed to create API client - no clients returned"
+                        )
+                        return {"error": "Failed to create API client"}
+                else:
+                    logger.error("No resource coordinator available to create client")
+                    return {"error": "No resource coordinator available"}
+            except Exception as e:
+                logger.error(f"Failed to create API client: {e}")
+                return {"error": f"Failed to create API client: {e}"}
+
+        # Initialize storage manager
+        storage_manager = None
+        try:
+            if fetcher.resource_coordinator:
+                storage_manager = (
+                    await fetcher.resource_coordinator.get_storage_manager_instance()
+                )
+                if storage_manager:
+                    logger.info("Starting storage manager background workers...")
+                    await storage_manager.start()
+                    logger.info("Storage manager started successfully")
+                else:
+                    logger.warning("No storage manager available, using direct storage")
+            else:
+                logger.warning(
+                    "No resource coordinator available, using direct storage"
+                )
+        except Exception as e:
+            logger.error(f"Failed to initialize storage manager: {e}")
+            storage_manager = None
+
+        # Create optimized storage adapter if storage manager is available
+        optimized_storage = None
+        if storage_manager:
+            id_field = getattr(fetcher, "id_field", "parent_id")
+            optimized_storage = OptimizedFetcherStorage(
+                storage_manager, id_field, fetcher
+            )
+            logger.info("Using optimized storage for related table fetching")
+        else:
+            logger.info("Using direct storage for related table fetching")
+
+        # Get schema name
+        schema_name = fetcher.get_default_schema()
+        table_name = f"{data_type}_raw"
+
+        # Build query to get existing Phase 2 data
+        query = f"""
+        SELECT 
+            payload,
+            source_doc_id
+        FROM {schema_name}.{table_name}
+        WHERE payload IS NOT NULL
+        """
+
+        params = []
+        param_count = 0
+
+        # Add date filters if provided
+        if from_date:
+            param_count += 1
+            query += f" AND payload->>'updatedate' >= ${param_count}"
+            params.append(from_date)
+
+        if to_date:
+            param_count += 1
+            query += f" AND payload->>'updatedate' <= ${param_count}"
+            params.append(to_date)
+
+        query += " ORDER BY payload->>'updatedate' DESC"
+
+        if limit:
+            query += f" LIMIT {limit}"
+
+        logger.info(f"Querying existing Phase 2 data from {schema_name}.{table_name}")
+        logger.info(f"Related tables to fetch: {related_tables}")
+
+        # Get all existing Phase 2 data
+        async with fetcher.db_pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        if not rows:
+            logger.info("No existing Phase 2 data found")
+            return {
+                "status": "completed",
+                "items_processed": 0,
+                "related_tables_fetched": related_tables,
+                "message": "No existing Phase 2 data found",
+            }
+
+        logger.info(f"Found {len(rows)} existing Phase 2 items")
+
+        # Process items in batches
+        processed_count = 0
+        error_count = 0
+        total_related_items = 0
+
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i : i + batch_size]
+            logger.info(
+                f"Processing batch {i // batch_size + 1}/{(len(rows) + batch_size - 1) // batch_size}"
+            )
+
+            for row in batch:
+                try:
+                    payload = row["payload"]
+                    source_doc_id = row["source_doc_id"]
+
+                    logger.debug(f"Processing item {source_doc_id}")
+
+                    # Fetch related data for this item
+                    related_data = await self._fetch_specific_related_tables_for_item(
+                        fetcher, payload, related_tables
+                    )
+
+                    if related_data:
+                        # Store the related data using optimized storage if available
+                        if optimized_storage:
+                            await optimized_storage.store_phase_3_data(
+                                fetcher.get_default_schema(),
+                                data_type,
+                                related_data,
+                                source_doc_id,
+                            )
+                        else:
+                            # Fallback to direct storage
+                            await fetcher.store_phase_3_data(
+                                related_data, source_doc_id
+                            )
+
+                        processed_count += 1
+                        total_related_items += len(related_data)
+                        logger.debug(f"Stored related data for {source_doc_id}")
+                    else:
+                        logger.debug(f"No related data found for {source_doc_id}")
+
+                except Exception as e:
+                    logger.error(
+                        f"Error processing item {row.get('source_doc_id', 'unknown')}: {e}"
+                    )
+                    error_count += 1
+                    continue
+
+        # Stop storage manager and flush remaining data
+        if storage_manager:
+            try:
+                logger.info("Stopping storage manager and flushing remaining data...")
+                await storage_manager.stop()
+                logger.info("Storage manager stopped and data flushed")
+            except Exception as e:
+                logger.error(f"Error stopping storage manager: {e}")
+
+        duration = (datetime.now(UTC) - start_time).total_seconds()
+
+        logger.info(f"Successfully processed {processed_count} items")
+        logger.info(f"Fetched {total_related_items} related items")
+        if error_count > 0:
+            logger.warning(f"Encountered {error_count} errors")
+
+        return {
+            "status": "completed",
+            "data_type": data_type,
+            "data_source": getattr(fetcher, "data_source", "unknown"),
+            "related_tables": related_tables,
+            "metrics": {
+                "items_processed": processed_count,
+                "related_items_fetched": total_related_items,
+                "errors": error_count,
+                "duration": duration,
+            },
+            "batch_size": batch_size,
+            "limit": limit,
+            "from_date": from_date,
+            "to_date": to_date,
+        }
+
+    async def _fetch_specific_related_tables_for_item(
+        self, fetcher, detailed_data: dict, related_tables: list[str]
+    ) -> list[dict]:
+        """Fetch only the specified related tables for a single item."""
+        related_data = []
+
+        # Ensure detailed_data is a dictionary (parse JSON if it's a string)
+        if isinstance(detailed_data, str):
+            try:
+                import json
+
+                detailed_data = json.loads(detailed_data)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse detailed_data JSON: {e}")
+                return []
+
+        if not isinstance(detailed_data, dict):
+            logger.error(f"detailed_data is not a dictionary: {type(detailed_data)}")
+            return []
+
+        # Get the custom logic plugin
+        custom_logic = fetcher._plugin._get_custom_logic_plugin(fetcher.data_type_name)
+        if not custom_logic:
+            logger.error(
+                f"No custom logic plugin available for {fetcher.data_type_name}"
+            )
+            return []
+
+        # Call only the requested related methods
+        for table in related_tables:
+            method_name = f"get_{fetcher.data_type_name}_{table}"
+
+            if hasattr(custom_logic, method_name):
+                try:
+                    method = getattr(custom_logic, method_name)
+                    if callable(method):
+                        logger.debug(
+                            f"Calling {method_name} for {fetcher.data_type_name}"
+                        )
+
+                        # Call the method with detailed_data and client
+                        result = await method(detailed_data, fetcher.client)
+
+                        if result:
+                            # Extract item ID for the parent record
+                            item_id = custom_logic.extract_item_id(detailed_data)
+                            related_data.append(
+                                {
+                                    "type": method_name,
+                                    f"{fetcher.data_type_name}_id": item_id,
+                                    "data": result,
+                                    "method": method_name,
+                                }
+                            )
+                            logger.debug(f"{method_name} returned {len(result)} items")
+                        else:
+                            logger.debug(f"{method_name} returned no data")
+
+                except Exception as e:
+                    logger.error(f"Error calling {method_name}: {e}")
+            else:
+                logger.warning(f"Method {method_name} not found in custom logic")
+
+        return related_data

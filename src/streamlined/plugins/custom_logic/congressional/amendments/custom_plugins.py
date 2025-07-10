@@ -38,7 +38,7 @@ class AmendmentsFetcherLogic(CongressionalBaseFetcherLogic):
     def __init__(self, data_type: str = "amendments"):
         super().__init__(data_type)
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized amendment ID from amendment data."""
         amendment_type = item_data.get("type", "").lower()
         number = item_data.get("number", "")
@@ -85,7 +85,7 @@ class AmendmentsFetcherLogic(CongressionalBaseFetcherLogic):
     ) -> list[dict[str, Any]]:
         """Get amendment text versions from textVersions URL in full amendment data."""
         return await self.get_generic_related_data(
-            full_amendment_data, related_table_name="texts", client=client
+            full_amendment_data, related_table_name="textVersions", client=client
         )
 
 

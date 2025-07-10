@@ -28,7 +28,7 @@ class CommitteemeetingsFetcherLogic(CongressionalBaseFetcherLogic):
     # REQUIRED ABSTRACT METHOD IMPLEMENTATIONS
     # =============================================================================
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized committe meeting ID from committe meeting data."""
         return item_data.get("eventId", "ID_ERROR")
 

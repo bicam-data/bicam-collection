@@ -35,7 +35,7 @@ class HearingsFetcherLogic(CongressionalBaseFetcherLogic):
     def __init__(self, data_type: str = "hearings"):
         super().__init__(data_type)
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized hearing ID from hearing data."""
         hearing_chamber = item_data.get("chamber")
         if hearing_chamber == "NoChamber":

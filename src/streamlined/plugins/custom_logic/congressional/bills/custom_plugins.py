@@ -36,7 +36,7 @@ class BillsFetcherLogic(CongressionalBaseFetcherLogic):
     def __init__(self, data_type: str = "bills"):
         super().__init__(data_type)
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized bill ID from bill data."""
         bill_type = item_data.get("type", "").lower()
         number = item_data.get("number", "").replace("½", ".5")
@@ -83,7 +83,7 @@ class BillsFetcherLogic(CongressionalBaseFetcherLogic):
     ) -> list[dict[str, Any]]:
         """Get bill text versions from textVersions URL in full bill data."""
         return await self.get_generic_related_data(
-            full_bill_data, related_table_name="texts", client=client
+            full_bill_data, related_table_name="textVersions", client=client
         )
 
     async def get_bills_summaries(

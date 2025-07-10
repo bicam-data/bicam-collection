@@ -219,6 +219,33 @@ Examples:
         "--max-retries", type=int, default=3, help="Maximum retry attempts (default: 3)"
     )
 
+    # Fetch related tables command
+    fetch_related_parser = subparsers.add_parser(
+        "fetch-related", help="Fetch related tables from existing Phase 2 data"
+    )
+    fetch_related_parser.add_argument(
+        "data_type", help="Data type to fetch related tables for"
+    )
+    fetch_related_parser.add_argument(
+        "--related-tables",
+        nargs="+",
+        required=True,
+        help="Related tables to fetch (e.g., texts actions cosponsors)",
+    )
+    fetch_related_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=100,
+        help="Batch size for processing (default: 100)",
+    )
+    fetch_related_parser.add_argument(
+        "--limit", type=int, help="Maximum number of items to process"
+    )
+    fetch_related_parser.add_argument(
+        "--from-date", help="Start date filter (YYYY-MM-DD)"
+    )
+    fetch_related_parser.add_argument("--to-date", help="End date filter (YYYY-MM-DD)")
+
     return parser
 
 
@@ -1143,6 +1170,71 @@ async def command_retry_failed(args) -> int:
         return 1
 
 
+async def command_fetch_related(args) -> int:
+    """Fetch related tables from existing Phase 2 data."""
+    try:
+        from .executor import StreamlinedExecutor
+        from .plugins.consolidated_registry import get_consolidated_registry
+        from .resources.coordinator import ResourceCoordinator
+
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"FETCHING RELATED TABLES for {args.data_type}")
+        logger.info(f"{'=' * 60}")
+
+        # Get the data source for this data type
+        registry = get_consolidated_registry()
+        data_source = registry.get_data_source(args.data_type)
+        logger.info(f"Data source for {args.data_type}: {data_source}")
+
+        # Initialize coordinator with the correct data source
+        coordinator = ResourceCoordinator(source=data_source)
+        await coordinator.initialize()
+
+        executor = StreamlinedExecutor(coordinator)
+
+        # Use the executor's method to fetch related tables
+        results = await executor.fetch_related_tables_from_existing_data(
+            data_type=args.data_type,
+            related_tables=args.related_tables,
+            batch_size=args.batch_size,
+            limit=args.limit,
+            from_date=args.from_date,
+            to_date=args.to_date,
+        )
+
+        # Display results
+        logger.info(f"\n{'=' * 60}")
+        logger.info("FETCH RESULTS")
+        logger.info(f"{'=' * 60}")
+
+        logger.info(f"Status: {results.get('status', 'unknown')}")
+        logger.info(f"Data Type: {results.get('data_type', 'unknown')}")
+        logger.info(f"Data Source: {results.get('data_source', 'unknown')}")
+        logger.info(f"Related Tables: {results.get('related_tables', [])}")
+
+        metrics = results.get("metrics", {})
+        logger.info(f"Items Processed: {metrics.get('items_processed', 0)}")
+        logger.info(f"Related Items Fetched: {metrics.get('related_items_fetched', 0)}")
+        logger.info(f"Duration: {metrics.get('duration', 0):.2f} seconds")
+        logger.info(f"Errors: {metrics.get('errors', 0)}")
+
+        if results.get("errors"):
+            logger.error("Errors encountered:")
+            for error in results["errors"]:
+                logger.error(f"  - {error}")
+
+        if results.get("status") == "completed":
+            logger.info("✅ Related tables fetch completed successfully")
+            return 0
+        else:
+            logger.error("❌ Related tables fetch failed")
+            return 1
+
+    except Exception as e:
+        logger.error(f"Failed to fetch related tables: {e}")
+        return 1
+
+
 async def main() -> int:
     """Main CLI entry point."""
     parser = create_parser()
@@ -1166,6 +1258,7 @@ async def main() -> int:
         "resume-from-checkpoint": command_resume_from_checkpoint,
         "checkpoint-stats": command_checkpoint_stats,
         "retry-failed": command_retry_failed,
+        "fetch-related": command_fetch_related,
     }
 
     handler = command_handlers.get(args.command)

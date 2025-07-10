@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -1100,9 +1101,9 @@ class StreamlinedNormalizer:
         async with db_pool.acquire() as conn:
             # Get all tables in the staging schema that start with the data_type
             query = """
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = $1 
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = $1
             AND table_name LIKE $2
             AND table_name NOT LIKE '%_raw'
             ORDER BY table_name
@@ -1506,7 +1507,32 @@ class StreamlinedNormalizer:
                 try:
                     # Parse the list
                     if isinstance(list_data, str):
-                        items = json.loads(list_data)
+                        # Try to clean up common JSON issues before parsing
+                        cleaned_data = list_data
+
+                        # Handle double-escaped quotes (common issue)
+                        if '\\"' in cleaned_data:
+                            # Replace double-escaped quotes with single-escaped quotes
+                            cleaned_data = cleaned_data.replace('\\"', '"')
+
+                        # Handle other common JSON issues
+                        if cleaned_data.startswith('"') and cleaned_data.endswith('"'):
+                            # Remove outer quotes if present
+                            cleaned_data = cleaned_data[1:-1]
+
+                        try:
+                            items = json.loads(cleaned_data)
+                        except json.JSONDecodeError:
+                            # If still fails, try with more aggressive cleaning
+                            logger.warning(
+                                f"Initial JSON parsing failed for {table_name}.{column_name}, trying aggressive cleaning"
+                            )
+
+                            # Remove any trailing commas before closing brackets/braces
+                            cleaned_data = re.sub(r",(\s*[}\]])", r"\1", cleaned_data)
+
+                            # Try parsing again
+                            items = json.loads(cleaned_data)
                     else:
                         items = list_data
 
@@ -1541,6 +1567,58 @@ class StreamlinedNormalizer:
                     logger.error(
                         f"JSON decode error extracting list from {table_name}.{column_name}: {e}"
                     )
+
+                    # Try one more aggressive cleaning attempt
+                    if isinstance(list_data, str):
+                        try:
+                            # Last resort: try to extract valid JSON using rege
+
+                            # Find JSON array pattern
+                            json_match = re.search(r"\[.*\]", list_data)
+                            if json_match:
+                                potential_json = json_match.group(0)
+                                # Clean up common issues
+                                potential_json = potential_json.replace('\\"', '"')
+                                potential_json = re.sub(
+                                    r",(\s*[}\]])", r"\1", potential_json
+                                )
+                                items = json.loads(potential_json)
+
+                                logger.info(
+                                    f"Successfully parsed JSON using regex fallback for {table_name}.{column_name}"
+                                )
+
+                                # Continue with processing
+                                if isinstance(items, list):
+                                    # Create records for each list item
+                                    for idx, item in enumerate(items):
+                                        if isinstance(item, dict):
+                                            # Flatten the item
+                                            flat_item = self._flatten_dict(item)
+                                        else:
+                                            # Simple value
+                                            flat_item = {"value": str(item)}
+
+                                        # Add hierarchical IDs
+                                        # Use the deterministic ID of the parent row as the foreign key
+                                        flat_item = self._add_hierarchical_ids(
+                                            flat_item,
+                                            target_table,
+                                            parent_id,
+                                            table_name,
+                                            config=config,
+                                        )
+                                        flat_item["list_index"] = idx
+
+                                        batch_records.append(flat_item)
+                                        stats["records"] += 1
+
+                                    # Skip the error logging and continue
+                                    continue
+                        except Exception:
+                            # If regex fallback also fails, log the error
+                            pass
+
                     logger.error(
                         f"Problematic row - parent_id: {parent_id}, list_data type: {type(list_data)}, "
                         f"list_data length: {len(str(list_data)) if list_data else 0}, "
@@ -1582,7 +1660,13 @@ class StreamlinedNormalizer:
                 flattened.update(self._flatten_dict(value, new_key))
             elif isinstance(value, list):
                 # Store lists as JSON for later extraction
-                flattened[new_key] = json.dumps(value) if value else None
+                try:
+                    flattened[new_key] = json.dumps(value) if value else None
+                except (TypeError, ValueError) as e:
+                    # Handle cases where list contains non-serializable objects
+                    logger.warning(f"Failed to serialize list for key {new_key}: {e}")
+                    # Fallback: convert to string representation
+                    flattened[new_key] = str(value) if value else None
             else:
                 if value is None:
                     flattened[new_key] = None

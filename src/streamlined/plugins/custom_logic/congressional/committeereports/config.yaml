@@ -54,7 +54,7 @@
 
   api:
     api_endpoint: text
-    list_key: textVersions
+    list_key: text
     page_size: 250
     retry_attempts: 3
 

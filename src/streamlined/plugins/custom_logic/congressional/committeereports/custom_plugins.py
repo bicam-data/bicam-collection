@@ -35,10 +35,11 @@ class CommitteereportsFetcherLogic(CongressionalBaseFetcherLogic):
         super().__init__(data_type)
 
         # =============================================================================
+
     # REQUIRED ABSTRACT METHOD IMPLEMENTATIONS
     # =============================================================================
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized committeereport ID from committeereport data."""
         item_data = item_data[0] if isinstance(item_data, list) else item_data
         report_number = item_data.get("number")
@@ -70,7 +71,6 @@ class CommitteereportsFetcherLogic(CongressionalBaseFetcherLogic):
         return await self.get_generic_related_data(
             full_committeereport_data, related_table_name="texts", client=client
         )
-
 
 
 class CommitteereportsCleanerLogic(CongressionalBaseCleanerLogic):
@@ -106,47 +106,47 @@ class CommitteereportsCleanerLogic(CongressionalBaseCleanerLogic):
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """
-        Custom cleaning logic for individual committeereports records.
+            Custom cleaning logic for individual committeereports records.
 
-        FINAL COLUMNS:
-        - report_id TEXT PRIMARY KEY,
-        - citation TEXT,
-        - report_type TEXT,
-        - report_number INTEGER,
-        - report_part INTEGER,
-        - congress INTEGER,
-        - session INTEGER,
-        - title TEXT,
-        - chamber TEXT,
-        - is_conference_report BOOLEAN,
-        - issued_at TIMESTAMP WITH TIME ZONE,
-        - texts_count INTEGER,
-        - updated_at TIMESTAMP WITH TIME ZONE
+            FINAL COLUMNS:
+            - report_id TEXT PRIMARY KEY,
+            - citation TEXT,
+            - report_type TEXT,
+            - report_number INTEGER,
+            - report_part INTEGER,
+            - congress INTEGER,
+            - session INTEGER,
+            - title TEXT,
+            - chamber TEXT,
+            - is_conference_report BOOLEAN,
+            - issued_at TIMESTAMP WITH TIME ZONE,
+            - texts_count INTEGER,
+            - updated_at TIMESTAMP WITH TIME ZONE
 
-        STAGING COLUMNS:
-        Based on Congressional API committee structure, typically includes:
-        - part               text,
-        - text_url           text,
-        - text_count         text,
-        - type               text,
-        - title              text,
-        - number             text,
-        - chamber            text,
-        - batch_id           text,
-        - citation           text,
-        - congress           text,
-        - issuedate          text,
-        - report_id          text
-        - reporttype         text,
-    -   updatedate         text,
-        - sessionnumber      text,
-        - isconferencereport text,
+            STAGING COLUMNS:
+            Based on Congressional API committee structure, typically includes:
+            - part               text,
+            - text_url           text,
+            - text_count         text,
+            - type               text,
+            - title              text,
+            - number             text,
+            - chamber            text,
+            - batch_id           text,
+            - citation           text,
+            - congress           text,
+            - issuedate          text,
+            - report_id          text
+            - reporttype         text,
+        -   updatedate         text,
+            - sessionnumber      text,
+            - isconferencereport text,
 
 
-        Args:
-            record_data: Raw committeereports record from staging
-        Returns:
-            Cleaned committeereports record
+            Args:
+                record_data: Raw committeereports record from staging
+            Returns:
+                Cleaned committeereports record
         """
         cleaned = record_data.copy()
 

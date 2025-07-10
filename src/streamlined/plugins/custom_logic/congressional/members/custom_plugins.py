@@ -24,7 +24,7 @@ class MembersFetcherLogic(CongressionalBaseFetcherLogic):
     def __init__(self, data_type: str = "members"):
         super().__init__(data_type)
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized member ID from member data."""
         return item_data.get("bioguideId", "ID_ERROR")
 

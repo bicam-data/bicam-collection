@@ -378,6 +378,7 @@ class ConsolidatedRegistry:
     ) -> Any | None:
         """Create custom logic plugin for data type."""
         if data_type not in self._data_types:
+            logger.warning(f"Data type {data_type} not found in registry")
             return None
 
         data_source = self._data_types[data_type]["data_source"]
@@ -388,6 +389,11 @@ class ConsolidatedRegistry:
         else:
             raise ValueError(f"Unknown stage: {stage}")
 
+        logger.info(
+            f"Creating custom logic plugin for {data_type} ({data_source}, {stage})"
+        )
+        logger.info(f"Looking for class: {logic_class_name}")
+
         try:
             # Try to import the specific custom logic class for this data type
             module_path = f"streamlined.plugins.custom_logic.{data_source}.{data_type}.custom_plugins"
@@ -396,21 +402,28 @@ class ConsolidatedRegistry:
                 import importlib
 
                 module = importlib.import_module(module_path)
+                logger.info(f"Successfully imported module: {module_path}")
 
                 # Look for the custom logic class (e.g., BillsFetcherLogic)
                 if hasattr(module, logic_class_name):
                     logic_class = getattr(module, logic_class_name)
-                    return logic_class()
+                    logger.info(f"Found {logic_class_name} class: {logic_class}")
+                    instance = logic_class()
+                    logger.info(f"Created instance: {instance}")
+                    return instance
 
-                logger.debug(f"No {logic_class_name} found in {module_path}")
+                logger.warning(f"No {logic_class_name} found in {module_path}")
+                logger.info(
+                    f"Available classes in module: {[attr for attr in dir(module) if not attr.startswith('_')]}"
+                )
                 return None
 
             except ImportError as e:
-                logger.debug(f"Could not import custom logic from {module_path}: {e}")
+                logger.error(f"Could not import custom logic from {module_path}: {e}")
                 return None
 
         except Exception as e:
-            logger.warning(f"Error creating custom logic plugin for {data_type}: {e}")
+            logger.error(f"Error creating custom logic plugin for {data_type}: {e}")
             return None
 
     # =============================================================================

@@ -74,6 +74,9 @@ class CongressionalFetcherPlugin:
         if self._custom_logic is None:
             registry = get_consolidated_registry()
             self._custom_logic = registry.get_custom_logic_plugin(data_type, "fetching")
+            logger.info(
+                f"Loaded custom logic for {data_type}: {type(self._custom_logic).__name__ if self._custom_logic else 'None'}"
+            )
 
         return self._custom_logic
 
@@ -211,7 +214,10 @@ class CongressionalFetcherPlugin:
             # Extract using full_key if configured
             full_key = config.api.full_key
             if full_key and full_key in full_data:
-                if isinstance(full_data[full_key], list) and len(full_data[full_key]) == 1:
+                if (
+                    isinstance(full_data[full_key], list)
+                    and len(full_data[full_key]) == 1
+                ):
                     return full_data[full_key][0]
                 else:
                     return full_data[full_key]
@@ -301,6 +307,12 @@ class CongressionalFetcherPlugin:
                 "_get_generic_related_data",
             }
 
+            # Debug: Log all methods on the custom logic object
+            all_methods = [m for m in dir(custom_logic) if m.startswith("get_")]
+            logger.info(
+                f"All get_ methods on {self.data_type} custom logic: {all_methods}"
+            )
+
             methods = [
                 m
                 for m in dir(custom_logic)
@@ -309,7 +321,7 @@ class CongressionalFetcherPlugin:
                 and m not in exclude
             ]
 
-            logger.debug(
+            logger.info(
                 f"Found {len(methods)} related methods for {self.data_type}: {methods}"
             )
             return methods
@@ -356,11 +368,11 @@ class CongressionalFetcherPlugin:
             f"'{self.__class__.__name__}' object has no attribute '{name}'"
         )
 
-    async def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    async def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract item ID by delegating to custom logic."""
         custom_logic = self._get_custom_logic_plugin(self.data_type)
         if custom_logic and hasattr(custom_logic, "extract_item_id"):
-            return custom_logic.extract_item_id(item_data)
+            return custom_logic.extract_item_id(item_data, **kwargs)
 
         return "ID_ERROR"
 

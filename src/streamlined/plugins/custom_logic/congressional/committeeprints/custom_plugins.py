@@ -23,7 +23,7 @@ class CommitteeprintsFetcherLogic(CongressionalBaseFetcherLogic):
     def __init__(self, data_type: str = "committeeprints"):
         super().__init__(data_type)
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized committeeprint ID from committeeprint data."""
         item_data = item_data[0] if isinstance(item_data, list) else item_data
         jacket_number = item_data.get("jacketNumber")
@@ -61,7 +61,7 @@ class CommitteeprintsFetcherLogic(CongressionalBaseFetcherLogic):
     ) -> list[dict[str, Any]]:
         """Get committee print texts using the generic helper."""
         return await self.get_generic_related_data(
-            full_committeeprint_data, related_table_name="texts", client=client
+            full_committeeprint_data, related_table_name="text", client=client
         )
 
 

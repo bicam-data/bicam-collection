@@ -24,7 +24,7 @@ class CommitteesFetcherLogic(CongressionalBaseFetcherLogic):
     def __init__(self, data_type: str = "committees"):
         super().__init__(data_type)
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized committee ID from committee data."""
         return item_data.get("systemCode", "ID_ERROR")
 

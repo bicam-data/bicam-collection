@@ -34,7 +34,7 @@ class NominationsFetcherLogic(CongressionalBaseFetcherLogic):
     def __init__(self, data_type: str = "nominations"):
         super().__init__(data_type)
 
-    def extract_item_id(self, item_data: dict[str, Any]) -> str:
+    def extract_item_id(self, item_data: dict[str, Any], **kwargs) -> str:
         """Extract standardized nomination ID from nomination data."""
         nomination_number = item_data.get("number")
         part_number = item_data.get("partNumber", "00")

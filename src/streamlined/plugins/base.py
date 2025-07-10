@@ -126,15 +126,30 @@ class CongressionalBaseFetcherLogic:
             empty list on error / missing data.
         """
         try:
+            # Debug: Log available fields in full_data
+            logger.info(
+                f"Looking for '{related_table_name}' field in {self.data_type} data"
+            )
+            logger.info(f"Available fields in full_data: {list(full_data.keys())}")
+
             # Basic validation of expected structure
             if related_table_name not in full_data:
+                logger.warning(
+                    f"Field '{related_table_name}' not found in {self.data_type} data"
+                )
                 return []
 
             table_info = full_data[related_table_name]
+            logger.info(f"Found '{related_table_name}' field: {table_info}")
+
             if not isinstance(table_info, dict) or "url" not in table_info:
+                logger.warning(
+                    f"Invalid structure for '{related_table_name}' field: {table_info}"
+                )
                 return []
 
             url = table_info["url"]
+            logger.info(f"Found URL for '{related_table_name}': {url}")
 
             # Derive list_key from config unless explicitly provided
             effective_list_key = None
@@ -173,6 +188,9 @@ class CongressionalBaseFetcherLogic:
                                             if isinstance(cfg_list_key, str)
                                             else cfg_list_key
                                         )
+                                        logger.info(
+                                            f"Using list_key from config: {effective_list_key}"
+                                        )
                                         break
                 except Exception as e:
                     logger.debug(
@@ -182,9 +200,14 @@ class CongressionalBaseFetcherLogic:
             # Fallback to simple default if still None
             if not effective_list_key:
                 effective_list_key = [related_table_name]
+                logger.info(f"Using fallback list_key: {effective_list_key}")
 
             data = await client.retrieve_related_data_from_url(
                 url, list_key=effective_list_key
+            )
+
+            logger.info(
+                f"Retrieved {len(data) if data else 0} items for '{related_table_name}'"
             )
 
             # Ensure we always return a list
@@ -195,6 +218,7 @@ class CongressionalBaseFetcherLogic:
                 f"Failed to fetch related data '{related_table_name}' for {self.data_type}: {e}"
             )
             return []
+
 
 class CongressionalBaseCleanerLogic:
     """

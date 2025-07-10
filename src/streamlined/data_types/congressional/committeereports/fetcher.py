@@ -74,7 +74,7 @@ class CommitteereportsFetcher(CongressionalBaseFetcher):
     ) -> list[dict[str, Any]]:
         """Get texts from texts URL in full committeereport data."""
         return await self.get_generic_related_data(
-            full_committeereport_data
+            full_committeereport_data, related_table_name="texts"
         )
 
     # =============================================================================
