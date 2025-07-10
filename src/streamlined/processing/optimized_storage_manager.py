@@ -1258,6 +1258,25 @@ class OptimizedNormalizerStorage:
         )
         return result
 
+    def _safe_column_name(self, column_name: str) -> str:
+        """
+        Convert column name to safe PostgreSQL identifier.
+
+        Args:
+            column_name: Original column name
+
+        Returns:
+            Safe column name for PostgreSQL
+        """
+        # Replace dashes with underscores
+        safe_name = column_name.replace("-", "_")
+
+        # Handle reserved keyword 'references' by adding underscore prefix
+        if safe_name.lower() == "references":
+            safe_name = "_references"
+
+        return safe_name
+
     async def _create_table(
         self, conn: asyncpg.Connection, table_name: str, sample_record: dict[str, Any]
     ) -> bool:
@@ -1269,8 +1288,8 @@ class OptimizedNormalizerStorage:
             # Build column definitions - ALL TEXT, no constraints
             columns = []
             for key in sample_record:
-                # Replace dashes with underscores in column names
-                safe_column_name = key.replace("-", "_")
+                # Use safe column name helper
+                safe_column_name = self._safe_column_name(key)
                 columns.append(f"{safe_column_name} TEXT")
 
             # Create table
@@ -1320,8 +1339,8 @@ class OptimizedNormalizerStorage:
         # Find missing columns
         missing_columns = []
         for key in sample_record:
-            # Replace dashes with underscores in column names for comparison
-            safe_key = key.replace("-", "_")
+            # Use safe column name helper for comparison
+            safe_key = self._safe_column_name(key)
             if safe_key.lower() not in existing_columns:
                 missing_columns.append(safe_key)
 
@@ -1353,14 +1372,14 @@ class OptimizedNormalizerStorage:
 
         # Get all unique columns from all records and convert dashes to underscores
         all_columns = set().union(*(record.keys() for record in records))
-        # Replace dashes with underscores in column names
-        safe_columns = [col.replace("-", "_") for col in all_columns]
+        # Use safe column name helper
+        safe_columns = [self._safe_column_name(col) for col in all_columns]
         columns = sorted(safe_columns)
 
         # Create mapping from safe column names back to original names
         column_mapping = {}
         for original_col in all_columns:
-            safe_col = original_col.replace("-", "_")
+            safe_col = self._safe_column_name(original_col)
             column_mapping[safe_col] = original_col
 
         # Create tab-separated values

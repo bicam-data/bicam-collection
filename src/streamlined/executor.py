@@ -13,6 +13,7 @@ from .cleaner import StreamlinedCleaner
 from .fetcher import StreamlinedFetcher
 from .normalizer import StreamlinedNormalizer
 from .plugins.consolidated_registry import get_consolidated_registry
+from .processing.optimized_processor import OptimizedParallelProcessor
 from .resources.coordinator import ResourceCoordinator
 
 logger = logging.getLogger(__name__)
@@ -310,7 +311,7 @@ class StreamlinedExecutor:
 
         This method:
         1. Initializes a fetcher for the specified data type
-        2. Uses the fetcher's fetch_specific_related_tables_from_existing_data method
+        2. Uses the OptimizedParallelProcessor to fetch related tables with full storage infrastructure
         3. Provides full resource coordination and error handling
 
         Args:
@@ -322,10 +323,10 @@ class StreamlinedExecutor:
             to_date: End date filter (optional)
 
         Returns:
-            Dictionary with processing results and metrics
+            Dictionary containing execution results and metrics
         """
         logger.info(
-            f"Fetching related tables {related_tables} for {data_type} from existing Phase 2 data"
+            f"Starting related tables fetch for {data_type} with tables: {related_tables}"
         )
 
         # Get the data source for this data type
@@ -342,56 +343,41 @@ class StreamlinedExecutor:
         }
 
         try:
-            # Initialize fetcher for this data type
-            if self.fetcher is None or self.fetcher.data_type_name != data_type:
-                self.fetcher = await StreamlinedFetcher.from_coordinator(
-                    self.coordinator, data_type_name=data_type, data_source=data_source
-                )
-
-            # Use the fetcher's method to fetch related tables
-            fetcher_results = (
-                await self.fetcher.fetch_specific_related_tables_from_existing_data(
-                    related_tables=related_tables,
-                    batch_size=batch_size,
-                    limit=limit,
-                    from_date=from_date,
-                    to_date=to_date,
-                )
+            # Initialize fetcher
+            fetcher = await StreamlinedFetcher.from_coordinator(
+                self.coordinator, data_type_name=data_type, data_source=data_source
             )
 
-            # Check for errors in fetcher results
-            if "error" in fetcher_results:
-                error_msg = f"Fetcher error: {fetcher_results['error']}"
-                logger.error(error_msg)
-                results["errors"].append(error_msg)
-                results["status"] = "failed"
-                return results
-
-            # Update results with fetcher metrics
-            results["metrics"] = fetcher_results
-            results["status"] = fetcher_results.get("status", "completed")
-
-            logger.info(f"Successfully fetched related tables for {data_type}")
-            logger.info(f"Processed {fetcher_results.get('items_processed', 0)} items")
-            logger.info(
-                f"Fetched {fetcher_results.get('related_items_fetched', 0)} related items"
+            # Create OptimizedParallelProcessor
+            processor = OptimizedParallelProcessor(
+                api_keys=fetcher.api_keys,
+                client_class=fetcher.client.__class__ if fetcher.client else None,
+                db_pool=fetcher.db_pool,
             )
+
+            # Use the processor's method to fetch related tables with optimized storage
+            results = await processor.fetch_related_tables_from_existing_data(
+                fetcher=fetcher,
+                data_type=data_type,
+                related_tables=related_tables,
+                batch_size=batch_size,
+                limit=limit,
+                from_date=from_date,
+                to_date=to_date,
+            )
+
+            logger.info(f"Related tables fetch completed for {data_type}")
+            return results
 
         except Exception as e:
-            error_msg = f"Failed to fetch related tables: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            results["errors"].append(error_msg)
+            logger.error(f"Fetcher error: {e}")
             results["status"] = "failed"
-
+            results["errors"].append(f"Fetcher error: {e}")
+            return results
         finally:
-            # Cleanup fetcher if it was created for this operation
-            if self.fetcher and self.fetcher.data_type_name == data_type:
-                try:
-                    await self.fetcher.cleanup()
-                except Exception as e:
-                    logger.warning(f"Error during fetcher cleanup: {e}")
-
-        return results
+            # Cleanup
+            if "fetcher" in locals():
+                await fetcher.cleanup()
 
 
 # Convenience function for direct execution

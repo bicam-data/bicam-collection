@@ -12,9 +12,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..libs.hierarchical_checkpoint_system import (
-    HierarchicalCheckpointManager,
-    ProcessingStage,
     FetchingPhase,
+    ProcessingStage,
 )
 from ..processing.key_pool import DynamicKeyPool
 from ..processing.optimized_storage_manager import OptimizedFetcherStorage
@@ -990,7 +989,7 @@ class OptimizedParallelProcessor:
         start_time = datetime.now(UTC)
 
         logger.info("=" * 60)
-        logger.info(f"FETCHING RELATED TABLES FROM EXISTING DATA")
+        logger.info("FETCHING RELATED TABLES FROM EXISTING DATA")
         logger.info(f"Data Type: {data_type}")
         logger.info(f"Related Tables: {related_tables}")
         logger.info("=" * 60)
@@ -1064,7 +1063,7 @@ class OptimizedParallelProcessor:
 
         # Build query to get existing Phase 2 data
         query = f"""
-        SELECT 
+        SELECT
             payload,
             source_doc_id
         FROM {schema_name}.{table_name}
