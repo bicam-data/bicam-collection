@@ -19,6 +19,7 @@
   processing:
     batch_size: 50
     checkpoint_frequency: 25
+    scaling_factor: 20
 
 - name: committees_subcommittees
   description: Congressional committees subcommittees data

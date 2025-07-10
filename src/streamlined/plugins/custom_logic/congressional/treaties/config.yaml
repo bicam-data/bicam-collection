@@ -24,6 +24,7 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+    scaling_factor: 20
 
 - name: treaties_indexterms
   description: Treaty index terms data

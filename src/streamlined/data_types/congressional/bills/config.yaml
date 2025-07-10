@@ -27,6 +27,7 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+    scaling_factor: 100
 
 - name: bills_actions
   description: Congressional bills actions data

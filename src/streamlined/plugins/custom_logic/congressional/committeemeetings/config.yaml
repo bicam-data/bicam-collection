@@ -66,6 +66,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 20
 
 - name: committeemeetings_witnessdocuments
   description: Committee meetings witness documents data

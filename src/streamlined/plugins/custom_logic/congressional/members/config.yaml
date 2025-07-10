@@ -21,6 +21,8 @@
   processing:
     batch_size: 50
     checkpoint_frequency: 25
+    scaling_factor: 20
+
 
 - name: members_terms
   description: Congressional members terms data

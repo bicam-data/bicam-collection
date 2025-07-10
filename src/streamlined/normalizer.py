@@ -161,6 +161,50 @@ class StreamlinedNormalizer:
 
         return flat_data
 
+    def _get_optimal_batch_sizes(self, data_type: str) -> tuple[int, int, int]:
+        """
+        Get optimal batch sizes based on data type configuration and intelligent scaling.
+
+        Returns:
+            tuple: (batch_size, window_size, max_concurrent)
+        """
+        try:
+            # Get the data type config from registry
+            config = self.registry.get_data_type_config(data_type)
+            if not config:
+                logger.warning(f"No config found for {data_type}, using defaults")
+                return (1000, 10000, 50)
+
+            # Get base batch size and scaling factor from config
+            base_batch_size = config.processing.batch_size
+            scaling_factor = config.processing.scaling_factor
+
+            # Calculate optimized batch size
+            optimized_batch_size = base_batch_size * scaling_factor
+
+            # Calculate window size (10x batch size for efficient processing)
+            window_size = optimized_batch_size * 10
+
+            # Calculate max concurrent (based on batch size, capped for memory)
+            max_concurrent = min(
+                optimized_batch_size // 50, 200
+            )  # 1 worker per 50 items, max 200
+
+            logger.info(f"Config-based optimization for {data_type}:")
+            logger.info(f"  Base batch_size: {base_batch_size} (from config)")
+            logger.info(f"  Scaling factor: {scaling_factor}x (from config)")
+            logger.info(f"  Optimized batch_size: {optimized_batch_size}")
+            logger.info(f"  Window size: {window_size}")
+            logger.info(f"  Max concurrent: {max_concurrent}")
+
+            return (optimized_batch_size, window_size, max_concurrent)
+
+        except Exception as e:
+            logger.warning(
+                f"Error getting optimal batch sizes for {data_type}: {e}, using defaults"
+            )
+            return (1000, 10000, 50)
+
     async def normalize_data_type(
         self,
         data_type: str,
@@ -175,8 +219,8 @@ class StreamlinedNormalizer:
 
         Args:
             data_type: The data type to normalize (e.g., "bills", "nominations")
-            batch_size: Size of processing batches
-            max_concurrent: Maximum concurrent operations
+            batch_size: Size of processing batches (will be overridden for large data types)
+            max_concurrent: Maximum concurrent operations (will be overridden for large data types)
             rerun: Whether to reprocess existing records (ignores checkpoints)
             resume: Whether to use checkpoint-based resume logic
             **kwargs: Additional parameters for specific data types
@@ -185,6 +229,15 @@ class StreamlinedNormalizer:
             Dictionary containing normalization results and metrics
         """
         logger.info(f"Starting normalization for {data_type}")
+
+        # Get optimal batch sizes for this data type
+        optimal_batch_size, optimal_window_size, optimal_max_concurrent = (
+            self._get_optimal_batch_sizes(data_type)
+        )
+
+        # Always use optimal sizes for high-performance processing
+        batch_size = optimal_batch_size
+        max_concurrent = optimal_max_concurrent
 
         # Get data source from registry
         data_source = self.registry.get_data_source(data_type)
@@ -262,18 +315,24 @@ class StreamlinedNormalizer:
             else:
                 logger.info(f"Processing main table: {config.table_name}")
 
-                # Get items to process
-                item_ids = await self._get_items_to_normalize(
-                    db_pool,
-                    data_type,
-                    source_schema,
-                    config,
-                    jsonb_checkpoint,
-                    batch_size * 10,
-                )
-
-                if item_ids:
-                    jsonb_checkpoint.total_items = len(item_ids)
+                # Efficient windowed processing loop
+                total_processed = 0
+                total_errors = 0
+                window_size = optimal_window_size
+                while True:
+                    item_ids = await self._get_items_to_normalize(
+                        db_pool,
+                        data_type,
+                        source_schema,
+                        config,
+                        jsonb_checkpoint,
+                        window_size,
+                    )
+                    if not item_ids:
+                        break
+                    jsonb_checkpoint.total_items = max(
+                        jsonb_checkpoint.total_items, total_processed + len(item_ids)
+                    )
                     staging_checkpoint.save_checkpoint(jsonb_checkpoint)
 
                     main_stats = await self._process_main_records(
@@ -287,13 +346,19 @@ class StreamlinedNormalizer:
                         staging_checkpoint,
                         jsonb_checkpoint,
                     )
+                    total_processed += main_stats["processed"]
+                    total_errors += main_stats["errors"]
 
-                    results["main_records_processed"] = main_stats["processed"]
-                    results["errors"] += main_stats["errors"]
+                    # If fewer than window_size returned, we're done
+                    if len(item_ids) < window_size:
+                        break
 
-                    # Mark main table as processed
-                    staging_checkpoint.mark_table_processed(config.table_name)
-                    results["tables_processed"] += 1
+                results["main_records_processed"] = total_processed
+                results["errors"] += total_errors
+
+                # Mark main table as processed
+                staging_checkpoint.mark_table_processed(config.table_name)
+                results["tables_processed"] += 1
 
             # Phase 2: Process related tables (only those with create_raw: True)
             if hasattr(config, "related_tables") and config.related_tables:
@@ -500,6 +565,9 @@ class StreamlinedNormalizer:
         stats = {"processed": 0, "errors": 0}
         semaphore = asyncio.Semaphore(max_concurrent)
 
+        # Get the starting offset for this window
+        global_offset = checkpoint.current_offset if checkpoint else 0
+
         # Process in batches
         for batch_start in range(0, len(item_ids), batch_size):
             batch_ids = item_ids[batch_start : batch_start + batch_size]
@@ -634,8 +702,8 @@ class StreamlinedNormalizer:
                 else:
                     stats["errors"] += 1
 
-            # Update checkpoint
-            checkpoint.current_offset = batch_start + len(batch_ids)
+            # Update checkpoint with correct global offset
+            checkpoint.current_offset = global_offset + batch_start + len(batch_ids)
             checkpoint.processed_items = stats["processed"]
             checkpoint.failed_items = stats["errors"]
             staging_checkpoint.save_checkpoint(checkpoint)

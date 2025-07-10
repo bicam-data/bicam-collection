@@ -55,9 +55,9 @@ class OptimizedStorageManager:
         self,
         pg_pool: Pool,
         checkpoint_db_path: str = "hierarchical_checkpoints.db",
-        batch_size: int = 10000,
+        batch_size: int = 25000,  # Increased from 10000 for better performance with large datasets
         flush_interval: int = 10,
-        max_memory_mb: int = 500,
+        max_memory_mb: int = 1000,  # Increased from 500 for better performance with large datasets
     ):
         self.pg_pool = pg_pool
         self.batch_size = batch_size
@@ -1062,7 +1062,9 @@ class OptimizedNormalizerStorage:
         # Batch accumulator for bulk operations
         self.batch_accumulator = defaultdict(list)
         self.batch_sizes = defaultdict(int)
-        self.max_batch_size = 5000
+        self.max_batch_size = (
+            25000  # Increased from 5000 for better performance with large datasets
+        )
 
         logger.info(f"OptimizedNormalizerStorage initialized for {target_schema}")
 

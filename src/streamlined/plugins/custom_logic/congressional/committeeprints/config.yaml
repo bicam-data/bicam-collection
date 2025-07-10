@@ -45,6 +45,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 20
 
 - name: committeeprints_texts
   description: Committee prints texts data

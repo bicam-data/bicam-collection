@@ -43,6 +43,7 @@ class SchemaConfig:
 class ProcessingConfig:
     checkpoint_frequency: int = 100
     batch_size: int = 1000
+    scaling_factor: int = 10
 
 
 @dataclass(slots=True)

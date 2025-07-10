@@ -19,6 +19,7 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+    scaling_factor: 1
 
 - name: congresses_sessions
   description: Congressional sessions data
