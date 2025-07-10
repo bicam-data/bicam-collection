@@ -75,16 +75,12 @@ GRANT SELECT ON ALL TABLES IN SCHEMA bicam_govinfo TO bicam_pipeline;
 CREATE TABLE IF NOT EXISTS bicam_govinfo.bills_reference_codes(
     bill_code_id TEXT PRIMARY KEY,
     package_id TEXT,
-    reference_code TEXT, -- combination of label and title
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.bills(package_id)
-    INITIALLY DEFERRED
+    reference_code TEXT -- combination of label and title
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.bills_reference_codes_sections(
     bill_code_id TEXT,
     code_section TEXT,
-    FOREIGN KEY (bill_code_id) REFERENCES bicam_govinfo.bills_reference_codes(bill_code_id)
-    INITIALLY DEFERRED,
     UNIQUE (bill_code_id, code_section)
 );
 
@@ -92,24 +88,18 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.bills_reference_laws(
     package_id TEXT,
     law_id TEXT, -- fix law_id
     law_type TEXT,
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.bills(package_id)
-    INITIALLY DEFERRED,
     PRIMARY KEY (package_id, law_id)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.bills_reference_statutes(
     bill_statute_id TEXT PRIMARY KEY,
     package_id TEXT,
-    reference_statute TEXT, -- combine label and title
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.bills(package_id)
-    INITIALLY DEFERRED
+    reference_statute TEXT -- combine label and title
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.bills_reference_statutes_pages(
     bill_statute_id TEXT,
     page TEXT, -- combine label and title
-    FOREIGN KEY (bill_statute_id) REFERENCES bicam_govinfo.bills_reference_statutes(bill_statute_id)
-    INITIALLY DEFERRED,
     UNIQUE (bill_statute_id, page)
 );
 
@@ -118,8 +108,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.bills_short_titles(
     short_title TEXT,
     level TEXT,
     type TEXT,
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.bills(package_id)
-    INITIALLY DEFERRED,
     UNIQUE (package_id, short_title, level, type)
 );
 
@@ -146,8 +134,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.committeeprints(
 CREATE TABLE IF NOT EXISTS bicam_govinfo.committeeprints_granules(
     granule_id TEXT,
     package_id TEXT,
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.committeeprints(package_id)
-    INITIALLY DEFERRED,
     PRIMARY KEY (granule_id, package_id)
 );
 
@@ -157,7 +143,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.committeeprints_committees(
     committee_code TEXT,
     committee_name TEXT,
     chamber TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.committeeprints_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, committee_code, committee_name, chamber)
 );
 
@@ -165,7 +150,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.committeeprints_reference_bills(
     package_id TEXT,
     granule_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.committeeprints_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bill_id)
 );
 
@@ -194,8 +178,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.committeereports(
 CREATE TABLE IF NOT EXISTS bicam_govinfo.committeereports_granules(
     granule_id TEXT,
     package_id TEXT,
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.committeereports(package_id)
-    INITIALLY DEFERRED,
     PRIMARY KEY (granule_id, package_id)
 );
 
@@ -205,7 +187,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.committeereports_committees(
     committee_code TEXT,
     committee_name TEXT,
     chamber TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.committeereports_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, committee_code, committee_name, chamber)
 );
 
@@ -213,7 +194,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.committeereports_members(
     granule_id TEXT,
     package_id TEXT,
     bioguide_id TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.committeereports_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bioguide_id)
 
 );
@@ -222,7 +202,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.committeereports_reference_bills(
     granule_id TEXT,
     package_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.committeereports_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bill_id)
 );
 
@@ -252,8 +231,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.hearings(
 CREATE TABLE IF NOT EXISTS bicam_govinfo.hearings_granules(
     granule_id TEXT,
     package_id TEXT,
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.hearings(package_id)
-    INITIALLY DEFERRED,
     PRIMARY KEY (granule_id, package_id)
 );
 
@@ -262,7 +239,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.hearings_committees(
     package_id TEXT,
     committee_code TEXT,
     committee_name TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.hearings_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, committee_code, committee_name)
 );
 
@@ -271,7 +247,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.hearings_members(
     package_id TEXT,
     bioguide_id TEXT,
     name TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.hearings_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bioguide_id, name)
 );
 
@@ -279,7 +254,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.hearings_reference_bills(
     granule_id TEXT,
     package_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.hearings_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bill_id)
 );
 
@@ -312,8 +286,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.treaties(
 CREATE TABLE IF NOT EXISTS bicam_govinfo.treaties_granules(
     granule_id TEXT,
     package_id TEXT,
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.treaties(package_id)
-    INITIALLY DEFERRED,
     PRIMARY KEY (granule_id, package_id)
 );
 
@@ -323,7 +295,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.treaties_committees(
     committee_code TEXT,
     committee_name TEXT,
     chamber TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES bicam_govinfo.treaties_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, committee_code, committee_name, chamber)
 );
 
@@ -331,7 +302,7 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressional_directories(
     package_id TEXT PRIMARY KEY,
     title TEXT,
     congress INTEGER,
-    issued_at DATE,
+    issued_at TIMESTAMP WITH TIME ZONE,
     branch TEXT,
     government_author1 TEXT,
     government_author2 TEXT,
@@ -348,7 +319,6 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressional_directories(
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressional_directories_isbn(
     package_id TEXT,
     isbn TEXT,
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.congressional_directories(package_id),
     UNIQUE(package_id, isbn)
 );
 
@@ -356,21 +326,30 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.members(
     granule_id TEXT,
     package_id TEXT,
     bioguide_id TEXT,
+    membername TEXT,
     title TEXT,
     biography TEXT,
     member_type TEXT,
-    population TEXT,
+    chamber TEXT,
+    population INTEGER,
     gpo_id TEXT,
     authority_id TEXT,
+    email_address TEXT,
     official_url TEXT,
     twitter_url TEXT,
     instagram_url TEXT,
     facebook_url TEXT,
     youtube_url TEXT,
-    other_url TEXT,
-    FOREIGN KEY (package_id) REFERENCES bicam_govinfo.congressional_directories(package_id)
-    INITIALLY DEFERRED,
+    last_modified TIMESTAMP WITH TIME ZONE,
     PRIMARY KEY (granule_id, package_id)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.members_zipcodes(
+    package_id TEXT,
+    granule_id TEXT,
+    bioguide_id TEXT,
+    zipcode TEXT,
+    UNIQUE (package_id, granule_id, bioguide_id, zipcode)
 );
 
 -- Finish off with granting permissions
@@ -388,5 +367,4 @@ END$$;
 
 END TRANSACTION;
 
-SET CONSTRAINTS ALL IMMEDIATE;
 COMMIT;

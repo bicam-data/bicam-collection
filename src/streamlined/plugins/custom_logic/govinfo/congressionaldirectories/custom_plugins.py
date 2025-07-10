@@ -12,7 +12,10 @@ import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from streamlined.plugins.base import BaseCleanerLogic
+
 logger = logging.getLogger(__name__)
+
 
 class CongressionalDirectoriesFetcher:
     """
@@ -30,7 +33,8 @@ class CongressionalDirectoriesFetcher:
     def __init__(self, data_type: str = "congressionaldirectories"):
         self.data_type = data_type
 
-class CongressionalDirectoriesCleaner:
+
+class CongressionalDirectoriesCleaner(BaseCleanerLogic):
     """
     Congressional Directories cleaner logic extracted from CongressionalDirectoriesCleaner class.
     Contains all the custom cleaning methods for congressional directories data.
@@ -51,75 +55,136 @@ class CongressionalDirectoriesCleaner:
 
         # Set bills-specific multi-table processing configuration
         self.multi_table_data_types = {
-            "bills_texts": ["bills_texts", "bills_texts_formats"],
-            # Add other bills multi-table data types here as needed
+            "congressionaldirectories_granules": [
+                "congressionaldirectories_granules",
+                "congressionaldirectories_granules_members",
+                "congressionaldirectories_granules_online",
+                "congressionaldirectories_granules_members_name",
+            ],
         }
-        
-        #TODO: fix bioguideids, get proper metadata
 
-    async def _stream_bills_texts_joined_chunks(
+        # TODO: fix bioguideids, get proper metadata
+
+    async def _stream_congressionaldirectories_granules_joined_chunks(
         self, chunk_size: int
     ) -> AsyncGenerator[list[dict[str, Any]], None]:
         """
-        Stream joined data from bills_texts_staging and bills_texts_formats_staging.
-        Properly aggregates multiple formats per text record.
+        Stream joined data from congressional directories granules tables.
+        Joins granules with granules_members, granules_online, and granules_members_name tables.
+        Coalesces membername with parsed name from granules_members_name.
         """
         if not self.db_pool:
             raise ValueError("Database pool not configured")
 
         async with self.db_pool.acquire() as conn:
             try:
-                # First, check if both tables exist
+                # First, check if all required tables exist
                 tables_exist_query = """
                 SELECT COUNT(*) FROM information_schema.tables
                 WHERE table_schema = $1
-                AND table_name IN ('bills_texts', 'bills_texts_formats')
+                AND table_name IN (
+                    'congressionaldirectories_granules',
+                    'congressionaldirectories_granules_members',
+                    'congressionaldirectories_granules_online',
+                    'congressionaldirectories_granules_members_name'
+                )
                 """
                 tables_count = await conn.fetchval(
                     tables_exist_query, self.staging_schema
                 )
 
-                if tables_count < 2:
+                if tables_count < 4:
                     logger.warning(
-                        "One or both bills_texts staging tables do not exist"
+                        f"One or more congressional directories granules staging tables do not exist. Found {tables_count}/4 tables."
                     )
                     return
 
                 # Get total count for logging
                 count_query = f"""
-                SELECT COUNT(DISTINCT bt.id)
-                FROM {self.staging_schema}.bills_texts bt
+                SELECT COUNT(DISTINCT g.id)
+                FROM {self.staging_schema}.congressionaldirectories_granules g
+                WHERE g.granuleclass = 'CONGRESSMEMBERSTATE'
+                AND g.subgranuleclass != 'STATEDELEGATION'
                 """
                 total_count = await conn.fetchval(count_query)
 
                 if total_count == 0:
-                    logger.info("No bills_texts records found")
+                    logger.info("No congressional directories granules records found")
                     return
 
                 logger.info(
-                    f"Streaming {total_count} bills_texts records with formats in chunks of {chunk_size}"
+                    f"Streaming {total_count} congressional directories granules records with members, online data, and member names in chunks of {chunk_size}"
                 )
 
-                # Stream using pagination with aggregated formats
+                # Stream using pagination with flattened joined data
                 offset = 0
                 while True:
-                    # Use JSON aggregation to collect all formats for each text
+                    # Join granules with members, online data, and member names - flattened into one big table
                     query = f"""
                     SELECT
-                        bt.*,
-                        COALESCE(
-                            json_agg(
-                                json_build_object('type', btf.type, 'url', btf.url)
-                                ORDER BY btf.type
-                            ) FILTER (WHERE btf.type IS NOT NULL),
-                            '[]'::json
-                        ) as formats_json
-                    FROM {self.staging_schema}.bills_texts bt
-                    LEFT JOIN {self.staging_schema}.bills_texts_formats btf
-                        ON bt.bill_id = btf.bill_id AND bt.list_index = btf.list_index
-                    GROUP BY bt.id, bt.bill_id, bt.list_index, bt.date, bt.type,
-                                bt.processed_at
-                    ORDER BY bt.processed_at DESC
+                        g.id as granule_id,
+                        g.granuleid,
+                        g.packageid,
+                        g.state,
+                        g.title,
+                        g.category,
+                        g.docclass,
+                        g.dateissued,
+                        g.population,
+                        g.district,
+                        g.year,
+                        g.biography,
+                        g.constituents,
+                        g.zipcodes,
+                        g.graphicsinpdf,
+                        g.online,
+                        g.download_pdflink,
+                        g.download_txtlink,
+                        g.download_ziplink,
+                        g.download_modslink,
+                        g.download_premislink,
+                        g.detailslink,
+                        g.packagelink,
+                        g.relatedlink,
+                        g.granuleclass,
+                        g.granuleslink,
+                        g.lastmodified,
+                        g.collectioncode,
+                        g.collectionname,
+                        g.subgranuleclass,
+                        g.processed_at,
+                        g.source_doc_id,
+                        -- Members data (joined)
+                        gm.gpoid,
+                        gm.party,
+                        gm.state as member_state,
+                        gm.chamber,
+                        gm.congress,
+                        gm.bioguideid,
+                        COALESCE(gm.membername, gmn.parsed) as membername,
+                        gm.authorityid,
+                        gm.list_index as member_list_index,
+                        -- Online data (joined)
+                        go.value as online_value,
+                        go.list_index as online_list_index,
+                        -- Members name data (joined, for reference)
+                        gmn.parsed as membername_parsed,
+                        gmn.authority_fnf as membername_authority_fnf,
+                        gmn.authority_lnf as membername_authority_lnf,
+                        gmn.authority_other as membername_authority_other,
+                        gmn.id as membername_id,
+                        gmn.members_id as membername_members_id,
+                        gmn.list_index as membername_list_index
+                    FROM {self.staging_schema}.congressionaldirectories_granules g
+                    LEFT JOIN {self.staging_schema}.congressionaldirectories_granules_members gm
+                        ON g.id = gm.granule_id
+                    LEFT JOIN {self.staging_schema}.congressionaldirectories_granules_members_name gmn
+                        ON gm.id = gmn.members_id
+                    LEFT JOIN {self.staging_schema}.congressionaldirectories_granules_online go
+                        ON g.id = go.granule_id
+                    WHERE g.granuleclass = 'CONGRESSMEMBERSTATE'
+                    AND g.subgranuleclass != 'STATEDELEGATION'
+                    ORDER BY g.processed_at DESC, gm.list_index, go.list_index
                     LIMIT {chunk_size} OFFSET {offset}
                     """
 
@@ -134,7 +199,7 @@ class CongressionalDirectoriesCleaner:
                             chunk.append(row_dict)
                         except Exception as e:
                             logger.error(
-                                f"Error converting bills_texts row to dict: {e}, row type: {type(row)}, row: {row}"
+                                f"Error converting congressional directories granules row to dict: {e}, row type: {type(row)}, row: {row}"
                             )
                             continue
 
@@ -146,117 +211,224 @@ class CongressionalDirectoriesCleaner:
                     # Log progress periodically
                     if offset % (chunk_size * 10) == 0:
                         logger.debug(
-                            f"Streamed {offset} bills_texts records with formats"
+                            f"Streamed {offset} congressional directories granules records with members, online data, and member names"
                         )
 
             except Exception as e:
-                logger.error(f"Error streaming bills_texts with formats: {e}")
+                logger.error(
+                    f"Error streaming congressional directories granules with joined data: {e}"
+                )
                 raise
 
-    async def _clean_bills_singular(
+    async def _clean_congressionaldirectories_granules_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """
-        Custom cleaning logic for individual bills records.
+        Custom cleaning logic for individual congressional directories granules records.
+        STAGING COLUMNS:
+        - title                           text,
+        - branch                          text,
+        - session                         text,
+        - category                        text,
+        - congress                        text,
+        - docclass                        text,
+        - download_pdflink                text,
+        - download_txtlink                text,
+        - download_ziplink                text,
+        - download_modslink               text,
+        - download_premislink             text,
+        - packageid                       text,
+        - publisher                       text,
+        - dateissued                      text,
+        - detailslink                     text,
+        - documenttype                    text,
+        - granuleslink                    text,
+        - lastmodified                    text,
+        - collectioncode                  text,
+        - collectionname                  text,
+        - otheridentifier_ils_system_id   text,
+        - otheridentifier_migrated_doc_id text,
+        - sudocclassnumber                text,
+        - governmentauthor1               text,
+        - governmentauthor2               text,
+        - package_id                      text,
+        - processed_at                    text,
+        - source_doc_id                   text,
+        - otheridentifier_isbn            text
+
+        FINAL COLUMNS:
+        - package_id TEXT PRIMARY KEY,
+        - title TEXT,
+        - congress INTEGER,
+        - issued_at DATE,
+        - branch TEXT,
+        - government_author1 TEXT,
+        - government_author2 TEXT,
+        - publisher TEXT,
+        - collection_code TEXT,
+        - ils_system_id TEXT,
+        - migrated_doc_id TEXT,
+        - su_doc_class_number TEXT,
+        - text_url TEXT,
+        - pdf_url TEXT,
+        - last_modified TIMESTAMP WITH TIME ZONE
+
         """
         cleaned = record_data.copy()
 
-        # Apply bills-specific cleaning logic
+        # Apply congressional directories-specific cleaning logic
         filtered_cleaned = {
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "bill_type": str(cleaned.get("type", None).lower()),
-            "bill_number": float(cleaned.get("number", None)),
-            "congress": self.safe_int(cleaned.get("congress", None)),
+            "package_id": str(cleaned.get("package_id", "ID_ERROR")),
             "title": str(cleaned.get("title", None)),
-            "origin_chamber": str(
-                self.standardize_chamber(cleaned.get("originchamber", None))
-            ),
-            "policy_area": str(cleaned.get("policyarea_name", None)),
-            "is_law": None,  # added via postprocessing
-            "introduced_at": self.standardize_date(cleaned.get("introduceddate", None)),
-            "constitutional_authority_statement": self.clean_long_text(
-                cleaned.get("constitutionalauthoritystatementtext", None)
-            ),
-            "actions_count": self.safe_int(cleaned.get("actions_count", 0), 0),
-            "amendments_count": self.safe_int(cleaned.get("amendments_count", 0), 0),
-            "committees_count": self.safe_int(cleaned.get("committees_count", 0), 0),
-            "cosponsors_count": self.safe_int(cleaned.get("cosponsors_count", 0), 0),
-            "cosponsors_withdrawn_count": (
-                self.safe_int(
-                    cleaned.get("cosponsors_countincludingwithdrawncosponsors", 0), 0
-                )
-                - self.safe_int(cleaned.get("cosponsors_count", 0), 0)
-            ),
-            "relatedbills_count": self.safe_int(
-                cleaned.get("relatedbills_count", 0), 0
-            ),
-            "subjects_count": self.safe_int(cleaned.get("subjects_count", 0), 0),
-            "summaries_count": self.safe_int(cleaned.get("summaries_count", 0), 0),
-            "texts_count": self.safe_int(cleaned.get("textversions_count", 0), 0),
-            "titles_count": self.safe_int(cleaned.get("titles_count", 0), 0),
-            "updated_at": self.standardize_date(cleaned.get("updatedate", None)),
-        }
-
-        # Validate bill_id format
-        if not re.match(
-            r"^(hr|hres|sres|s|hjres|hconres|sjres|sconres)\d{1,4}(\.5)?-\d{1,3}$",
-            filtered_cleaned["bill_id"],
-        ):
-            raise ValueError(f"Invalid bill_id format: {filtered_cleaned['bill_id']}")
-
-        return filtered_cleaned
-
-    async def _clean_bills_actions_singular(
-        self, record_data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Custom cleaning logic for bills actions records."""
-        cleaned = record_data.copy()
-
-        filtered_cleaned = {
-            "action_id": str(cleaned.get("id", "ID_ERROR")),
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "action_code": str(cleaned.get("actioncode", None)),
-            "action_date": self.standardize_date(cleaned.get("actiondate", None)),
-            "text": self.clean_long_text(cleaned.get("text", None)),
-            "action_type": str(cleaned.get("type", None)),
-            "source_system": str(cleaned.get("sourcesystem_name", None)),
-            "source_system_code": self.safe_int(cleaned.get("sourcesystem_code", None)),
-            "calendar": str(cleaned.get("calendarnumber_calendar", None)),
-            "calendar_number": self.safe_int(
-                cleaned.get("calendarnumber_number", None)
-            ),
+            "congress": self.safe_int(cleaned.get("congress", None)),
+            "issued_at": self.standardize_date(cleaned.get("dateissued", None)),
+            "branch": str(cleaned.get("branch", None)),
+            "government_author1": str(cleaned.get("governmentauthor1", None)),
+            "government_author2": str(cleaned.get("governmentauthor2", None)),
+            "publisher": str(cleaned.get("publisher", None)),
+            "collection_code": str(cleaned.get("collectioncode", None)),
+            "ils_system_id": str(cleaned.get("otheridentifier_ils_system_id", None)),
+            "migrated_doc_id": str(cleaned.get("otheridentifier_migrated_doc_id", None)),
+            "su_doc_class_number": str(cleaned.get("sudocclassnumber", None)),
+            "text_url": str(cleaned.get("download_txtlink", None)),
+            "pdf_url": str(cleaned.get("download_pdflink", None)),
+            "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
         }
 
         return filtered_cleaned
+
 
     # Add other cleaning methods for bills sub-tables
-    async def _clean_bills_cosponsors_singular(
+    async def _clean_congressionaldirectories_granules_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Custom cleaning logic for bills cosponsors records."""
-        cleaned = record_data.copy()
+        """Custom cleaning logic for congressional directories granules records, matching bicam_govinfo.members schema.
+        g.id as granule_id,
+        g.granuleid,
+        g.packageid,
+        g.state,
+        g.title,
+        g.category,
+        g.docclass,
+        g.dateissued,
+        g.population,
+        g.district,
+        g.year,
+        g.biography,
+        g.constituents,
+        g.zipcodes,
+        g.graphicsinpdf,
+        g.online,
+        g.download_pdflink,
+        g.download_txtlink,
+        g.download_ziplink,
+        g.download_modslink,
+        g.download_premislink,
+        g.detailslink,
+        g.packagelink,
+        g.relatedlink,
+        g.granuleclass,
+        g.granuleslink,
+        g.lastmodified,
+        g.collectioncode,
+        g.collectionname,
+        g.subgranuleclass,
+        g.processed_at,
+        g.source_doc_id,
+        -- Members data (joined)
+        gm.gpoid,
+        gm.party,
+        gm.state as member_state,
+        gm.chamber,
+        gm.congress,
+        gm.bioguideid,
+        gm.membername,
+        gm.authorityid,
+        gm.list_index as member_list_index,
+        -- Online data (joined)
+        go.value as online_value,
+        go.list_index as online_list_index
+        """
 
+        cleaned = record_data.copy()
+        if "writerep" not in cleaned.get("online_value"):
+            if (
+                ".house.gov" in cleaned.get("online_value")
+                or ".senate.gov" in cleaned.get("online_value")
+            ) and "@" not in cleaned.get("online_value"):
+                official_url = cleaned.get("online_value")
+            elif (
+                ".house.gov" in cleaned.get("online_value")
+                or ".senate.gov" in cleaned.get("online_value")
+            ) and "@" in cleaned.get("online_value"):
+                email_address = cleaned.get("online_value")
+            else:
+                official_url = None
+                email_address = None
+            if "twitter" in cleaned.get("online_value"):
+                twitter_url = cleaned.get("online_value")
+            else:
+                twitter_url = None
+            if "facebook" in cleaned.get("online_value"):
+                facebook_url = cleaned.get("online_value")
+            else:
+                facebook_url = None
+            if "youtube" in cleaned.get("online_value"):
+                youtube_url = cleaned.get("online_value")
+            else:
+                youtube_url = None
+            if "instagram" in cleaned.get("online_value"):
+                instagram_url = cleaned.get("online_value")
+            else:
+                instagram_url = None
+        else:
+            official_url = None
+            email_address = None
+            twitter_url = None
+            facebook_url = None
+            youtube_url = None
+            instagram_url = None
+        # Map fields from the flat joined row to the members table
         filtered_cleaned = {
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "bioguide_id": str(cleaned.get("bioguideid", "ID_ERROR")),
-            "display_name": str(cleaned.get("fullname", None)),
-            "party": str(cleaned.get("party", None)),
-            "state": str(cleaned.get("state", None)),
-            "district": self.safe_int(cleaned.get("district", None)),
-            "is_original_cosponsor": bool(cleaned.get("isoriginalcosponsor", None)),
-            "sponsorship_date": self.standardize_date(
-                cleaned.get("sponsorshipdate", None)
+            "granule_id": str(
+                cleaned.get("granuleid") or "ID_ERROR"
             ),
-            "sponsorship_withdrawal_date": self.standardize_date(
-                cleaned.get("sponsorshipwithdrawndate", None)
+            "package_id": str(
+                cleaned.get("packageid") or "ID_ERROR"
             ),
+            "bioguide_id": str(
+                cleaned.get("bioguideid") or None
+            ),
+            "membername": str(cleaned.get("membername") or None),
+            "title": str(cleaned.get("title") or None),
+            "biography": self.clean_long_text(cleaned.get("biography")),
+            "member_type": str(cleaned.get("category") or None),
+            "chamber": self.standardize_chamber(cleaned.get("chamber") or None),
+            "population": self.safe_int(cleaned.get("population") or None),
+            "gpo_id": str(cleaned.get("gpoid") or None),
+            "authority_id": str(
+                cleaned.get("authorityid") or None
+            ),
+            "email_address": str(email_address or None),
+            "official_url": str(official_url or None),
+            "twitter_url": str(twitter_url or None),
+            "instagram_url": str(instagram_url or None),
+            "facebook_url": str(facebook_url or None),
+            "youtube_url": str(youtube_url or None),
+            "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
         }
 
         return filtered_cleaned
 
     # Add post-processing methods
-    async def _post_process_bills(self) -> dict[str, Any]:
-        """Post-processing operations specific to bills data."""
+    async def _post_process_congressionaldirectories(self) -> dict[str, Any]:
+        """
+        Post-processing for congressional directories:
+        - Extract ISBNs from the staging table's otheridentifiers_isbn column (JSON array)
+        - Insert each ISBN into the production congressional_directories_isbn table
+        """
+        import json
+
         if not self.db_pool:
             raise ValueError("Database pool not configured")
 
@@ -267,41 +439,74 @@ class CongressionalDirectoriesCleaner:
         }
 
         async with self.db_pool.acquire() as conn:
-            # Operation 1: Populate is_law field based on bills_laws table
+            # Operation 1: Extract and insert ISBNs
             try:
                 async with conn.transaction():
-                    sql = f"""
-                        UPDATE {self.production_schema}.bills
-                        SET is_law = CASE
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM {self.production_schema}.bills_laws bl
-                                WHERE bl.bill_id = bills.bill_id
-                            ) THEN true
-                            ELSE false
-                        END
-                        WHERE is_law IS NULL;
+                    # Fetch package_id and otheridentifiers_isbn from staging
+                    fetch_sql = f"""
+                        SELECT packageid, otheridentifiers_isbn
+                        FROM {self.staging_schema}.congressionaldirectories
+                        WHERE otheridentifiers_isbn IS NOT NULL
                     """
+                    rows = await conn.fetch(fetch_sql)
+                    isbn_records = []
+                    for row in rows:
+                        package_id = row["packageid"]
+                        isbns_json = row["otheridentifiers_isbn"]
+                        if not isbns_json:
+                            continue
+                        try:
+                            isbns = json.loads(isbns_json)
+                            if isinstance(isbns, str):
+                                # Sometimes a single string, not a list
+                                isbns = [isbns]
+                            elif not isinstance(isbns, list):
+                                continue
+                        except Exception as e:
+                            logger.error(f"Error parsing ISBN JSON for package_id {package_id}: {e}")
+                            continue
+                        for isbn in isbns:
+                            if not isbn or not str(isbn).strip() and isbn != "\\u00a0":
+                                continue
+                            isbn_records.append((package_id, str(isbn).strip()))
 
-                    result = await conn.execute(sql)
-                    rows_affected = int(result.split()[-1]) if result.split() else 0
-
-                    results["operations"].append(
-                        {
-                            "name": "populate_is_law_field",
-                            "status": "success",
-                            "rows_affected": rows_affected,
-                        }
-                    )
-                    results["rows_affected"] += rows_affected
-
-                    logger.info(f"Updated is_law for {rows_affected} bills")
-
+                    # Insert into production table, avoiding duplicates
+                    if isbn_records:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressional_directories_isbn (package_id, isbn)
+                            VALUES ($1, $2)
+                            ON CONFLICT DO NOTHING
+                        """
+                        rows_inserted = 0
+                        for rec in isbn_records:
+                            try:
+                                await conn.execute(insert_sql, rec[0], rec[1])
+                                rows_inserted += 1
+                            except Exception as e:
+                                logger.error(f"Error inserting ISBN {rec[1]} for package_id {rec[0]}: {e}")
+                        results["operations"].append(
+                            {
+                                "name": "extract_and_insert_isbns",
+                                "status": "success",
+                                "rows_affected": rows_inserted,
+                            }
+                        )
+                        results["rows_affected"] += rows_inserted
+                        logger.info(f"Inserted {rows_inserted} congressional directories ISBN records")
+                    else:
+                        results["operations"].append(
+                            {
+                                "name": "extract_and_insert_isbns",
+                                "status": "success",
+                                "rows_affected": 0,
+                                "note": "No ISBNs found to insert"
+                            }
+                        )
             except Exception as e:
-                logger.error(f"Error populating is_law field: {e}")
+                logger.error(f"Error extracting/inserting congressional directories ISBNs: {e}")
                 results["operations"].append(
                     {
-                        "name": "populate_is_law_field",
+                        "name": "extract_and_insert_isbns",
                         "status": "error",
                         "error": str(e),
                     }
@@ -310,40 +515,94 @@ class CongressionalDirectoriesCleaner:
 
         return results
 
-    # Helper methods from base cleaner
-    def safe_int(self, value: Any, default: int = None) -> int | None:
-        """Safely convert value to int."""
-        if value is None:
-            return default
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return default
+    async def _post_process_congressionaldirectories_granules(self) -> dict[str, Any]:
+        """
+        Post-processing for congressional directories granules:
+        - Extract zipcodes from the staging table's zipcodes column (space-separated string)
+        - Insert each zipcode into the production members_zipcodes table
+          with package_id, granule_id, bioguide_id, and the zipcode
+        """
+        results = {
+            "status": "success",
+            "operations": [],
+            "rows_affected": 0,
+        }
 
-    def standardize_chamber(self, chamber: str) -> str | None:
-        """Standardize chamber names."""
-        if not chamber:
-            return None
-        chamber_lower = chamber.lower()
-        if chamber_lower in ["house", "h"]:
-            return "house"
-        elif chamber_lower in ["senate", "s"]:
-            return "senate"
-        else:
-            return chamber_lower
+        if not self.db_pool:
+            raise ValueError("Database pool not configured")
 
-    def standardize_date(self, date_str: str) -> str | None:
-        """Standardize date strings."""
-        if not date_str:
-            return None
-        # Add date parsing logic here
-        return date_str
+        async with self.db_pool.acquire() as conn:
+            try:
+                # Fetch all relevant records from the staging table
+                fetch_sql = f"""
+                    SELECT
+                        g.packageid AS package_id,
+                        g.id AS granule_id,
+                        gm.bioguideid AS bioguide_id,
+                        gm.zipcodes AS zipcodes
+                    FROM {self.staging_schema}.congressionaldirectories_granules g
+                    LEFT JOIN {self.staging_schema}.congressionaldirectories_granules_members gm
+                        ON g.id = gm.granule_id
+                    WHERE gm.zipcodes IS NOT NULL AND TRIM(gm.zipcodes) <> ''
+                """
+                rows = await conn.fetch(fetch_sql)
 
-    def clean_long_text(self, text: str) -> str | None:
-        """Clean long text fields."""
-        if not text:
-            return None
-        # Add text cleaning logic here
-        return text.strip()
+                zipcode_records = []
+                for row in rows:
+                    package_id = row["package_id"]
+                    granule_id = row["granule_id"]
+                    bioguide_id = row["bioguide_id"]
+                    zipcodes_str = row["zipcodes"]
+                    if not zipcodes_str:
+                        continue
+                    # Split by whitespace, filter out empty strings
+                    zipcodes = [z for z in str(zipcodes_str).split() if z]
+                    for zipcode in zipcodes:
+                        zipcode_records.append((package_id, granule_id, bioguide_id, zipcode))
 
+                rows_inserted = 0
+                if zipcode_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.members_zipcodes
+                        (package_id, granule_id, bioguide_id, zipcode)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT DO NOTHING
+                    """
+                    for rec in zipcode_records:
+                        try:
+                            await conn.execute(insert_sql, *rec)
+                            rows_inserted += 1
+                        except Exception as e:
+                            logger.error(
+                                f"Error inserting zipcode {rec[3]} for package_id {rec[0]}, granule_id {rec[1]}, bioguide_id {rec[2]}: {e}"
+                            )
+                    results["operations"].append(
+                        {
+                            "name": "extract_and_insert_zipcodes",
+                            "status": "success",
+                            "rows_affected": rows_inserted,
+                        }
+                    )
+                    results["rows_affected"] += rows_inserted
+                    logger.info(f"Inserted {rows_inserted} congressional directories member zipcode records")
+                else:
+                    results["operations"].append(
+                        {
+                            "name": "extract_and_insert_zipcodes",
+                            "status": "success",
+                            "rows_affected": 0,
+                            "note": "No zipcodes found to insert"
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Error extracting/inserting congressional directories member zipcodes: {e}")
+                results["operations"].append(
+                    {
+                        "name": "extract_and_insert_zipcodes",
+                        "status": "error",
+                        "error": str(e),
+                    }
+                )
+                results["status"] = "partial_failure"
 
+        return results
