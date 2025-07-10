@@ -41,6 +41,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: amendments_cosponsors
   description: Amendment cosponsors data
@@ -60,6 +61,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: amendments_actions
   description: Amendment actions data
@@ -82,6 +84,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: amendments_actions_recordedvotes
   description: Amendment actions recorded votes data
@@ -94,6 +97,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: amendments_actions_committees
   description: Amendment actions committees data
@@ -107,6 +111,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: amendments_texts
   description: Amendment texts data
@@ -127,6 +132,7 @@
   processing:
     batch_size: 200
     checkpoint_frequency: 100
+    scaling_factor: 50
 
 - name: amendments_on_behalf_of
   description: Amendment on behalf of data
@@ -140,6 +146,7 @@
   processing:
     batch_size: 500
     checkpoint_frequency: 250
+    scaling_factor: 50
 
 - name: amendments_links
   description: Amendment links data

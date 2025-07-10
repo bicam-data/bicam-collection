@@ -393,7 +393,13 @@ class StreamlinedNormalizer:
 
                     table_name = f"{data_type}_{related_table}".lower()
 
-                    if not rerun and staging_checkpoint.should_skip_table(table_name):
+                    # If rerun is True, clear the checkpoint for this related table
+                    if rerun:
+                        logger.info(f"Rerun mode: clearing checkpoint for {table_name}")
+                        self._clear_related_table_checkpoint(
+                            staging_checkpoint, f"{data_type}_{related_table}".lower()
+                        )
+                    elif staging_checkpoint.should_skip_table(table_name):
                         logger.info(
                             f"Related table {table_name} already processed, skipping"
                         )
@@ -743,37 +749,40 @@ class StreamlinedNormalizer:
                 count_result = await conn.fetchval(
                     f"SELECT COUNT(*) FROM {source_schema}.{source_table}"
                 )
-                logger.debug(
+                logger.info(
                     f"Found {count_result} records in {source_schema}.{source_table}"
                 )
                 checkpoint.total_items = count_result
                 staging_checkpoint.save_checkpoint(checkpoint)
 
                 if count_result == 0:
-                    logger.debug(
+                    logger.info(
                         f"No records found in {source_schema}.{source_table} - skipping processing"
                     )
                     return stats
         except Exception as e:
-            logger.debug(
+            logger.error(
                 f"Could not count records in {source_schema}.{source_table}: {e}"
             )
             return stats
 
-        # Process in batches with offset for resume
-        # If we're starting fresh (no processed items), start at offset 0
-        logger.info(
-            f"Checkpoint state: processed_items={checkpoint.processed_items}, current_offset={checkpoint.current_offset}, total_items={checkpoint.total_items}"
-        )
+        # Determine starting offset based on checkpoint state
+        # If we have processed items but offset is 0, we need to recalculate offset
+        # If we have no processed items, start from 0
         if checkpoint.processed_items == 0:
             offset = 0
             checkpoint.current_offset = 0
             staging_checkpoint.save_checkpoint(checkpoint)
-            logger.info("Starting fresh, reset offset to 0")
+            logger.info(
+                f"Starting fresh processing for {target_table}, offset reset to 0"
+            )
         else:
             offset = checkpoint.current_offset
-            logger.info(f"Resuming from offset {offset}")
+            logger.info(
+                f"Resuming processing for {target_table} from offset {offset} (processed: {checkpoint.processed_items})"
+            )
 
+        # Process in batches using offset-based pagination
         while True:
             # Fetch batch
             query = f"""
@@ -789,14 +798,14 @@ class StreamlinedNormalizer:
                         f"Fetched {len(rows)} rows from {source_schema}.{source_table} at offset {offset}"
                     )
             except Exception as e:
-                logger.debug(
+                logger.error(
                     f"Could not fetch records from {source_schema}.{source_table}: {e}"
                 )
                 stats["errors"] += 1
                 break
 
             if not rows:
-                logger.debug(
+                logger.info(
                     f"No more rows to process from {source_schema}.{source_table} at offset {offset}"
                 )
                 break
@@ -809,19 +818,6 @@ class StreamlinedNormalizer:
                     try:
                         source_doc_id = record.get("source_doc_id")
 
-                        # Check if already processed
-                        is_processed = staging_checkpoint.cm.is_item_processed(
-                            ProcessingStage.STAGING,
-                            StagingPhase.JSONB_TO_STAGING.value,
-                            f"{data_type}_{related_table}".lower(),
-                            source_doc_id,
-                        )
-                        if is_processed:
-                            logger.debug(
-                                f"Skipping already processed record: {source_doc_id}"
-                            )
-                            return {"success": True, "skipped": True}
-
                         # Standard processing - all data comes from "payload" field
                         payload = record.get("payload", {})
                         if isinstance(payload, str):
@@ -830,19 +826,6 @@ class StreamlinedNormalizer:
                         if not payload:
                             logger.warning(f"Empty payload for {source_doc_id}")
                             return {"success": False, "error": "Empty payload"}
-
-                        # # Check for wrapper key if configured
-                        # if hasattr(config.api, "full_key") and config.api.full_key:
-                        #     if config.api.full_key in payload:
-                        #         payload = payload[config.api.full_key]
-                        #     else:
-                        #         logger.warning(
-                        #             f"Expected wrapper key '{config.api.full_key}' not found in payload"
-                        #         )
-                        #         return {
-                        #             "success": False,
-                        #             "error": f"Missing wrapper key: {config.api.full_key}",
-                        #         }
 
                         # Get record ID using configured field
                         record_id = payload.get(config.id_field) or source_doc_id
@@ -888,14 +871,6 @@ class StreamlinedNormalizer:
                                 checkpoint=False,
                             )
 
-                        # Mark as processed
-                        staging_checkpoint.cm.mark_item_processed(
-                            ProcessingStage.STAGING,
-                            StagingPhase.JSONB_TO_STAGING.value,
-                            f"{data_type}_{related_table}".lower(),
-                            source_doc_id,
-                        )
-
                         return {"success": True}
 
                     except Exception as e:
@@ -916,26 +891,39 @@ class StreamlinedNormalizer:
             results = await asyncio.gather(
                 *[process_record(r) for r in rows], return_exceptions=True
             )
+
             # Update stats
+            batch_processed = 0
+            batch_errors = 0
             for result in results:
                 if isinstance(result, Exception):
-                    stats["errors"] += 1
+                    batch_errors += 1
                 elif isinstance(result, dict) and result.get("success"):
-                    if not result.get("skipped"):
-                        stats["processed"] += 1
+                    batch_processed += 1
                 else:
-                    stats["errors"] += 1
+                    batch_errors += 1
 
-            # Update checkpoint
+            stats["processed"] += batch_processed
+            stats["errors"] += batch_errors
+
+            # Update checkpoint after each batch
             offset += len(rows)
             checkpoint.current_offset = offset
             checkpoint.processed_items = stats["processed"]
             checkpoint.failed_items = stats["errors"]
             staging_checkpoint.save_checkpoint(checkpoint)
 
+            logger.info(
+                f"Batch processed for {target_table}: {batch_processed} processed, {batch_errors} errors. "
+                f"Total: {stats['processed']}/{checkpoint.total_items} processed, offset: {offset}"
+            )
+
         # Final flush
         await self.normalizer_storage.flush_all()
 
+        logger.info(
+            f"Completed processing {target_table}: {stats['processed']} processed, {stats['errors']} errors"
+        )
         return stats
 
     async def _extract_all_lists(
@@ -1625,6 +1613,33 @@ class StreamlinedNormalizer:
                 "config_available": False,
                 "error": str(e),
             }
+
+    def _clear_related_table_checkpoint(
+        self, staging_checkpoint, related_table_key: str
+    ):
+        """Clear checkpoint for a related table to force reprocessing."""
+        try:
+            # Get the checkpoint and reset it
+            checkpoint = staging_checkpoint.cm.get_or_create_checkpoint(
+                ProcessingStage.STAGING,
+                StagingPhase.JSONB_TO_STAGING.value,
+                related_table_key,
+            )
+
+            # Reset checkpoint state
+            checkpoint.processed_items = 0
+            checkpoint.current_offset = 0
+            checkpoint.failed_items = 0
+            checkpoint.skipped_items = 0
+            checkpoint.error_message = None
+
+            # Save the reset checkpoint
+            staging_checkpoint.save_checkpoint(checkpoint)
+
+            logger.info(f"Cleared checkpoint for {related_table_key}")
+
+        except Exception as e:
+            logger.warning(f"Error clearing checkpoint for {related_table_key}: {e}")
 
     async def cleanup(self):
         """Clean up normalizer resources."""
