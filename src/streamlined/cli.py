@@ -1175,19 +1175,24 @@ async def command_fetch_related(args) -> int:
     try:
         from .executor import StreamlinedExecutor
         from .plugins.consolidated_registry import get_consolidated_registry
+        from .resources.config import StreamlinedConfig
         from .resources.coordinator import ResourceCoordinator
 
         logger.info(f"\n{'=' * 60}")
         logger.info(f"FETCHING RELATED TABLES for {args.data_type}")
         logger.info(f"{'=' * 60}")
 
+        # Load configuration with API keys
+        logger.info("Loading configuration...")
+        config = StreamlinedConfig.from_env()
+
         # Get the data source for this data type
         registry = get_consolidated_registry()
         data_source = registry.get_data_source(args.data_type)
         logger.info(f"Data source for {args.data_type}: {data_source}")
 
-        # Initialize coordinator with the correct data source
-        coordinator = ResourceCoordinator(source=data_source)
+        # Initialize coordinator with the correct data source and configuration
+        coordinator = ResourceCoordinator(source=data_source, config=config)
         await coordinator.initialize()
 
         executor = StreamlinedExecutor(coordinator)
