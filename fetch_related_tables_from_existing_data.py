@@ -19,6 +19,7 @@ import asyncio
 import logging
 
 from src.streamlined.fetcher import StreamlinedFetcher
+from src.streamlined.resources.config import StreamlinedConfig
 from src.streamlined.resources.coordinator import ResourceCoordinator
 
 logging.basicConfig(level=logging.INFO)
@@ -45,17 +46,38 @@ async def fetch_related_tables_from_existing_data(
         to_date: End date filter (optional)
     """
 
-    # Initialize coordinator
-    coordinator = ResourceCoordinator()
+    # Load configuration from environment
+    logger.info("Loading configuration from environment...")
+    config = StreamlinedConfig.from_env()
+
+    # Validate configuration
+    errors = config.validate()
+    if errors:
+        logger.error(f"Configuration errors: {', '.join(errors)}")
+        return
+
+    logger.info(
+        f"Configuration loaded successfully with {len(config.api.keys)} API keys"
+    )
+
+    # Get the data source for this data type
+    from src.streamlined.plugins.consolidated_registry import get_consolidated_registry
+
+    registry = get_consolidated_registry()
+    data_source = registry.get_data_source(data_type)
+    logger.info(f"Data source for {data_type}: {data_source}")
+
+    # Initialize coordinator with configuration and data source
+    coordinator = ResourceCoordinator(config=config, source=data_source)
     await coordinator.initialize()
 
     # Create fetcher
     fetcher = await StreamlinedFetcher.from_coordinator(
-        coordinator, data_type_name=data_type, data_source="congressional"
+        coordinator, data_type_name=data_type, data_source=data_source
     )
 
     # Get database pool
-    db_pool = coordinator.get_db_pool()
+    db_pool = await coordinator.get_db_pool()
     if not db_pool:
         logger.error("No database pool available")
         return
@@ -68,7 +90,7 @@ async def fetch_related_tables_from_existing_data(
     query = f"""
     SELECT
         payload,
-        source_doc_id,
+        source_doc_id
     FROM {schema_name}.{table_name}
     WHERE payload IS NOT NULL
     """
@@ -93,8 +115,7 @@ async def fetch_related_tables_from_existing_data(
         query += f" LIMIT {limit}"
 
     logger.info(f"Querying existing Phase 2 data from {schema_name}.{table_name}")
-    logger.info(f"Query: {query}")
-    logger.info(f"Parameters: {params}")
+    logger.info(f"Related tables to fetch: {related_tables}")
 
     # Get all existing Phase 2 data
     async with db_pool.acquire() as conn:
