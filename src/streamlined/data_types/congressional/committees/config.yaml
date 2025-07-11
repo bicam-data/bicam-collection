@@ -62,3 +62,20 @@
   processing:
     batch_size: 100
     checkpoint_frequency: 50
+
+- name: committees_bills
+  description: Congressional committees bills data
+
+  api:
+    api_endpoint: bills
+    list_key: [committee-bills, bills]
+
+  schema:
+    table_name: committees_bills
+    is_main: false
+    create_raw: true
+    id_fields: [committee_code, bill_id]
+
+  processing:
+    batch_size: 100
+    checkpoint_frequency: 50
