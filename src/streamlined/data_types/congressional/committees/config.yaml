@@ -14,6 +14,7 @@
     id_fields: [committee_code]
     related_tables:
       - committeereports
+      - bills
 
   processing:
     batch_size: 50
