@@ -49,6 +49,14 @@ class CommitteesFetcherLogic(CongressionalBaseFetcherLogic):
             full_committee_data, related_table_name="reports", client=client
         )
 
+    async def get_committees_bills(
+        self, full_committee_data: dict[str, Any], client
+    ) -> list[dict[str, Any]]:
+        """Get committee reports from reports URL in full committee data."""
+        return await self.get_generic_related_data(
+            full_committee_data, related_table_name="bills", client=client
+        )
+
 class CommitteesCleanerLogic(BaseCleanerLogic):
     """
     Committees-specific cleaner logic extracted from CommitteesCleaner class.

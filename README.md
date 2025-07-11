@@ -1,61 +1,157 @@
-# bicam-collection
+# Bicam Collection - Amendment Processing
 
-# Overview
-This repository contains the code used for the collection and cleaning of the Bulk Ingestion of Congressional Actions & Materials, also known as the BICAM dataset. Below, we will detail each section of the code, and the order in which they should be run to create the BICAM dataset.
+This project processes JSON amendment data from the Congress.gov API into SQL tables defined in the staging schema (`staging_congressional`).
 
-## Sections
+## Overview
 
-### database_construction
-This section contains the code for creating the database schema, built in PostgreSQL. All scripts beginning with `build_` create the schemas and tables,
-while the `join_congressional_govinfo.sql` script takes both production schemas and the staging schemas and joins them together into BICAM.
+The system reads from raw tables in the `bicam_raw_congressional` schema and processes them into structured tables in the `staging_congressional` schema. It supports processing:
 
-### scrapers
-This section contains the code for scraping the data from the source websites. The `congressional` and `govinfo` folders contain the scrapers for the Congressional and GovInfo data, respectively, including the main scrapers, the cleanup scripts for testing and debugging, the script for inserting the data into the database, and the script for scraping text data from URLs in given components.
+- **Amendments** (`bicam_raw_congressional.amendments_raw`)
+- **Amendment Actions** (`bicam_raw_congressional.amendments_actions_raw`)
 
-### lobbyist_matching
-This section contains the code for extracting and matching references to legislation from lobbying filings.
+## Setup
 
-### cleaning
-This section contains the code for cleaning the data. The `staging_info.yml` file contains the information for the cleaning scripts, and the `final_cleaning_and_creation.py` script is the main script for cleaning the data, utilizing each individual cleaning script with custom arguments.
+1. **Environment Variables**: Create a `.env` file with your database credentials:
+   ```
+   POSTGRESQL_HOST=your_host
+   POSTGRESQL_PORT=5432
+   POSTGRESQL_DATABASE=your_database
+   POSTGRESQL_USERNAME=your_username
+   POSTGRESQL_PASSWORD=your_password
+   ```
 
-### backfills
-This section contains the code for backfilling the data into the database. When joining the schemas, we find that some data exists from one source, but not in another, or we need to add data that raised errors during the original scraping process. These scripts are used to add this data to the database.
+2. **Database Schema**: Run the staging schema creation script:
+   ```bash
+   psql -h your_host -U your_username -d your_database -f build_staging_congressional.sql
+   ```
 
-### bulk_exports
-This section contains the code for exporting the data to zipped folders of CSV files.
+3. **SQL Functions**: Load the processing functions:
+   ```bash
+   python process_amendments.py --table-type amendments --reload-functions
+   ```
 
-## Sequence
+## Usage
 
-First, set up your environment variables for your GovInfo API key, Congress.gov API key, and database configuration. 
+### Generic Processor
 
-The database configuration should be in a `.env` file in the same directory as the scrapers, with the parameters:
+The main script `process_amendments.py` is now a generic processor that can handle different table types:
+
+```bash
+# Process amendments
+python process_amendments.py --table-type amendments --process-all
+
+# Process amendment actions
+python process_amendments.py --table-type amendment_actions --process-all
+
+# Test with a single record
+python process_amendments.py --table-type amendments --test
+python process_amendments.py --table-type amendment_actions --test
+
+# Get statistics
+python process_amendments.py --table-type amendments --unprocessed-stats
+python process_amendments.py --table-type amendment_actions --unprocessed-stats
 ```
-POSTGRESQL_USER=''
-POSTGRESQL_PASSWORD=''
-POSTGRESQL_HOST=''
-POSTGRESQL_PORT=''
-POSTGRESQL_DB=''
+
+### Command Line Options
+
+- `--table-type`: Type of table to process (`amendments` or `amendment_actions`)
+- `--process-all`: Process all records from the raw table
+- `--from-raw-table`: Process from raw table with custom parameters
+- `--batch-size`: Number of records to process in each batch (default: 1000)
+- `--start-offset`: Starting offset for processing (default: 0)
+- `--max-records`: Maximum number of records to process
+- `--test`: Test with a single record
+- `--unprocessed-stats`: Show unprocessed record statistics
+
+### Examples
+
+**Process all amendments:**
+```bash
+python process_amendments.py --table-type amendments --process-all
 ```
 
-The API key for Congress.gov should be within `.env.gov` with the parameter `CONGRESS_API_KEY`, while the API key for GovInfo.gov should be in the file `.env.info` with the parameter `GOVINFO_API_KEY`. 
+**Process amendment actions in batches:**
+```bash
+python process_amendments.py --table-type amendment_actions --from-raw-table --batch-size 500
+```
 
-Once environmental variables are set, create the schemas in `database_construction`, running the `build_` scripts in any order. 
+**Test amendment processing:**
+```bash
+python process_amendments.py --table-type amendments --test
+```
 
-Next, run the scrapers in `scrapers`. These both scrape the data from the source websites - you may need to setup external tables to fully
-make use of the functionality to begin from the previous last-processed date and store errors. These scrapers utilize the package found within `api_interface` to interact with the API.
+**Get statistics:**
+```bash
+python process_amendments.py --table-type amendments --unprocessed-stats
+```
 
-After the scrapers are run, insert the data into the database using the `insert_csv.py` script in `scrapers` with the proper arguments for the
-source directory and the target schema.
+## Table Structure
 
-At any point in this process, you can begin the lobbyist matching in `lobbyist_matching` by running `main.py` from the command line - everything should follow
-from that, including matching and post-processing. Once this completes, insert the data into the database using the `insert_csv.py` script in `scrapers`.
+### Amendments
 
-Then, run the cleaning in `cleaning` by running `final_cleaning_and_creation.py` from the command line. All arguments should be provided
-within `staging_info.yml`, and the script will follow the order of the phases as defined in the script.
+The system creates the following tables for amendments:
 
-Next, join the schemas in `database_construction` using the `join_congressional_govinfo.sql` script. if there are errors, you can run the `backfills` section with any missing data.
+- `staging_congressional.amendments` - Main amendment records
+- `staging_congressional.amendments_sponsors` - Amendment sponsors
+- `staging_congressional.amendments_amended_bills` - Bills amended by amendments
+- `staging_congressional.amendments_amended_amendments` - Amendments amended by amendments
+- `staging_congressional.amendments_amended_treaties` - Treaties amended by amendments
 
-Finally, run the bulk exports in `bulk_exports` by running `exporter.py` from the command line with a target schema and target directory.
+### Amendment Actions
 
-#### DEPENDENCIES:
-Using astral's UV package (an improved version of pip), you can run `uv init` to initialize the project, and then `uv run` to run the project.
+The system creates the following tables for amendment actions:
+
+- `staging_congressional.amendments_actions` - Main action records
+- `staging_congressional.amendments_actions_recordedvotes` - Recorded votes for actions
+
+## ID Formats
+
+According to `formats.md`, the following ID formats are used:
+
+- **Amendments**: `{lower(type)}{number}-{congress}` (e.g., `samdt2686-118`)
+- **Bills**: `{lower(type)}{number}-{congress}` (e.g., `s4638-118`)
+- **Treaties**: `td{congressreceived}-{number}` (e.g., `td118-123`)
+
+## Error Handling
+
+The system includes comprehensive error handling:
+
+- Batch processing with rollback on errors
+- Detailed logging of processing statistics
+- Conflict resolution for duplicate records
+- Graceful handling of malformed JSON data
+
+## Development
+
+### Testing
+
+Test individual components:
+
+```bash
+# Test amendment processing
+python test_single_amendment.py
+
+# Test amendment actions processing
+python process_amendments.py --table-type amendment_actions --test
+```
+
+### Debugging
+
+Use the diagnostic scripts for troubleshooting:
+
+```bash
+# Debug specific errors
+python debug_specific_errors.py
+
+# Get detailed diagnostics
+python debug_amendments.py
+```
+
+## File Structure
+
+- `process_amendments.py` - Generic processor for all table types
+- `convert_amendments_json_to_sql.sql` - SQL functions and procedures
+- `build_staging_congressional.sql` - Database schema creation
+- `test_single_amendment.py` - Single amendment testing
+- `debug_amendments.py` - Diagnostic tools
+- `formats.md` - ID format specifications
