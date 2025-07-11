@@ -205,8 +205,22 @@ class StreamlinedExecutor:
 
         # Initialize fetcher lazily if not already done
         if self.fetcher is None:
+            # Extract parallel related data options
+            parallel_related_data_kwargs = {}
+            if "enable_parallel_related_data" in kwargs:
+                parallel_related_data_kwargs["enable_parallel_related_data"] = kwargs[
+                    "enable_parallel_related_data"
+                ]
+            if "parallel_related_data_threshold" in kwargs:
+                parallel_related_data_kwargs["parallel_related_data_threshold"] = (
+                    kwargs["parallel_related_data_threshold"]
+                )
+
             self.fetcher = await StreamlinedFetcher.from_coordinator(
-                self.coordinator, data_type_name=data_type, data_source=data_source
+                self.coordinator,
+                data_type_name=data_type,
+                data_source=data_source,
+                **parallel_related_data_kwargs,
             )
 
         # Use streamlined fetcher with plugin system

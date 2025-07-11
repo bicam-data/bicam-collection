@@ -146,6 +146,24 @@
   
   processing:
     batch_size: 50
+    checkpoint_frequency: 25
+
+  # Example configuration for parallel related data processing
+  # (Uncomment and configure as needed)
+  # parallel_related_data:
+  #   enabled: true
+  #   threshold_pages: 10  # Only parallelize if more than 10 pages
+  #   max_workers: 4       # Maximum workers for related data pagination
+  #   related_types:
+  #     actions:
+  #       list_key: ["actions"]
+  #       page_size: 250
+  #     cosponsors:
+  #       list_key: ["cosponsors"]
+  #       page_size: 250
+  #     subjects:
+  #       list_key: ["subjects"]
+  #       page_size: 250
 
 - name: bills_texts
   description: Congressional bills text data

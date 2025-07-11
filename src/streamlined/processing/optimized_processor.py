@@ -615,9 +615,37 @@ class OptimizedParallelProcessor:
                                         logger.debug(
                                             f"Worker {worker_id} starting Phase 3 for item {item.get('url', 'unknown')}"
                                         )
-                                        related_data = await fetcher.fetch_phase_3_data_with_client(
+
+                                        # Check if this item needs parallel related data processing
+                                        pagination_info = await fetcher.get_related_data_pagination_metadata(
                                             detailed_data, client
                                         )
+
+                                        if (
+                                            pagination_info
+                                            and pagination_info.get(
+                                                "total_parallel_work", 0
+                                            )
+                                            > 10
+                                        ):
+                                            # Use parallel processing for related data
+                                            logger.info(
+                                                f"Worker {worker_id} using parallel processing for related data: "
+                                                f"{pagination_info['total_parallel_work']} pages to process"
+                                            )
+
+                                            related_data = await self._process_related_data_parallel(
+                                                worker_id=worker_id,
+                                                fetcher=fetcher,
+                                                pagination_info=pagination_info,
+                                                client=client,
+                                                optimized_storage=optimized_storage,
+                                            )
+                                        else:
+                                            # Use normal sequential processing
+                                            related_data = await fetcher.fetch_phase_3_data_with_client(
+                                                detailed_data, client
+                                            )
 
                                         if related_data:
                                             requests_made += len(
@@ -785,6 +813,194 @@ class OptimizedParallelProcessor:
             f"- processed {processed} items"
         )
         return processed
+
+    async def _process_related_data_parallel(
+        self,
+        worker_id: str,
+        fetcher,
+        pagination_info: dict[str, Any],
+        client,
+        optimized_storage,
+    ) -> list[dict[str, Any]]:
+        """
+        Process related data pagination in parallel using multiple workers.
+
+        This method creates a work queue for the pagination pages and distributes
+        the work across available workers to fetch related data concurrently.
+        """
+        try:
+            total_pages = pagination_info.get("total_parallel_work", 0)
+            if total_pages == 0:
+                return []
+
+            logger.info(
+                f"Worker {worker_id} starting parallel related data processing: "
+                f"{total_pages} pages for item {pagination_info.get('item_id')}"
+            )
+
+            # Create a work queue for the pagination pages
+            # Use smaller chunks for pagination (each page is ~250 items)
+            page_chunk_size = max(1, min(5, total_pages // 10))  # 1-5 pages per chunk
+
+            related_work_queue = AdaptiveWorkQueue(
+                total_records=total_pages,
+                initial_chunk_size=page_chunk_size,
+                page_size=page_chunk_size,
+            )
+
+            # Create workers for related data pagination
+            # Use fewer workers than main processing to avoid overwhelming the API
+            configured_max_workers = pagination_info.get("max_workers", 4)
+            num_related_workers = min(configured_max_workers, len(self.api_keys))
+
+            logger.info(
+                f"Creating {num_related_workers} workers for related data pagination "
+                f"({total_pages} pages, {page_chunk_size} pages per chunk, "
+                f"configured max: {configured_max_workers})"
+            )
+
+            # Create and start related data workers
+            worker_tasks = []
+            worker_results = [
+                {"processed": 0, "errors": 0, "data": []}
+                for _ in range(num_related_workers)
+            ]
+
+            for i in range(num_related_workers):
+                task = asyncio.create_task(
+                    self._process_related_data_worker(
+                        worker_id=f"related_{worker_id}_worker_{i}",
+                        fetcher=fetcher,
+                        work_queue=related_work_queue,
+                        pagination_info=pagination_info,
+                        worker_results=worker_results[i],
+                        client_class=self.client_class,
+                        key_pool=self.key_pool,
+                    )
+                )
+                worker_tasks.append(task)
+
+            # Wait for all related data workers to complete
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
+
+            # Aggregate all related data
+            all_related_data = []
+            total_processed = 0
+            total_errors = 0
+
+            for result in worker_results:
+                all_related_data.extend(result.get("data", []))
+                total_processed += result.get("processed", 0)
+                total_errors += result.get("errors", 0)
+
+            logger.info(
+                f"Worker {worker_id} completed parallel related data processing: "
+                f"{len(all_related_data)} items, {total_processed} pages processed, {total_errors} errors"
+            )
+
+            return all_related_data
+
+        except Exception as e:
+            logger.error(f"Error in parallel related data processing: {e}")
+            return []
+
+    async def _process_related_data_worker(
+        self,
+        worker_id: str,
+        fetcher,
+        work_queue: AdaptiveWorkQueue,
+        pagination_info: dict[str, Any],
+        worker_results: dict,
+        client_class,
+        key_pool,
+    ):
+        """Worker function for processing related data pagination in parallel."""
+        logger.info(f"Related data worker {worker_id} started")
+
+        try:
+            while True:
+                # Get next chunk of work (page numbers)
+                chunk = await work_queue.get_work(worker_id)
+                if chunk is None:
+                    logger.info(
+                        f"Related data worker {worker_id} finished - no more work"
+                    )
+                    break
+
+                chunk_id = chunk.chunk_id
+                start_offset = chunk.start_offset
+                end_offset = chunk.end_offset
+
+                # Convert offset range to page numbers
+                page_numbers = list(range(start_offset, end_offset))
+
+                logger.info(
+                    f"Related data worker {worker_id} processing chunk {chunk_id} "
+                    f"(pages: {page_numbers})"
+                )
+
+                # Get API key for this request
+                pooled_key = await self._acquire_api_key_with_smart_backoff(
+                    worker_id, key_pool, len(page_numbers), chunk, 0
+                )
+
+                if not pooled_key:
+                    logger.warning(
+                        f"Related data worker {worker_id} could not acquire API key, skipping chunk"
+                    )
+                    await work_queue.complete_work(worker_id, chunk_id, success=False)
+                    continue
+
+                # Create client with this API key and use as async context manager
+                client = client_class(api_keys=[pooled_key.key])
+
+                async with client:
+                    try:
+                        # Fetch related data for these pages
+                        page_data = await fetcher.fetch_related_data_pages_parallel(
+                            pagination_info, client, page_numbers
+                        )
+
+                        if page_data:
+                            worker_results["data"].extend(page_data)
+                            worker_results["processed"] += len(page_numbers)
+                            logger.debug(
+                                f"Related data worker {worker_id} got {len(page_data)} items "
+                                f"from {len(page_numbers)} pages"
+                            )
+                        else:
+                            logger.debug(
+                                f"Related data worker {worker_id} no data from {len(page_numbers)} pages"
+                            )
+
+                        # Return API key to pool
+                        await key_pool.checkin_key(pooled_key.key, len(page_numbers))
+
+                        # Mark chunk as completed
+                        await work_queue.complete_work(
+                            worker_id, chunk_id, success=True
+                        )
+
+                    except Exception as e:
+                        logger.error(
+                            f"Related data worker {worker_id} error processing chunk {chunk_id}: {e}"
+                        )
+                        worker_results["errors"] += 1
+                        # Return API key to pool even on error
+                        await key_pool.checkin_key(pooled_key.key, len(page_numbers))
+                        await work_queue.complete_work(
+                            worker_id, chunk_id, success=False
+                        )
+
+        except Exception as e:
+            logger.error(
+                f"Related data worker {worker_id} encountered fatal error: {e}"
+            )
+        finally:
+            logger.info(
+                f"Related data worker {worker_id} completed. "
+                f"Processed: {worker_results['processed']}, Errors: {worker_results['errors']}"
+            )
 
     async def _acquire_api_key_with_smart_backoff(
         self,
@@ -1336,13 +1552,14 @@ class OptimizedParallelProcessor:
                             )
                             continue
 
-                        # Create client with this API key
+                        # Create client with this API key and use as async context manager
                         client = self.client_class(api_keys=[pooled_key.key])
 
-                        # Fetch related data for this item
-                        related_data = await self._fetch_specific_related_tables_for_item_with_client(
-                            fetcher, payload, related_tables, client
-                        )
+                        async with client:
+                            # Fetch related data for this item
+                            related_data = await self._fetch_specific_related_tables_for_item_with_client(
+                                fetcher, payload, related_tables, client
+                            )
 
                         if related_data:
                             # Store the related data using optimized storage if available
@@ -1436,14 +1653,10 @@ class OptimizedParallelProcessor:
                         result = await method(detailed_data, client)
 
                         if result:
-                            # Extract item ID for the parent record
-                            item_id = custom_logic.extract_item_id(detailed_data)
                             related_data.append(
                                 {
                                     "type": method_name,
-                                    f"{fetcher.data_type_name}_id": item_id,
                                     "data": result,
-                                    "method": method_name,
                                 }
                             )
                             logger.debug(f"{method_name} returned {len(result)} items")

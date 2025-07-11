@@ -88,6 +88,24 @@ Examples:
         help="Disable parallel processing",
     )
 
+    # Parallel related data options
+    process_parser.add_argument(
+        "--enable-parallel-related-data",
+        action="store_true",
+        default=True,
+        help="Enable parallel processing for related data pagination (default: from config)",
+    )
+    process_parser.add_argument(
+        "--disable-parallel-related-data",
+        action="store_true",
+        help="Disable parallel processing for related data pagination",
+    )
+    process_parser.add_argument(
+        "--parallel-related-data-threshold",
+        type=int,
+        help="Minimum pages to trigger parallel related data processing (default: from config)",
+    )
+
     # Incremental processing options
     process_parser.add_argument(
         "--enable-incremental",
@@ -302,6 +320,17 @@ async def command_process(args) -> int:
         resume_from_checkpoint = not args.no_resume
         kwargs["resume_from_checkpoint"] = resume_from_checkpoint
 
+        # Handle parallel related data options
+        if args.enable_parallel_related_data:
+            kwargs["enable_parallel_related_data"] = True
+        elif args.disable_parallel_related_data:
+            kwargs["enable_parallel_related_data"] = False
+
+        if args.parallel_related_data_threshold:
+            kwargs["parallel_related_data_threshold"] = (
+                args.parallel_related_data_threshold
+            )
+
         logger.info(
             f"Parallelization: {'enabled' if enable_parallelization else 'disabled'}"
         )
@@ -313,6 +342,16 @@ async def command_process(args) -> int:
         )
         if args.fallback_days:
             logger.info(f"Fallback days: {args.fallback_days}")
+
+        # Log parallel related data configuration
+        if "enable_parallel_related_data" in kwargs:
+            logger.info(
+                f"Parallel related data: {'enabled' if kwargs['enable_parallel_related_data'] else 'disabled'}"
+            )
+        if "parallel_related_data_threshold" in kwargs:
+            logger.info(
+                f"Parallel related data threshold: {kwargs['parallel_related_data_threshold']} pages"
+            )
 
         # Execute pipeline
         results = await execute_streamlined_pipeline(

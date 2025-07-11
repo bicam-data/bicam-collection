@@ -20,6 +20,19 @@
     batch_size: 50
     checkpoint_frequency: 25
 
+  # Configuration for parallel related data processing
+  parallel_related_data:
+    enabled: true
+    threshold_pages: 10  # Only parallelize if more than 10 pages
+    max_workers: 4       # Maximum workers for related data pagination
+    related_types:
+      bills:
+        list_key: ["committee-bills", "bills"]
+        page_size: 250
+      communications:
+        list_key: ["communications"]
+        page_size: 250
+
 - name: committees_subcommittees
   description: Congressional committees subcommittees data
 
@@ -64,7 +77,7 @@
     checkpoint_frequency: 50
 
 - name: committees_bills
-  description: Congressional committees bills data
+  description: Congressional committees bills relationship data
 
   api:
     api_endpoint: bills

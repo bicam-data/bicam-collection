@@ -876,13 +876,13 @@ class OptimizedFetcherStorage:
                 f"PHASE 3 STORAGE: Storing {len(items)} items of type '{item_type}'"
             )
             # Clean up method name to get just the table suffix
-            # e.g., "get_nominations_individualnominees" -> "individualnominees"
+            # e.g., "get_committees_bills" -> "bills"
             table_suffix = item_type
             if item_type.startswith("get_"):
                 table_suffix = item_type[4:]  # Remove "get_" prefix
 
                 # Remove data type prefix if present
-                # e.g., "nominations_individualnominees" -> "individualnominees"
+                # e.g., "committees_bills" -> "bills"
                 if table_suffix.startswith(f"{table_prefix}_"):
                     table_suffix = table_suffix[len(f"{table_prefix}_") :]
 

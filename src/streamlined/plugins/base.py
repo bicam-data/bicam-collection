@@ -219,7 +219,236 @@ class CongressionalBaseFetcherLogic:
             )
             return []
 
+    async def get_related_data_pagination_metadata(
+        self,
+        full_data: dict[str, Any],
+        related_table_name: str,
+        client,
+        list_key: list[str],
+        page_size: int = 250,
+    ) -> dict[str, Any] | None:
+        """
+        Generic method to get pagination metadata for any related data type.
 
+        This method can be used for any related data type that needs parallel pagination.
+
+        Args:
+            full_data: The complete item data
+            related_table_name: The field name in item data (e.g., "bills", "communications")
+            client: API client instance
+            list_key: The list key path to extract data from response
+            page_size: Page size for pagination
+
+        Returns:
+            Dict with pagination info or None if not applicable
+        """
+        try:
+            # Basic validation of expected structure
+            if related_table_name not in full_data:
+                return None
+
+            table_info = full_data[related_table_name]
+            if not isinstance(table_info, dict) or "url" not in table_info:
+                return None
+
+            url = table_info["url"]
+
+            # Extract the endpoint from the full URL
+            if not url.startswith(client.base_url):
+                return None
+
+            # Remove base URL and extract endpoint
+            endpoint = url.replace(client.base_url, "")
+
+            # Remove existing query parameters
+            if "?" in endpoint:
+                endpoint = endpoint.split("?")[0]
+
+            # Fetch just the first page to get pagination metadata
+            params = {"limit": 1, "offset": 0}
+
+            response = await client._make_request(endpoint, params)
+
+            # Extract pagination metadata
+            pagination = response.get("pagination", {})
+            total_count = pagination.get("count", 0)
+
+            if total_count > page_size:  # Only parallelize if there's significant data
+                return {
+                    "endpoint": endpoint,
+                    "total_count": total_count,
+                    "page_size": page_size,
+                    "total_pages": (total_count + page_size - 1) // page_size,
+                    "list_key": list_key,
+                    "item_id": self.extract_item_id(full_data),
+                    "related_table_name": related_table_name,
+                }
+
+            return None
+
+        except Exception as e:
+            logger.error(
+                f"Error getting pagination metadata for {related_table_name}: {e}"
+            )
+            return None
+
+    async def get_related_data_page(
+        self, pagination_metadata: dict[str, Any], page_number: int, client
+    ) -> list[dict[str, Any]]:
+        """
+        Generic method to fetch a specific page of related data.
+
+        This method can be used for any related data type that needs parallel pagination.
+
+        Args:
+            pagination_metadata: Metadata from get_related_data_pagination_metadata
+            page_number: Which page to fetch (0-based)
+            client: API client to use
+
+        Returns:
+            List of records for this page
+        """
+        try:
+            endpoint = pagination_metadata["endpoint"]
+            page_size = pagination_metadata["page_size"]
+            list_key = pagination_metadata["list_key"]
+            related_table_name = pagination_metadata.get(
+                "related_table_name", "unknown"
+            )
+
+            # Calculate offset for this page
+            offset = page_number * page_size
+
+            # Build parameters for this page
+            params = {
+                "limit": page_size,
+                "offset": offset,
+            }
+
+            logger.info(
+                f"Fetching {related_table_name} page {page_number + 1} "
+                f"(offset: {offset}) for {self.data_type} {pagination_metadata.get('item_id')}"
+            )
+
+            # Make the request
+            response = await client._make_request(endpoint, params)
+
+            # Extract data using the list_key
+            data = response
+            for key in list_key:
+                if isinstance(data, dict) and key in data:
+                    data = data.get(key)
+                else:
+                    data = None
+                    break
+
+            if data and isinstance(data, list):
+                logger.info(
+                    f"Page {page_number + 1}: Got {len(data)} items for {self.data_type} "
+                    f"{pagination_metadata.get('item_id')} ({related_table_name})"
+                )
+                return data
+            else:
+                logger.warning(
+                    f"Page {page_number + 1}: No data found for {self.data_type} "
+                    f"{pagination_metadata.get('item_id')} ({related_table_name})"
+                )
+                return []
+
+        except Exception as e:
+            logger.error(
+                f"Error fetching {related_table_name} page {page_number} for {self.data_type} "
+                f"{pagination_metadata.get('item_id')}: {e}"
+            )
+            return []
+
+    async def get_paginated_related_data(
+        self,
+        full_data: dict[str, Any],
+        related_table_name: str,
+        client,
+        list_key: list[str] | None = None,
+        page_size: int = 250,
+    ) -> list[dict[str, Any]]:
+        """
+        Generic method to fetch all related data using pagination.
+
+        This method orchestrates the pagination process by:
+        1. Getting pagination metadata to determine if parallelization is needed
+        2. If needed, fetching all pages sequentially (fallback for non-parallel contexts)
+        3. If not needed, falling back to the standard get_generic_related_data method
+
+        Args:
+            full_data: The complete item data
+            related_table_name: The field name in item data (e.g., "bills", "communications")
+            client: API client instance
+            list_key: The list key path to extract data from response
+            page_size: Page size for pagination
+
+        Returns:
+            List of all related records
+        """
+        try:
+            # Derive list_key if not provided
+            if list_key is None:
+                list_key = [related_table_name]
+
+            # Get pagination metadata to see if we need parallel processing
+            pagination_metadata = await self.get_related_data_pagination_metadata(
+                full_data, related_table_name, client, list_key, page_size
+            )
+
+            if pagination_metadata is None:
+                # No pagination needed, use standard method
+                logger.info(
+                    f"No pagination needed for {related_table_name}, using standard method"
+                )
+                return await self.get_generic_related_data(
+                    full_data, related_table_name, client, list_key
+                )
+
+            # Pagination is needed - fetch all pages sequentially as fallback
+            # (The optimized processor will handle parallel fetching when available)
+            logger.info(
+                f"Pagination needed for {related_table_name}: "
+                f"{pagination_metadata['total_count']} total items, "
+                f"{pagination_metadata['total_pages']} pages - fetching sequentially"
+            )
+
+            all_data = []
+            total_pages = pagination_metadata["total_pages"]
+
+            # Fetch all pages sequentially
+            for page_number in range(total_pages):
+                try:
+                    page_data = await self.get_related_data_page(
+                        pagination_metadata, page_number, client
+                    )
+                    if page_data:
+                        all_data.extend(page_data)
+                        logger.debug(
+                            f"Page {page_number + 1}/{total_pages}: Got {len(page_data)} items"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Error fetching page {page_number} for {related_table_name}: {e}"
+                    )
+
+            logger.info(
+                f"Completed sequential pagination for {related_table_name}: "
+                f"{len(all_data)} total items from {total_pages} pages"
+            )
+
+            return all_data
+
+        except Exception as e:
+            logger.error(
+                f"Error in get_paginated_related_data for {related_table_name}: {e}"
+            )
+            # Fall back to standard method on error
+            return await self.get_generic_related_data(
+                full_data, related_table_name, client, list_key
+            )
 class BaseCleanerLogic:
     """
     Base cleaner logic for congressional data with table override registration.

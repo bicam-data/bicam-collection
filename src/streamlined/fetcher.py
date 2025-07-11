@@ -38,6 +38,10 @@ class StreamlinedFetcher:
     - Supports comprehensive checkpoint management
     """
 
+    # Class-level configuration for parallel related data processing
+    ENABLE_PARALLEL_RELATED_DATA = True  # Can be overridden per instance
+    PARALLEL_RELATED_DATA_THRESHOLD = 10  # Minimum pages to trigger parallel processing
+
     def __init__(
         self,
         client,
@@ -50,6 +54,8 @@ class StreamlinedFetcher:
         resource_coordinator=None,
         checkpoint_db_path: str = "hierarchical_checkpoints.db",
         data_source: str | None = None,
+        enable_parallel_related_data: bool | None = None,
+        parallel_related_data_threshold: int | None = None,
     ):
         self.client = client
         self.db_pool = db_pool
@@ -60,6 +66,18 @@ class StreamlinedFetcher:
         self.config = config
         self.resource_coordinator = resource_coordinator
         self._data_source = data_source
+
+        # Instance-level parallel related data configuration
+        self.enable_parallel_related_data = (
+            enable_parallel_related_data
+            if enable_parallel_related_data is not None
+            else self.ENABLE_PARALLEL_RELATED_DATA
+        )
+        self.parallel_related_data_threshold = (
+            parallel_related_data_threshold
+            if parallel_related_data_threshold is not None
+            else self.PARALLEL_RELATED_DATA_THRESHOLD
+        )
 
         # Initialize hierarchical checkpoint manager
         self.hierarchical_checkpoint_manager = HierarchicalCheckpointManager(
@@ -75,12 +93,18 @@ class StreamlinedFetcher:
             self.api_keys = client.api_keys
 
         logger.info(
-            f"StreamlinedFetcher initialized for {data_type_name} (source: {data_source})"
+            f"StreamlinedFetcher initialized for {data_type_name} (source: {data_source}, "
+            f"parallel_related_data: {self.enable_parallel_related_data})"
         )
 
     @classmethod
     async def from_coordinator(
-        cls, resource_coordinator, data_type_name=None, data_source: str | None = None
+        cls,
+        resource_coordinator,
+        data_type_name=None,
+        data_source: str | None = None,
+        enable_parallel_related_data: bool | None = None,
+        parallel_related_data_threshold: int | None = None,
     ):
         """
         Create a StreamlinedFetcher from a ResourceCoordinator.
@@ -128,6 +152,8 @@ class StreamlinedFetcher:
             api_keys=api_keys,
             resource_coordinator=resource_coordinator,
             data_source=data_source,
+            enable_parallel_related_data=enable_parallel_related_data,
+            parallel_related_data_threshold=parallel_related_data_threshold,
         )
 
         return fetcher
@@ -454,6 +480,187 @@ class StreamlinedFetcher:
 
         except Exception as e:
             logger.error(f"Phase 3 fetch failed: {e}")
+            return []
+
+    async def get_related_data_pagination_metadata(
+        self, detailed_data: dict[str, Any], client
+    ) -> dict[str, Any] | None:
+        """
+        Get pagination metadata for related data that needs parallel processing.
+
+        This method checks if any related data endpoints have large datasets
+        that would benefit from parallel pagination processing.
+
+        Returns:
+            Dict with pagination metadata for parallel processing, or None if not needed
+        """
+        if not self._plugin or not detailed_data:
+            return None
+
+        # Check instance-level configuration first
+        if not self.enable_parallel_related_data:
+            return None
+
+        try:
+            # Get the parallel_related_data configuration from the data type config
+            config = await self._get_data_type_config()
+            if not config:
+                return None
+
+            parallel_config = config.get("parallel_related_data", {})
+            if not parallel_config.get("enabled", False):
+                return None
+
+            # Get the custom logic plugin
+            custom_logic = self._plugin._get_custom_logic_plugin(self.data_type_name)
+            if not custom_logic:
+                return None
+
+            # Check for configured related data types that need parallel pagination
+            parallel_related_types = []
+            # Use instance threshold if available, otherwise use config threshold
+            threshold_pages = (
+                self.parallel_related_data_threshold
+                if hasattr(self, "parallel_related_data_threshold")
+                else parallel_config.get("threshold_pages", 10)
+            )
+
+            for related_type, type_config in parallel_config.get(
+                "related_types", {}
+            ).items():
+                list_key = type_config.get("list_key")
+                page_size = type_config.get("page_size", 250)
+
+                # Use the generic pagination metadata method from the base class
+                if hasattr(custom_logic, "get_related_data_pagination_metadata"):
+                    method = custom_logic.get_related_data_pagination_metadata
+                    if callable(method):
+                        pagination_metadata = await method(
+                            detailed_data, related_type, client, list_key, page_size
+                        )
+                        if (
+                            pagination_metadata
+                            and pagination_metadata.get("total_pages", 0)
+                            > threshold_pages
+                        ):
+                            parallel_related_types.append(
+                                {
+                                    "type": related_type,
+                                    "pagination_metadata": pagination_metadata,
+                                    "page_fetch_method": "get_related_data_page",  # Always use base class method
+                                    "list_key": list_key,
+                                    "page_size": page_size,
+                                }
+                            )
+
+            if parallel_related_types:
+                return {
+                    "item_id": await self.extract_item_id(detailed_data),
+                    "parallel_related_types": parallel_related_types,
+                    "total_parallel_work": sum(
+                        pm["pagination_metadata"]["total_pages"]
+                        for pm in parallel_related_types
+                    ),
+                    "max_workers": parallel_config.get("max_workers", 4),
+                }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting related data pagination metadata: {e}")
+            return None
+
+    async def _get_data_type_config(self) -> dict[str, Any] | None:
+        """Get the configuration for the current data type."""
+        if not self.data_type_name:
+            return None
+
+        try:
+            registry = get_consolidated_registry()
+            config_file = registry.get_config_file(self.data_type_name)
+
+            if config_file:
+                import yaml
+
+                with open(config_file) as f:
+                    config_data = yaml.safe_load(f)
+
+                # Find the config entry for this data type
+                if isinstance(config_data, list):
+                    for entry in config_data:
+                        if entry.get("name") == self.data_type_name:
+                            return entry
+
+                return None
+        except Exception as e:
+            logger.debug(f"Could not load config for {self.data_type_name}: {e}")
+            return None
+
+    async def fetch_related_data_pages_parallel(
+        self, pagination_info: dict[str, Any], client, page_numbers: list[int]
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch specific pages of related data in parallel.
+
+        This method is called by parallel workers to fetch different pages
+        of related data concurrently.
+
+        Args:
+            pagination_info: Pagination metadata from get_related_data_pagination_metadata
+            client: API client to use
+            page_numbers: List of page numbers to fetch (0-based)
+
+        Returns:
+            List of related data records from all requested pages
+        """
+        if not self._plugin:
+            return []
+
+        try:
+            # Get the custom logic plugin
+            custom_logic = self._plugin._get_custom_logic_plugin(self.data_type_name)
+            if not custom_logic:
+                return []
+
+            all_data = []
+
+            # Process each parallel related type
+            for related_type_info in pagination_info.get("parallel_related_types", []):
+                related_type = related_type_info["type"]
+                page_fetch_method = related_type_info["page_fetch_method"]
+                pagination_metadata = related_type_info["pagination_metadata"]
+
+                # Get the page fetching method (now always the generic one)
+                if hasattr(custom_logic, page_fetch_method):
+                    method = getattr(custom_logic, page_fetch_method)
+                    if callable(method):
+                        # Fetch each requested page
+                        for page_number in page_numbers:
+                            try:
+                                page_data = await method(
+                                    pagination_metadata, page_number, client
+                                )
+                                if page_data:
+                                    # Add metadata to each record
+                                    for record in page_data:
+                                        if isinstance(record, dict):
+                                            record["_related_type"] = related_type
+                                            record["_page_number"] = page_number
+                                            record["_parent_item_id"] = pagination_info[
+                                                "item_id"
+                                            ]
+
+                                    all_data.extend(page_data)
+
+                            except Exception as e:
+                                logger.error(
+                                    f"Error fetching page {page_number} for {related_type}: {e}"
+                                )
+
+            return all_data
+
+        except Exception as e:
+            logger.error(f"Error in parallel related data fetching: {e}")
             return []
 
     async def fetch_phase_4_data_with_client(
