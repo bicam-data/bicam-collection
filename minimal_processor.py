@@ -250,10 +250,8 @@ logger = logging.getLogger(__name__)
 def get_data_from_raw_table(
     data_type, table_name, cursor, schema="bicam_raw_congressional", related=False
 ):
-    if data_type == "bills_related_bills":
-        table_name = "bills_relatedbills"
     if related:
-        if data_type == "committeeprints_texts":
+        if table_name == "committeeprints_texts_raw":
             cursor.execute(
                 f"""
                 SELECT
@@ -302,7 +300,7 @@ def check_duplicates(data, id_keys, data_type):
     def get_key(item):
         return tuple(item.get(k) for k in id_keys)
 
-    from collections import Counter, defaultdict
+    from collections import Counter
 
     key_counts = Counter(get_key(item) for item in data)
     duplicates = [item for item in data if key_counts[get_key(item)] > 1]
@@ -1098,9 +1096,9 @@ def process_bills_cosponsors(data, cursor):
     logger.info(f"Inserted {len(bills_cosponsors)} bills_cosponsors")
 
 
-def process_bills_related_bills(data, cursor):
+def process_bills_relatedbills(data, cursor):
     logger.info(f"Processing {len(data)} related bills")
-    bills_related_bills = [
+    bills_relatedbills = [
         {
             "bill_id": item.get("bills_id"),
             "related_bill_id": f"{item.get('type').lower()}{item.get('number')}-{item.get('congress')}",
@@ -1108,19 +1106,19 @@ def process_bills_related_bills(data, cursor):
         }
         for item in data
     ]
-    bills_related_bills = check_duplicates(
-        bills_related_bills, ["bill_id", "related_bill_id"], "bills_related_bills"
+    bills_relatedbills = check_duplicates(
+        bills_relatedbills, ["bill_id", "related_bill_id"], "bills_relatedbills"
     )
-    logger.info(f"Found {len(bills_related_bills)} bills_related_bills")
+    logger.info(f"Found {len(bills_relatedbills)} bills_relatedbills")
 
     Utils.copy_dicts_to_table(
         cursor,
         "staging_congressional",
         "bills_related_bills",
         ["bill_id", "related_bill_id", "relationship_type"],
-        bills_related_bills,
+        bills_relatedbills,
     )
-    logger.info(f"Inserted {len(bills_related_bills)} bills_related_bills")
+    logger.info(f"Inserted {len(bills_relatedbills)} bills_relatedbills")
 
 
 def process_committeemeetings(data, cursor):
@@ -2104,8 +2102,10 @@ def process_committees_bills(data, cursor):
         - staging_congressional.committees_bills
     """
     logger.info(f"Processing {len(data)} committees_bills")
-    
-    
+
+    raise NotImplementedError("Not implemented")
+
+
 def process_congresses(data, cursor):
     """
     Processes a list of congress API response objects and inserts into:
@@ -2432,15 +2432,6 @@ def process_members(data, cursor):
     logger.info("Done processing members")
 
 
-def connect_to_database():
-    conn = psycopg2.connect(
-        host=os.getenv("POSTGRESQL_HOST"),
-        database=os.getenv("POSTGRESQL_DATABASE"),
-        user=os.getenv("POSTGRESQL_USERNAME"),
-        password=os.getenv("POSTGRESQL_PASSWORD"),
-        port=os.getenv("POSTGRESQL_PORT"),
-    )
-    return conn
 
 
 def process_hearings(data, cursor):
@@ -2587,6 +2578,409 @@ def process_hearings(data, cursor):
         )
         logger.info(f"Inserted {len(hearings_texts)} hearings_texts")
 
+def process_nominations(data, cursor):
+    logger.info(f"Processing {len(data)} nominations")
+
+    utils = Utils()
+    nominations_positions = []
+    nominations = []
+
+    for item in data:
+
+        nomination_id = f"PN{item.get('number')}-{item.get('partNumber', '00')}-{item.get('congress')}"
+        nominations.append(
+            {
+                "nomination_id": nomination_id,
+                "nomination_number": item.get("number"),
+                "part_number": item.get("partNumber", "00"),
+                "congress": item.get("congress"),
+                "description": item.get("description"),
+                "is_privileged": item.get("isPrivileged"),
+                "is_civilian": item.get("isList"),
+                "received_at": utils.standardize_date(item.get("receivedDate")),
+                "authority_date": utils.standardize_date(item.get("authorityDate")),
+                "executive_calendar_number": item.get("executiveCalendarNumber"),
+                "citation": item.get("citation"),
+                "committees_count": item.get("committees", {}).get("count", 0),
+                "actions_count": item.get("actions", {}).get("count", 0),
+                "updated_at": utils.standardize_date(item.get("updateDate")),
+            }
+        )
+
+        if item.get("nominees"):
+            for nominee in item.get("nominees"):
+                nominations_positions.append(
+                    {
+                        "nomination_id": nomination_id,
+                        "ordinal": nominee.get("ordinal"),
+                        "position_title": nominee.get("positionTitle"),
+                        "organization": nominee.get("organization"),
+                        "intro_text": utils.clean_long_text(nominee.get("introText")),
+                        "nominee_count": nominee.get("nomineeCount"),
+                    }
+                )
+
+    # Deduplicate
+    nominations = check_duplicates(nominations, ["nomination_id"], "nominations")
+    nominations_positions = check_duplicates(
+        nominations_positions, ["nomination_id", "ordinal"], "nominations_positions"
+    )
+
+    # Insert into tables
+    if nominations:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "nominations",
+            ["nomination_id", "nomination_number", "part_number", "congress", "description", "is_privileged", "is_civilian", "received_at", "authority_date", "executive_calendar_number", "citation", "committees_count", "actions_count", "updated_at"],
+            nominations,
+        )
+        logger.info(f"Inserted {len(nominations)} nominations")
+
+    if nominations_positions:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "nominations_positions",
+            ["nomination_id", "ordinal", "position_title", "organization", "intro_text", "nominee_count"],
+            nominations_positions,
+        )
+        logger.info(f"Inserted {len(nominations_positions)} nominations_positions")
+
+    logger.info("Done processing nominations")
+
+def process_nominations_actions(data, cursor):
+    logger.info(f"Processing {len(data)} nominations_actions")
+
+    utils = Utils()
+    nominations_actions = []
+    nominations_actions_committees = []
+    for item in data:
+        action_id = hashlib.sha256(json.dumps(item).encode()).hexdigest()
+
+        nominations_actions.append(
+            {
+                "action_id": action_id,
+                "nomination_id": item.get("nominations_id"),
+                "action_code": item.get("actionCode"),
+                "action_type": item.get("type"),
+                "action_date": utils.standardize_date(item.get("date")),
+                "text": utils.clean_long_text(item.get("text")),
+            }
+        )
+
+        if item.get('committees'):
+            for committee in item.get('committees'):
+                nominations_actions_committees.append(
+                    {
+                        "action_id": action_id,
+                        "nomination_id": item.get("nominations_id"),
+                        "committee_code": committee.get("systemCode"),
+                    }
+                )
+
+    # Deduplicate
+    nominations_actions = check_duplicates(nominations_actions, ["action_id", "nomination_id"], "nominations_actions")
+    nominations_actions_committees = check_duplicates(nominations_actions_committees, ["action_id", "nomination_id", "committee_code"], "nominations_actions_committees")
+
+    # Insert into tables
+    if nominations_actions:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "nominations_actions",
+            ["action_id", "nomination_id", "action_code", "action_type", "action_date", "text"],
+            nominations_actions,
+        )
+        logger.info(f"Inserted {len(nominations_actions)} nominations_actions")
+
+    if nominations_actions_committees:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "nominations_actions_committees",
+            ["action_id", "nomination_id", "committee_code"],
+            nominations_actions_committees,
+        )
+        logger.info(f"Inserted {len(nominations_actions_committees)} nominations_actions_committees")
+
+    logger.info("Done processing nominations_actions")
+
+def process_nominations_committeeactivities(data, cursor):
+    logger.info(f"Processing {len(data)} nominations_committeeactivities")
+
+    utils = Utils()
+    nominations_committeeactivities = []
+    for item in data:
+        if item.get('committee_code', '')[-2:] != '00':
+            continue
+        nominations_committeeactivities.append(
+            {
+                "nomination_id": item.get("nominations_id"),
+                "committee_code": item.get("committee_code"),
+                "activity_name": item.get("activity_name"),
+                "activity_date": utils.standardize_date(item.get("activity_date")),
+            }
+        )
+
+    # Deduplicate
+    nominations_committeeactivities = check_duplicates(nominations_committeeactivities, ["nomination_id", "committee_code", "activity_date", "activity_name"], "nominations_committeeactivities")
+
+    # Insert into tables
+    if nominations_committeeactivities:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "nominations_committeeactivities",
+            ["nomination_id", "committee_code", "activity_name", "activity_date"],
+            nominations_committeeactivities,
+        )
+        logger.info(f"Inserted {len(nominations_committeeactivities)} nominations_committeeactivities")
+
+    logger.info("Done processing nominations_committeeactivities")
+
+def process_nominations_hearings(data, cursor):
+    logger.info(f"Processing {len(data)} nominations_hearings")
+
+    nominations_associated_hearings = []
+    for item in data:
+        chamber = item.get('chamber')
+        jacketnumber = item.get('jacketNumber')
+        citation = item.get("citation")
+        if citation:
+            numbers = citation.split('.')[2]
+            if numbers:
+                congress = numbers.split('-')[0]
+                if chamber and jacketnumber and congress:
+                    hearing_id = f"{chamber[0].lower()}hrg{jacketnumber}-{congress}"
+            else:
+                hearing_id = citation
+        else:
+            hearing_id = 'ID_ERROR'
+
+        nominations_associated_hearings.append(
+            {
+                "nomination_id": item.get("nominations_id"),
+                "hearing_id": hearing_id,
+            }
+        )
+
+    # Deduplicate
+    nominations_associated_hearings = check_duplicates(nominations_associated_hearings, ["nomination_id", "hearing_id"], "nominations_hearings")
+
+    # Insert into tables
+    if nominations_associated_hearings:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "nominations_associated_hearings",
+            ["nomination_id", "hearing_id"],
+            nominations_associated_hearings,
+        )
+        logger.info(f"Inserted {len(nominations_associated_hearings)} nominations_associated_hearings")
+
+    logger.info("Done processing nominations_associated_hearings")
+
+def process_nominations_nominees(data, cursor):
+    logger.info(f"Processing {len(data)} nominations_nominees")
+
+    utils = Utils()
+    nominations_nominees = []
+    for item in data:
+        nominations_nominees.append(
+            {
+                "nomination_id": item.get("nominations_id"),
+                "ordinal": item.get("position_id"),
+                "first_name": item.get("firstName"),
+                "middle_name": item.get("middleName"),
+                "last_name": item.get("lastName"),
+                "prefix": item.get("prefix"),
+                "suffix": item.get("suffix"),
+                "state": item.get("state"),
+                "effective_date": utils.standardize_date(item.get("effectiveDate")),
+                "predecessor_name": item.get("predecessorName"),
+                "corps_code": item.get("corpsCode"),
+            }
+        )
+
+    # Deduplicate
+    nominations_nominees = check_duplicates(nominations_nominees, ["nomination_id", "ordinal", "first_name", "middle_name", "last_name"], "nominations_nominees")
+
+    # Insert into tables
+    if nominations_nominees:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "nominations_nominees",
+            ["nomination_id", "ordinal", "first_name", "middle_name", "last_name", "prefix", "suffix", "state", "effective_date", "predecessor_name", "corps_code"],
+            nominations_nominees,
+        )
+        logger.info(f"Inserted {len(nominations_nominees)} nominations_nominees")
+
+    logger.info("Done processing nominations_nominees")
+
+def process_treaties(data, cursor):
+    logger.info(f"Processing {len(data)} treaties")
+
+    utils = Utils()
+    treaties = []
+    treaties_country_parties = []
+    treaties_index_terms = []
+    treaties_titles = []
+    for item in data:
+        treaty_id = f"td{item.get('congressReceived')}-{item.get('number')}{item.get('suffix', '')}"
+        treaties.append(
+            {
+                "treaty_id": treaty_id,
+                "treaty_number": item.get("number"),
+                "suffix": item.get("suffix"),
+                "congress_received": item.get("congressReceived"),
+                "congress_considered": item.get("congressConsidered"),
+                "topic": item.get("topic"),
+                "transmitted_at": utils.standardize_date(item.get("transmittedDate")),
+                "in_force_at": utils.standardize_date(item.get("inForceDate")),
+                "resolution_text": utils.clean_long_text(item.get("resolutionText")),
+                "parts_count": item.get("parts", {}).get("count", 0),
+                "actions_count": item.get("actions", {}).get("count", 0),
+                "old_number": item.get("oldNumber"),
+                "old_number_display_name": item.get("oldNumberDisplayName"),
+                "updated_at": utils.standardize_date(item.get("updateDate")),
+            }
+        )
+
+        if item.get('countriesParties'):
+            for country_party in item.get('countriesParties'):
+                treaties_country_parties.append(
+                    {
+                        "treaty_id": treaty_id,
+                        "country": country_party.get("name"),
+                    }
+                )
+        if item.get('indexTerms'):
+            for index_term in item.get('indexTerms'):
+                treaties_index_terms.append(
+                    {
+                        "treaty_id": treaty_id,
+                        "index_term": index_term.get("name"),
+                    }
+                )
+        if item.get('titles'):
+            for title in item.get('titles'):
+                treaties_titles.append(
+                    {
+                        "treaty_id": treaty_id,
+                        "title": title.get("title"),
+                        "title_type": title.get("titleType"),
+                    }
+                )
+
+    # Deduplicate
+    treaties = check_duplicates(treaties, ["treaty_id"], "treaties")
+    treaties_country_parties = check_duplicates(treaties_country_parties, ["treaty_id", "country"], "treaties_country_parties")
+    treaties_index_terms = check_duplicates(treaties_index_terms, ["treaty_id", "index_term"], "treaties_index_terms")
+    treaties_titles = check_duplicates(treaties_titles, ["treaty_id", "title", "title_type"], "treaties_titles")
+
+    # Insert into tables
+    if treaties:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "treaties",
+            ["treaty_id", "treaty_number", "suffix", "congress_received", "congress_considered", "topic", "transmitted_at", "in_force_at", "resolution_text", "parts_count", "actions_count", "old_number", "old_number_display_name", "updated_at"],
+            treaties,
+        )
+        logger.info(f"Inserted {len(treaties)} treaties")
+
+    if treaties_country_parties:
+
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "treaties_country_parties",
+            ["treaty_id", "country"],
+            treaties_country_parties,
+        )
+        logger.info(f"Inserted {len(treaties_country_parties)} treaties_country_parties")
+
+    if treaties_index_terms:
+
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "treaties_index_terms",
+            ["treaty_id", "index_term"],
+            treaties_index_terms,
+        )
+        logger.info(f"Inserted {len(treaties_index_terms)} treaties_index_terms")
+
+    if treaties_titles:
+
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "treaties_titles",
+            ["treaty_id", "title", "title_type"],
+            treaties_titles,
+        )
+        logger.info(f"Inserted {len(treaties_titles)} treaties_titles")
+
+    logger.info("Done processing treaties")
+
+def process_treaties_actions(data, cursor):
+    logger.info(f"Processing {len(data)} treaties_actions")
+    utils = Utils()
+    treaties_actions = []
+    treaties_actions_committees = []
+    for item in data:
+        action_id = hashlib.sha256(json.dumps(item).encode()).hexdigest()
+        treaty_id = item.get("treaty_id")
+        treaties_actions.append(
+            {
+                "action_id": action_id,
+                "treaty_id": treaty_id,
+                "action_code": item.get("actionCode"),
+                "action_date": utils.standardize_date(item.get("date")),
+                "text": item.get("text"),
+                "action_type": item.get("type"),
+            }
+        )
+
+        if item.get('committees'):
+            for committee in item.get('committees'):
+                treaties_actions_committees.append(
+                    {
+                        "action_id": action_id,
+                        "treaty_id": treaty_id,
+                        "committee_code": committee.get("systemCode"),
+                    }
+                )
+
+    # Deduplicate
+    treaties_actions = check_duplicates(treaties_actions, ["action_id", "treaty_id"], "treaties_actions")
+    treaties_actions_committees = check_duplicates(treaties_actions_committees, ["action_id", "treaty_id", "committee_code"], "treaties_actions_committees")
+
+    # Insert into tables
+    if treaties_actions:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "treaties_actions",
+            ["action_id", "treaty_id", "action_code", "action_date", "text", "action_type"],
+            treaties_actions,
+        )
+        logger.info(f"Inserted {len(treaties_actions)} treaties_actions")
+
+    if treaties_actions_committees:
+        Utils.copy_dicts_to_table(
+            cursor,
+            "staging_congressional",
+            "treaties_actions_committees",
+            ["action_id", "treaty_id", "committee_code"],
+            treaties_actions_committees,
+        )
+        logger.info(f"Inserted {len(treaties_actions_committees)} treaties_actions_committees")
+
+    logger.info("Done processing treaties_actions")
 
 def process_data(data, data_type, cursor):
     if data_type == "amendments":
@@ -2611,8 +3005,8 @@ def process_data(data, data_type, cursor):
         process_bills_texts(data, cursor)
     if data_type == "bills_cosponsors":
         process_bills_cosponsors(data, cursor)
-    if data_type == "bills_related_bills":
-        process_bills_related_bills(data, cursor)
+    if data_type == "bills_relatedbills":
+        process_bills_relatedbills(data, cursor)
     if data_type == "committeemeetings":
         process_committeemeetings(data, cursor)
     if data_type == "committeeprints":
@@ -2633,77 +3027,107 @@ def process_data(data, data_type, cursor):
         process_hearings(data, cursor)
     if data_type == "members":
         process_members(data, cursor)
+    if data_type == "nominations":
+        process_nominations(data, cursor)
+    if data_type == "nominations_actions":
+        process_nominations_actions(data, cursor)
+    if data_type == "nominations_committeeactivities":
+        process_nominations_committeeactivities(data, cursor)
+    if data_type == "nominations_hearings":
+        process_nominations_hearings(data, cursor)
+    if data_type == 'nominations_nominees':
+        process_nominations_nominees(data, cursor)
+    if data_type == "treaties":
+        process_treaties(data, cursor)
+    if data_type == "treaties_actions":
+        process_treaties_actions(data, cursor)
 
+def connect_to_database():
+    conn = psycopg2.connect(
+        host=os.getenv("POSTGRESQL_HOST"),
+        database=os.getenv("POSTGRESQL_DATABASE"),
+        user=os.getenv("POSTGRESQL_USERNAME"),
+        password=os.getenv("POSTGRESQL_PASSWORD"),
+        port=os.getenv("POSTGRESQL_PORT"),
+    )
+    return conn
 
 def main():
     conn = connect_to_database()
     cursor = conn.cursor()
     conn.autocommit = True
-    # data = get_data_from_raw_table("amendments", "amendments_raw", cursor, schema='bicam_raw_congressional')
-
-    # process_data(data, "amendments", cursor)
-    # data = get_data_from_raw_table("amendments", "amendments_actions_raw", cursor, schema='bicam_raw_congressional', related=True)
-    # process_data(data, "amendments_actions", cursor)
-    # data = get_data_from_raw_table("amendments", "amendments_cosponsors_raw", cursor, schema='bicam_raw_congressional', related=True)
-    # process_data(data, "amendments_cosponsors", cursor)
-    # data = get_data_from_raw_table("amendments", "amendments_texts_raw", cursor, schema='bicam_raw_congressional', related=True)
-    # process_data(data, "amendments_texts", cursor)
+    data = get_data_from_raw_table("amendments", "amendments_raw", cursor, schema='bicam_raw_congressional')
+    process_data(data, "amendments", cursor)
+    data = get_data_from_raw_table("amendments", "amendments_actions_raw", cursor, schema='bicam_raw_congressional', related=True)
+    process_data(data, "amendments_actions", cursor)
+    data = get_data_from_raw_table("amendments", "amendments_cosponsors_raw", cursor, schema='bicam_raw_congressional', related=True)
+    process_data(data, "amendments_cosponsors", cursor)
+    data = get_data_from_raw_table("amendments", "amendments_texts_raw", cursor, schema='bicam_raw_congressional', related=True)
+    process_data(data, "amendments_texts", cursor)
     # data = get_data_from_raw_table("bills", "bills_raw", cursor, schema='bicam_raw_congressional')
     # process_data(data, "bills", cursor)
-    data = get_data_from_raw_table(
-        "bills",
-        "bills_actions_raw",
-        cursor,
-        schema="bicam_raw_congressional",
-        related=True,
-    )
-    process_data(data, "bills_actions", cursor)
-    data = get_data_from_raw_table(
-        "bills",
-        "bills_summaries_raw",
-        cursor,
-        schema="bicam_raw_congressional",
-        related=True,
-    )
-    process_data(data, "bills_summaries", cursor)
-    data = get_data_from_raw_table(
-        "bills",
-        "bills_subjects_raw",
-        cursor,
-        schema="bicam_raw_congressional",
-        related=True,
-    )
-    process_data(data, "bills_subjects", cursor)
-    data = get_data_from_raw_table(
-        "bills",
-        "bills_titles_raw",
-        cursor,
-        schema="bicam_raw_congressional",
-        related=True,
-    )
-    process_data(data, "bills_titles", cursor)
-    data = get_data_from_raw_table(
-        "bills",
-        "bills_texts_raw",
-        cursor,
-        schema="bicam_raw_congressional",
-        related=True,
-    )
-    process_data(data, "bills_texts", cursor)
-    data = get_data_from_raw_table(
-        "bills",
-        "bills_cosponsors_raw",
-        cursor,
-        schema="bicam_raw_congressional",
-        related=True,
-    )
-    process_data(data, "bills_cosponsors", cursor)
-    data = get_data_from_raw_table(
-        "committeemeetings",
-        "committeemeetings_raw",
-        cursor,
-        schema="bicam_raw_congressional",
-    )
+    # data = get_data_from_raw_table(
+    #     "bills",
+    #     "bills_relatedbills_raw",
+    #     cursor,
+    #     schema="bicam_raw_congressional",
+    #     related=True,
+    # )
+    # process_data(data, "bills_relatedbills", cursor)
+    # data = get_data_from_raw_table(
+    #     "bills",
+    #     "bills_actions_raw",
+    #     cursor,
+    #     schema="bicam_raw_congressional",
+    #     related=True,
+    # )
+    # process_data(data, "bills_actions", cursor)
+    # data = get_data_from_raw_table(
+    #     "bills",
+    #     "bills_summaries_raw",
+    #     cursor,
+    #     schema="bicam_raw_congressional",
+    #     related=True,
+    # )
+    # process_data(data, "bills_summaries", cursor)
+    # data = get_data_from_raw_table(
+    #     "bills",
+    #     "bills_subjects_raw",
+    #     cursor,
+    #     schema="bicam_raw_congressional",
+    #     related=True,
+    # )
+    # process_data(data, "bills_subjects", cursor)
+    # data = get_data_from_raw_table(
+    #     "bills",
+    #     "bills_titles_raw",
+    #     cursor,
+    #     schema="bicam_raw_congressional",
+    #     related=True,
+    # )
+    # process_data(data, "bills_titles", cursor)
+    # data = get_data_from_raw_table(
+    #     "bills",
+    #     "bills_texts_raw",
+    #     cursor,
+    #     schema="bicam_raw_congressional",
+    #     related=True,
+    # )
+    # process_data(data, "bills_texts", cursor)
+    # data = get_data_from_raw_table(
+    #     "bills",
+    #     "bills_cosponsors_raw",
+    #     cursor,
+    #     schema="bicam_raw_congressional",
+    #     related=True,
+    # )
+    # process_data(data, "bills_cosponsors", cursor)
+    # data = get_data_from_raw_table(
+    #     "committeemeetings",
+    #     "committeemeetings_raw",
+    #     cursor,
+    #     schema="bicam_raw_congressional",
+    # )
     process_data(data, "committeemeetings", cursor)
     data = get_data_from_raw_table(
         "committeeprints",
@@ -2748,14 +3172,41 @@ def main():
     )
     process_data(data, "committees_committeereports", cursor)
     data = get_data_from_raw_table(
-        "congresses", "congresses_raw", cursor, schema="bicam_raw_congressional"
+        "congresses", "congresses_raw", cursor, schema="bicam_raw_congressional",
     )
     process_data(data, "congresses", cursor)
     data = get_data_from_raw_table(
         "hearings", "hearings_raw", cursor, schema="bicam_raw_congressional"
     )
     process_data(data, "hearings", cursor)
-
+    data = get_data_from_raw_table(
+        "nominations", "nominations_raw", cursor, schema="bicam_raw_congressional"
+    )
+    process_data(data, "nominations", cursor)
+    data = get_data_from_raw_table(
+        "nominations", "nominations_actions_raw", cursor, schema="bicam_raw_congressional", related=True
+    )
+    process_data(data, "nominations_actions", cursor)
+    data = get_data_from_raw_table(
+        "nominations", "nominations_committeeactivities_raw", cursor, schema="bicam_raw_congressional", related=True
+    )
+    process_data(data, "nominations_committeeactivities", cursor)
+    data = get_data_from_raw_table(
+        "nominations", "nominations_hearings_raw", cursor, schema="bicam_raw_congressional", related=True
+    )
+    process_data(data, "nominations_hearings", cursor)
+    data = get_data_from_raw_table(
+        "nominations", "nominations_invidivualnominees_raw", cursor, schema="bicam_raw_congressional", related=True
+    )
+    process_data(data, "nominations_nominees", cursor)
+    data = get_data_from_raw_table(
+        "treaties", "treaties_raw", cursor, schema="bicam_raw_congressional"
+    )
+    process_data(data, "treaties", cursor)
+    data = get_data_from_raw_table(
+        "treaties", "treaties_actions_raw", cursor, schema="bicam_raw_congressional", related=True
+    )
+    process_data(data, "treaties_actions", cursor)
     conn.commit()
     cursor.close()
     conn.close()

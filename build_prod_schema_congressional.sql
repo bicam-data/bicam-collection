@@ -4,8 +4,6 @@ CREATE SCHEMA IF NOT EXISTS staging_congressional;
 
 BEGIN;
 
-SET CONSTRAINTS ALL DEFERRED;
-
 -- 1. Foundational tables
 CREATE TABLE IF NOT EXISTS staging_congressional.congresses(
     congress_number INTEGER PRIMARY KEY,
@@ -333,7 +331,7 @@ CREATE TABLE IF NOT EXISTS staging_congressional.committeemeetings(
     date TIMESTAMP,
     room TEXT,
     street_address TEXT,
-    building TEXT, 
+    building TEXT,
     city TEXT,
     state TEXT,
     zip_code TEXT,
@@ -483,7 +481,7 @@ CREATE TABLE IF NOT EXISTS staging_congressional.bills_laws(
 
 CREATE TABLE IF NOT EXISTS staging_congressional.bills_notes(
     bill_id TEXT,
-    note_number INTEGER,
+    note_number TEXT,
     note_text TEXT,
     updated_at TIMESTAMP WITH TIME ZONE,
     PRIMARY KEY (bill_id, note_number)
@@ -491,10 +489,10 @@ CREATE TABLE IF NOT EXISTS staging_congressional.bills_notes(
 
 CREATE TABLE IF NOT EXISTS staging_congressional.bills_notes_links(
     bill_id TEXT,
-    note_number INTEGER,
+    note_number TEXT,
     link_name TEXT,
     link_url TEXT,
-    updated_at TIMESTAMP WITH TIME ZONE,
+    link_type TEXT,
     UNIQUE (bill_id, note_number, link_url)
 );
 
@@ -626,7 +624,7 @@ CREATE TABLE IF NOT EXISTS staging_congressional.members_terms(
     state_name TEXT,
     state_code TEXT,
     district INTEGER,
-    PRIMARY KEY (bioguide_id, start_year, end_year)
+    UNIQUE (bioguide_id, start_year, end_year)
 );
 
 CREATE TABLE IF NOT EXISTS staging_congressional.members_leadership_roles(
@@ -796,20 +794,21 @@ CREATE TABLE IF NOT EXISTS staging_congressional.committeemeetings_committees(
     PRIMARY KEY (meeting_id, committee_code)
 );
 
+
+GRANT USAGE ON SCHEMA staging_congressional TO bicam_pipeline;
 -- Finish off with granting permissions
 DO $$
 DECLARE
     current_table_name text;
     current_schema_name text;
 BEGIN
-    FOR current_schema_name IN SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('staging_staging_congressional') LOOP
+    FOR current_schema_name IN SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('staging_congressional') LOOP
         FOR current_table_name IN SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema_name LOOP
-            EXECUTE format('GRANT ALL ON TABLE %I.%I TO postgres_admin__ryan', current_schema_name, current_table_name);
+            EXECUTE format('GRANT ALL ON TABLE %I.%I TO bicam_pipeline', current_schema_name, current_table_name);
         END LOOP;
     END LOOP;
 END$$;
 
 END TRANSACTION;
 
-SET CONSTRAINTS ALL IMMEDIATE;
 COMMIT;

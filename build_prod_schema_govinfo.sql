@@ -1,11 +1,10 @@
-DROP SCHEMA IF EXISTS govinfo CASCADE;
-CREATE SCHEMA IF NOT EXISTS govinfo;
+DROP SCHEMA IF EXISTS staging_govinfo CASCADE;
+CREATE SCHEMA IF NOT EXISTS staging_govinfo;
 
 BEGIN;
 
-SET CONSTRAINTS ALL DEFERRED;
 
-CREATE TABLE IF NOT EXISTS govinfo.bills(
+CREATE TABLE IF NOT EXISTS staging_govinfo.bills(
     package_id TEXT PRIMARY KEY,
     bill_id TEXT,
     bill_version TEXT,
@@ -19,8 +18,7 @@ CREATE TABLE IF NOT EXISTS govinfo.bills(
     government_author2 TEXT,
     publisher TEXT,
     collection_code TEXT,
-    stock_number TEXT,
-    su_doc_class_number TEXT,
+    stock_number TEXT,    su_doc_class_number TEXT,
     migrated_doc_id TEXT,
     child_ils_system_id TEXT,
     parent_ils_system_id TEXT,
@@ -34,7 +32,7 @@ CREATE TABLE IF NOT EXISTS govinfo.bills(
 );
 
 -- Create table for legislative document versions
-CREATE TABLE govinfo.ref_bill_version_codes (
+CREATE TABLE staging_govinfo.ref_bill_version_codes (
     version_code TEXT PRIMARY KEY,
     version_name  TEXT,
     description TEXT NOT NULL,
@@ -42,7 +40,7 @@ CREATE TABLE govinfo.ref_bill_version_codes (
 );
 
 -- Insert data
-INSERT INTO govinfo.ref_bill_version_codes (version_name, version_code, description, chamber) VALUES
+INSERT INTO staging_govinfo.ref_bill_version_codes (version_name, version_code, description, chamber) VALUES
 ('Amendment (Senate)', 'AS', 'An alternate name for this version is Senate Amendment Ordered to be Printed. This version contains an amendment that has been ordered to be printed.', 'Senate'),
 ('Additional Sponsors (House)', 'ASH', 'An alternate name for this version is House Sponsors or Cosponsors Added or Withdrawn. This version is used to add or delete cosponsor names. When used, it most often shows numerous cosponsors being added.', 'House'),
 ('Agreed to (House)', 'ATH', 'An alternate name for this version is Agreed to by House. This version is a simple or concurrent resolution as agreed to in the House of Representatives.', 'House'),
@@ -98,58 +96,46 @@ INSERT INTO govinfo.ref_bill_version_codes (version_name, version_code, descript
 ('Sponsor Change', 'SC', 'This version is used to change sponsors.', 'House');
 
 
-CREATE TABLE IF NOT EXISTS govinfo.bills_reference_codes(
+CREATE TABLE IF NOT EXISTS staging_govinfo.bills_reference_codes(
     bill_code_id TEXT PRIMARY KEY,
     package_id TEXT,
     reference_code TEXT, -- combination of label and title
-    FOREIGN KEY (package_id) REFERENCES govinfo.bills(package_id)
-    INITIALLY DEFERRED
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.bills_reference_codes_sections(
+CREATE TABLE IF NOT EXISTS staging_govinfo.bills_reference_codes_sections(
     bill_code_id TEXT,
     code_section TEXT,
-    FOREIGN KEY (bill_code_id) REFERENCES govinfo.bills_reference_codes(bill_code_id)
-    INITIALLY DEFERRED,
     UNIQUE (bill_code_id, code_section)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.bills_reference_laws(
+CREATE TABLE IF NOT EXISTS staging_govinfo.bills_reference_laws(
     package_id TEXT,
     law_id TEXT, -- fix law_id
     law_type TEXT,
-    FOREIGN KEY (package_id) REFERENCES govinfo.bills(package_id)
-    INITIALLY DEFERRED,
     PRIMARY KEY (package_id, law_id)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.bills_reference_statutes(
+CREATE TABLE IF NOT EXISTS staging_govinfo.bills_reference_statutes(
     bill_statute_id TEXT PRIMARY KEY,
     package_id TEXT,
     reference_statute TEXT, -- combine label and title
-    FOREIGN KEY (package_id) REFERENCES govinfo.bills(package_id)
-    INITIALLY DEFERRED
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.bills_reference_statutes_pages(
+CREATE TABLE IF NOT EXISTS staging_govinfo.bills_reference_statutes_pages(
     bill_statute_id TEXT,
     page TEXT, -- combine label and title
-    FOREIGN KEY (bill_statute_id) REFERENCES govinfo.bills_reference_statutes(bill_statute_id)
-    INITIALLY DEFERRED,
     UNIQUE (bill_statute_id, page)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.bills_short_titles(
+CREATE TABLE IF NOT EXISTS staging_govinfo.bills_short_titles(
     package_id TEXT,
     short_title TEXT,
     level TEXT,
     type TEXT,
-    FOREIGN KEY (package_id) REFERENCES govinfo.bills(package_id)
-    INITIALLY DEFERRED,
     UNIQUE (package_id, short_title, level, type)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.committeeprints(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeeprints(
     package_id TEXT PRIMARY KEY,
     print_id TEXT,
     title TEXT,
@@ -169,33 +155,29 @@ CREATE TABLE IF NOT EXISTS govinfo.committeeprints(
     last_modified TIMESTAMP WITH TIME ZONE
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.committeeprints_granules(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeeprints_granules(
     granule_id TEXT,
     package_id TEXT,
-    FOREIGN KEY (package_id) REFERENCES govinfo.committeeprints(package_id)
-    INITIALLY DEFERRED,
     PRIMARY KEY (granule_id, package_id)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.committeeprints_committees(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeeprints_committees(
     package_id TEXT,
     granule_id TEXT,
     committee_code TEXT,
     committee_name TEXT,
     chamber TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES govinfo.committeeprints_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, committee_code, committee_name, chamber)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.committeeprints_reference_bills(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeeprints_reference_bills(
     package_id TEXT,
     granule_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES govinfo.committeeprints_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.committeereports(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeereports(
     package_id TEXT PRIMARY KEY,
     report_id TEXT,
     title TEXT,
@@ -217,43 +199,39 @@ CREATE TABLE IF NOT EXISTS govinfo.committeereports(
 
 -- SERIAL DETAILS/SUBJECTS????
 
-CREATE TABLE IF NOT EXISTS govinfo.committeereports_granules(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeereports_granules(
     granule_id TEXT,
     package_id TEXT,
-    FOREIGN KEY (package_id) REFERENCES govinfo.committeereports(package_id)
-    INITIALLY DEFERRED,
     PRIMARY KEY (granule_id, package_id)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.committeereports_committees(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeereports_committees(
     granule_id TEXT,
     package_id TEXT,
     committee_code TEXT,
     committee_name TEXT,
     chamber TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES govinfo.committeereports_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, committee_code, committee_name, chamber)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.committeereports_members(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeereports_members(
     granule_id TEXT,
     package_id TEXT,
     bioguide_id TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES govinfo.committeereports_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bioguide_id)
 
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.committeereports_reference_bills(
+CREATE TABLE IF NOT EXISTS staging_govinfo.committeereports_reference_bills(
     granule_id TEXT,
     package_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES govinfo.committeereports_granules(granule_id, package_id),
+    FOREIGN KEY (package_id, granule_id) REFERENCES staging_govinfo.committeereports_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bill_id)
 );
 
 
-CREATE TABLE IF NOT EXISTS govinfo.hearings(
+CREATE TABLE IF NOT EXISTS staging_govinfo.hearings(
     package_id TEXT PRIMARY KEY,
     hearing_id TEXT,
     title TEXT,
@@ -275,47 +253,47 @@ CREATE TABLE IF NOT EXISTS govinfo.hearings(
 
 -- DATES???
 
-CREATE TABLE IF NOT EXISTS govinfo.hearings_granules(
+CREATE TABLE IF NOT EXISTS staging_govinfo.hearings_granules(
     granule_id TEXT,
     package_id TEXT,
-    FOREIGN KEY (package_id) REFERENCES govinfo.hearings(package_id)
+    FOREIGN KEY (package_id) REFERENCES staging_govinfo.hearings(package_id)
     INITIALLY DEFERRED,
     PRIMARY KEY (granule_id, package_id)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.hearings_committees(
+CREATE TABLE IF NOT EXISTS staging_govinfo.hearings_committees(
     granule_id TEXT,
     package_id TEXT,
     committee_code TEXT,
     committee_name TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES govinfo.hearings_granules(granule_id, package_id),
+    FOREIGN KEY (package_id, granule_id) REFERENCES staging_govinfo.hearings_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, committee_code, committee_name)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.hearings_members(
+CREATE TABLE IF NOT EXISTS staging_govinfo.hearings_members(
     granule_id TEXT,
     package_id TEXT,
     bioguide_id TEXT,
     name TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES govinfo.hearings_granules(granule_id, package_id),
+    FOREIGN KEY (package_id, granule_id) REFERENCES staging_govinfo.hearings_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bioguide_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.hearings_reference_bills(
+CREATE TABLE IF NOT EXISTS staging_govinfo.hearings_reference_bills(
     granule_id TEXT,
     package_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (package_id, granule_id) REFERENCES govinfo.hearings_granules(granule_id, package_id),
+    FOREIGN KEY (package_id, granule_id) REFERENCES staging_govinfo.hearings_granules(granule_id, package_id),
     UNIQUE (package_id, granule_id, bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.hearings_witnesses(
+CREATE TABLE IF NOT EXISTS staging_govinfo.hearings_witnesses(
     granule_id TEXT,
     witness TEXT,
     UNIQUE (granule_id, witness)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.treaties(
+CREATE TABLE IF NOT EXISTS staging_govinfo.treaties(
     package_id TEXT PRIMARY KEY,
     treaty_id TEXT,
     title TEXT,
@@ -335,7 +313,7 @@ CREATE TABLE IF NOT EXISTS govinfo.treaties(
     last_modified TIMESTAMP WITH TIME ZONE
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.treaties_granules(
+CREATE TABLE IF NOT EXISTS staging_govinfo.treaties_granules(
     granule_id TEXT,
     package_id TEXT,
     FOREIGN KEY (package_id) REFERENCES treaties(package_id)
@@ -343,7 +321,7 @@ CREATE TABLE IF NOT EXISTS govinfo.treaties_granules(
     PRIMARY KEY (granule_id, package_id)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.treaties_committees(
+CREATE TABLE IF NOT EXISTS staging_govinfo.treaties_committees(
     granule_id TEXT,
     package_id TEXT,
     committee_code TEXT,
@@ -353,7 +331,7 @@ CREATE TABLE IF NOT EXISTS govinfo.treaties_committees(
     UNIQUE (package_id, granule_id, committee_code, committee_name, chamber)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.congressional_directories(
+CREATE TABLE IF NOT EXISTS staging_govinfo.congressional_directories(
     package_id TEXT PRIMARY KEY,
     title TEXT,
     congress INTEGER,
@@ -371,14 +349,14 @@ CREATE TABLE IF NOT EXISTS govinfo.congressional_directories(
     last_modified TIMESTAMP WITH TIME ZONE
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.congressional_directories_isbn(
+CREATE TABLE IF NOT EXISTS staging_govinfo.congressional_directories_isbn(
     package_id TEXT,
     isbn TEXT,
-    FOREIGN KEY (package_id) REFERENCES govinfo.congressional_directories(package_id),
+    FOREIGN KEY (package_id) REFERENCES staging_govinfo.congressional_directories(package_id),
     UNIQUE(package_id, isbn)
 );
 
-CREATE TABLE IF NOT EXISTS govinfo.members(
+CREATE TABLE IF NOT EXISTS staging_govinfo.members(
     granule_id TEXT,
     package_id TEXT,
     bioguide_id TEXT,
@@ -394,10 +372,12 @@ CREATE TABLE IF NOT EXISTS govinfo.members(
     facebook_url TEXT,
     youtube_url TEXT,
     other_url TEXT,
-    FOREIGN KEY (package_id) REFERENCES govinfo.congressional_directories(package_id)
+    FOREIGN KEY (package_id) REFERENCES staging_govinfo.congressional_directories(package_id)
     INITIALLY DEFERRED,
     PRIMARY KEY (granule_id, package_id)
 );
+
+GRANT USAGE ON SCHEMA staging_govinfo TO bicam_pipeline;
 
 -- Finish off with granting permissions
 DO $$
@@ -405,9 +385,9 @@ DECLARE
     current_table_name text;
     current_schema_name text;
 BEGIN
-    FOR current_schema_name IN SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('_staging_congressional', 'congressional') LOOP
+    FOR current_schema_name IN SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('staging_govinfo') LOOP
         FOR current_table_name IN SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema_name LOOP
-            EXECUTE format('GRANT ALL ON TABLE %I.%I TO postgres_admin__ryan', current_schema_name, current_table_name);
+            EXECUTE format('GRANT ALL ON TABLE %I.%I TO bicam_pipeline', current_schema_name, current_table_name);
         END LOOP;
     END LOOP;
 END$$;
