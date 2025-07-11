@@ -448,13 +448,13 @@ class OptimizedDataProcessor:
         for item in data:
             package_id = item.get("packageId")
             bill_id = (
-                f"{item.get('billType')}{item.get('number')}-{item.get('congress')}"
+                f"{item.get('billType')}{item.get('billNumber')}-{item.get('congress')}"
             )
             # Main bill record
             bill_record = {
                 "package_id": package_id,
                 "bill_id": bill_id,
-                "bill_version": item.get("billVersion"),
+                "bill_version": item.get("billVersion", "").upper(),
                 "origin_chamber": self.utils.standardize_chamber(
                     item.get("originChamber")
                 ),
