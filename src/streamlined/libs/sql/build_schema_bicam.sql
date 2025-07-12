@@ -1,11 +1,11 @@
-CREATE SCHEMA IF NOT EXISTS bicam_final;
+CREATE SCHEMA IF NOT EXISTS bicam_test;
 
 BEGIN;
 
 SET CONSTRAINTS ALL DEFERRED;
 
 -- 1. Foundational tables
-CREATE TABLE IF NOT EXISTS bicam_final.congresses(
+CREATE TABLE IF NOT EXISTS bicam_test.congresses(
     congress_number INTEGER PRIMARY KEY,
     name TEXT,
     start_year INTEGER,
@@ -13,19 +13,19 @@ CREATE TABLE IF NOT EXISTS bicam_final.congresses(
     updated_at TIMESTAMP WITH TIME ZONE
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.congresses_sessions(
+CREATE TABLE IF NOT EXISTS bicam_test.congresses_sessions(
     congress_number INTEGER,
     session INTEGER,
     chamber TEXT,
     type TEXT,
     start_date DATE,
     end_date DATE,
-    FOREIGN KEY (congress_number) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress_number) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (congress_number, session, chamber, type)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.congresses_directories(
+CREATE TABLE IF NOT EXISTS bicam_test.congresses_directories(
     congress_number INTEGER,
     title TEXT,
     issued_at DATE,
@@ -40,23 +40,23 @@ CREATE TABLE IF NOT EXISTS bicam_final.congresses_directories(
     government_author2 TEXT,
     publisher TEXT,
     last_modified TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (congress_number) REFERENCES bicam_final.congresses(congress_number)
+    FOREIGN KEY (congress_number) REFERENCES bicam_test.congresses(congress_number)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (congress_number, govinfo_package_id),
     UNIQUE (govinfo_package_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.congresses_directories_isbn(
+CREATE TABLE IF NOT EXISTS bicam_test.congresses_directories_isbn(
     congress_number INTEGER,
     govinfo_package_id TEXT,
     isbn TEXT,
-    FOREIGN KEY (congress_number, govinfo_package_id) REFERENCES bicam_final.congresses_directories(congress_number, govinfo_package_id)
+    FOREIGN KEY (congress_number, govinfo_package_id) REFERENCES bicam_test.congresses_directories(congress_number, govinfo_package_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (congress_number, govinfo_package_id, isbn)
 );
 
 -- -- Reference tables with no dependencies
-CREATE TABLE IF NOT EXISTS bicam_final.ref_bill_summary_version_codes AS
+CREATE TABLE IF NOT EXISTS bicam_test.ref_bill_summary_version_codes AS
 SELECT
     version_code::integer as version_code,
     actionDesc::text as action_description,
@@ -124,10 +124,10 @@ FROM (
         ('87', 'Conference report filed in House, 3rd conference report', 'house')
 ) AS v (version_code, actionDesc, chamber);
 
-ALTER TABLE bicam_final.ref_bill_summary_version_codes
+ALTER TABLE bicam_test.ref_bill_summary_version_codes
 ADD CONSTRAINT unique_version_code_chamber UNIQUE (version_code, chamber);
 
-CREATE TABLE IF NOT EXISTS bicam_final.ref_title_type_codes AS
+CREATE TABLE IF NOT EXISTS bicam_test.ref_title_type_codes AS
 SELECT
     titleTypeCode::INTEGER as title_type_code,
     description::TEXT as description
@@ -165,11 +165,11 @@ FROM (
         (254, 'Short Title(s) from Engrossed Amendment Senate for portions of this bill')
 ) AS v (titleTypeCode, description);
 
-ALTER TABLE bicam_final.ref_title_type_codes
+ALTER TABLE bicam_test.ref_title_type_codes
 ADD PRIMARY KEY (title_type_code);
 
 
-CREATE TABLE IF NOT EXISTS bicam_final.ref_bill_version_codes (
+CREATE TABLE IF NOT EXISTS bicam_test.ref_bill_version_codes (
     version_code TEXT PRIMARY KEY,
     version_name  TEXT,
     description TEXT NOT NULL,
@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS bicam_final.ref_bill_version_codes (
 );
 
 -- Insert data
-INSERT INTO bicam_final.ref_bill_version_codes (version_name, version_code, description, chamber) VALUES
+INSERT INTO bicam_test.ref_bill_version_codes (version_name, version_code, description, chamber) VALUES
 ('Amendment (Senate)', 'AS', 'An alternate name for this version is Senate Amendment Ordered to be Printed. This version contains an amendment that has been ordered to be printed.', 'Senate'),
 ('Additional Sponsors (House)', 'ASH', 'An alternate name for this version is House Sponsors or Cosponsors Added or Withdrawn. This version is used to add or delete cosponsor names. When used, it most often shows numerous cosponsors being added.', 'House'),
 ('Agreed to (House)', 'ATH', 'An alternate name for this version is Agreed to by House. This version is a simple or concurrent resolution as agreed to in the House of Representatives.', 'House'),
@@ -233,7 +233,7 @@ INSERT INTO bicam_final.ref_bill_version_codes (version_name, version_code, desc
 ('Sponsor Change', 'SC', 'This version is used to change sponsors.', 'House');
 
 -- 2. Base tables that have no or simple dependencies
-CREATE TABLE IF NOT EXISTS bicam_final.members( -- coalesce the members that don't exist from govinfo, e.g. delegates and residentcommissioners
+CREATE TABLE IF NOT EXISTS bicam_test.members( -- coalesce the members that don't exist from govinfo, e.g. delegates and residentcommissioners
     bioguide_id TEXT PRIMARY KEY,
     normalized_name TEXT,
     direct_order_name TEXT,
@@ -263,19 +263,19 @@ CREATE TABLE IF NOT EXISTS bicam_final.members( -- coalesce the members that don
     updated_at TIMESTAMP WITH TIME ZONE
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.members_metadata(
+CREATE TABLE IF NOT EXISTS bicam_test.members_metadata(
     bioguide_id TEXT,
     govinfo_granule_id TEXT,
     govinfo_package_id TEXT,
     gpo_id TEXT,
     authority_id TEXT,
-    FOREIGN KEY (govinfo_package_id) REFERENCES bicam_final.congresses_directories(govinfo_package_id)
+    FOREIGN KEY (govinfo_package_id) REFERENCES bicam_test.congresses_directories(govinfo_package_id)
     INITIALLY DEFERRED,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members(bioguide_id),
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members(bioguide_id),
     UNIQUE (govinfo_package_id, govinfo_granule_id, bioguide_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committees(
+CREATE TABLE IF NOT EXISTS bicam_test.committees(
     committee_code TEXT PRIMARY KEY,
     name TEXT,
     chamber TEXT,
@@ -288,7 +288,7 @@ CREATE TABLE IF NOT EXISTS bicam_final.committees(
 );
 
 -- 3. Tables depending on congresses
-CREATE TABLE IF NOT EXISTS bicam_final.bills( -- coalesce congressional with govinfo to get version, current chamber, the new bools, pages
+CREATE TABLE IF NOT EXISTS bicam_test.bills( -- coalesce congressional with govinfo to get version, current chamber, the new bools, pages
     bill_id TEXT PRIMARY KEY,
     bill_type TEXT,
     bill_number TEXT,
@@ -313,13 +313,13 @@ CREATE TABLE IF NOT EXISTS bicam_final.bills( -- coalesce congressional with gov
     titles_count INTEGER,
     texts_count INTEGER,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (version_code) REFERENCES bicam_final.ref_bill_version_codes(version_code)
+    FOREIGN KEY (version_code) REFERENCES bicam_test.ref_bill_version_codes(version_code)
 );
 
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_metadata(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_metadata(
     bill_id TEXT,
     govinfo_package_id TEXT,
     su_doc_class_number TEXT,
@@ -328,11 +328,11 @@ CREATE TABLE IF NOT EXISTS bicam_final.bills_metadata(
     child_ils_system_id TEXT,
     parent_ils_system_id TEXT,
     govinfo_collection_code TEXT,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills(bill_id),
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills(bill_id),
     UNIQUE (bill_id, govinfo_package_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.hearings(
+CREATE TABLE IF NOT EXISTS bicam_test.hearings(
     hearing_id TEXT PRIMARY KEY,
     hearing_jacketnumber TEXT,
     loc_id TEXT,
@@ -346,32 +346,32 @@ CREATE TABLE IF NOT EXISTS bicam_final.hearings(
     citation TEXT,
     pages INTEGER,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.hearings_metadata(
+CREATE TABLE IF NOT EXISTS bicam_test.hearings_metadata(
     hearing_id TEXT,
     govinfo_package_id TEXT,
     su_doc_class_number TEXT,
     migrated_doc_id TEXT,
     govinfo_collection_code TEXT,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (hearing_id, govinfo_package_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.hearings_metadata_granules(
+CREATE TABLE IF NOT EXISTS bicam_test.hearings_metadata_granules(
     hearing_id TEXT,
     govinfo_package_id TEXT,
     govinfo_granule_id TEXT,
-    FOREIGN KEY (hearing_id, govinfo_package_id) REFERENCES bicam_final.hearings_metadata (hearing_id, govinfo_package_id)
+    FOREIGN KEY (hearing_id, govinfo_package_id) REFERENCES bicam_test.hearings_metadata (hearing_id, govinfo_package_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (hearing_id, govinfo_package_id, govinfo_granule_id)
 );
 
 
-CREATE TABLE IF NOT EXISTS bicam_final.treaties(
+CREATE TABLE IF NOT EXISTS bicam_test.treaties(
     treaty_id TEXT PRIMARY KEY,
     treaty_number INTEGER,
     suffix TEXT,
@@ -389,34 +389,34 @@ CREATE TABLE IF NOT EXISTS bicam_final.treaties(
     old_number TEXT,
     old_number_display_name TEXT,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (congress_received) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress_received) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (congress_considered) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress_considered) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED
 );
 
 
-CREATE TABLE IF NOT EXISTS bicam_final.treaties_metadata(
+CREATE TABLE IF NOT EXISTS bicam_test.treaties_metadata(
     treaty_id TEXT,
     govinfo_package_id TEXT,
     su_doc_class_number TEXT,
     migrated_doc_id TEXT,
     govinfo_collection_code TEXT,
-    FOREIGN KEY (treaty_id) REFERENCES bicam_final.treaties (treaty_id)
+    FOREIGN KEY (treaty_id) REFERENCES bicam_test.treaties (treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (treaty_id, govinfo_package_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.treaties_metadata_granules(
+CREATE TABLE IF NOT EXISTS bicam_test.treaties_metadata_granules(
     treaty_id TEXT,
     govinfo_package_id TEXT,
     govinfo_granule_id TEXT,
-    FOREIGN KEY (treaty_id, govinfo_package_id) REFERENCES bicam_final.treaties_metadata (treaty_id, govinfo_package_id)
+    FOREIGN KEY (treaty_id, govinfo_package_id) REFERENCES bicam_test.treaties_metadata (treaty_id, govinfo_package_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (treaty_id, govinfo_package_id, govinfo_granule_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.nominations(
+CREATE TABLE IF NOT EXISTS bicam_test.nominations(
     nomination_id TEXT PRIMARY KEY,
     nomination_number TEXT,
     part_number TEXT,
@@ -431,11 +431,11 @@ CREATE TABLE IF NOT EXISTS bicam_final.nominations(
     committees_count INTEGER,
     actions_count INTEGER,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.amendments(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments(
     amendment_id TEXT PRIMARY KEY,
     amendment_type TEXT,
     amendment_number TEXT,
@@ -453,24 +453,24 @@ CREATE TABLE IF NOT EXISTS bicam_final.amendments(
     cosponsors_count INTEGER,
     amendments_to_amendment_count INTEGER,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Dependent on bills and version codes:
-CREATE TABLE IF NOT EXISTS bicam_final.bills_summaries(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_summaries(
     bill_id TEXT,
     action_date DATE,
     action_desc TEXT,
     text TEXT,
     version_code INTEGER,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (bill_id, action_date, action_desc, version_code)
 );
 
 -- Dependent on bills and title type codes:
-CREATE TABLE IF NOT EXISTS bicam_final.bills_titles( -- check this with bills_short_titles
+CREATE TABLE IF NOT EXISTS bicam_test.bills_titles( -- check this with bills_short_titles
     bill_id TEXT,
     title TEXT,
     title_type TEXT,
@@ -478,15 +478,15 @@ CREATE TABLE IF NOT EXISTS bicam_final.bills_titles( -- check this with bills_sh
     bill_text_version_name TEXT,
     chamber TEXT,
     title_type_code INTEGER,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (title_type_code) REFERENCES bicam_final.ref_title_type_codes (title_type_code)
+    FOREIGN KEY (title_type_code) REFERENCES bicam_test.ref_title_type_codes (title_type_code)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, title, title_type)
 );
 
 -- Depends only on congresses
-CREATE TABLE IF NOT EXISTS bicam_final.committeeprints(
+CREATE TABLE IF NOT EXISTS bicam_test.committeeprints(
     print_id TEXT PRIMARY KEY,
     print_jacketnumber TEXT,
     congress INTEGER,
@@ -497,33 +497,33 @@ CREATE TABLE IF NOT EXISTS bicam_final.committeeprints(
     print_number TEXT,
     citation TEXT,
     updated_at TIMESTAMP,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeeprints_metadata(
+CREATE TABLE IF NOT EXISTS bicam_test.committeeprints_metadata(
     print_id TEXT,
     govinfo_package_id TEXT,
     su_doc_class_number TEXT,
     migrated_doc_id TEXT,
     govinfo_collection_code TEXT,
-    FOREIGN KEY (print_id) REFERENCES bicam_final.committeeprints (print_id)
+    FOREIGN KEY (print_id) REFERENCES bicam_test.committeeprints (print_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (print_id, govinfo_package_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeeprints_metadata_granules(
+CREATE TABLE IF NOT EXISTS bicam_test.committeeprints_metadata_granules(
     print_id TEXT,
     govinfo_package_id TEXT,
     govinfo_granule_id TEXT,
-    FOREIGN KEY (print_id, govinfo_package_id) REFERENCES bicam_final.committeeprints_metadata (print_id, govinfo_package_id)
+    FOREIGN KEY (print_id, govinfo_package_id) REFERENCES bicam_test.committeeprints_metadata (print_id, govinfo_package_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (print_id, govinfo_package_id, govinfo_granule_id)
 );
 
 
 -- No direct FKs, but will link later
-CREATE TABLE IF NOT EXISTS bicam_final.committeereports(
+CREATE TABLE IF NOT EXISTS bicam_test.committeereports(
     report_id TEXT PRIMARY KEY,
     report_type TEXT,
     report_number INTEGER,
@@ -541,28 +541,28 @@ CREATE TABLE IF NOT EXISTS bicam_final.committeereports(
     updated_at TIMESTAMP WITH TIME ZONE
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeereports_metadata(
+CREATE TABLE IF NOT EXISTS bicam_test.committeereports_metadata(
     report_id TEXT,
     govinfo_package_id TEXT,
     su_doc_class_number TEXT,
     migrated_doc_id TEXT,
     govinfo_collection_code TEXT,
-    FOREIGN KEY (report_id) REFERENCES bicam_final.committeereports (report_id)
+    FOREIGN KEY (report_id) REFERENCES bicam_test.committeereports (report_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (report_id, govinfo_package_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeereports_metadata_granules(
+CREATE TABLE IF NOT EXISTS bicam_test.committeereports_metadata_granules(
     report_id TEXT,
     govinfo_package_id TEXT,
     govinfo_granule_id TEXT,
-    FOREIGN KEY (report_id, govinfo_package_id) REFERENCES bicam_final.committeereports_metadata (report_id, govinfo_package_id)
+    FOREIGN KEY (report_id, govinfo_package_id) REFERENCES bicam_test.committeereports_metadata (report_id, govinfo_package_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (report_id, govinfo_package_id, govinfo_granule_id)
 );
 
 -- Depends on congresses and must link to bills, treaties, nominations, hearings
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings(
     meeting_id TEXT PRIMARY KEY,
     title TEXT,
     meeting_type TEXT,
@@ -577,62 +577,62 @@ CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings(
     zip_code TEXT,
     meeting_status TEXT,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Now create the amendments dependent tables
-CREATE TABLE IF NOT EXISTS bicam_final.amendments_sponsors(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments_sponsors(
     amendment_id TEXT,
     bioguide_id TEXT,
-    FOREIGN KEY (amendment_id) REFERENCES bicam_final.amendments (amendment_id)
+    FOREIGN KEY (amendment_id) REFERENCES bicam_test.amendments (amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (amendment_id, bioguide_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.amendments_cosponsors(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments_cosponsors(
     amendment_id TEXT,
     bioguide_id TEXT,
-    FOREIGN KEY (amendment_id) REFERENCES bicam_final.amendments (amendment_id)
+    FOREIGN KEY (amendment_id) REFERENCES bicam_test.amendments (amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (amendment_id, bioguide_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.amendments_amended_bills(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments_amended_bills(
     amendment_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (amendment_id) REFERENCES bicam_final.amendments (amendment_id)
+    FOREIGN KEY (amendment_id) REFERENCES bicam_test.amendments (amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (amendment_id, bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.amendments_amended_treaties(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments_amended_treaties(
     amendment_id TEXT,
     treaty_id TEXT,
-    FOREIGN KEY (amendment_id) REFERENCES bicam_final.amendments (amendment_id)
+    FOREIGN KEY (amendment_id) REFERENCES bicam_test.amendments (amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (treaty_id) REFERENCES bicam_final.treaties (treaty_id)
+    FOREIGN KEY (treaty_id) REFERENCES bicam_test.treaties (treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (amendment_id, treaty_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.amendments_amended_amendments(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments_amended_amendments(
     amendment_id TEXT,
     amended_amendment_id TEXT,
-    FOREIGN KEY (amendment_id) REFERENCES bicam_final.amendments (amendment_id)
+    FOREIGN KEY (amendment_id) REFERENCES bicam_test.amendments (amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (amended_amendment_id) REFERENCES bicam_final.amendments (amendment_id)
+    FOREIGN KEY (amended_amendment_id) REFERENCES bicam_test.amendments (amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (amendment_id, amended_amendment_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.amendments_actions(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments_actions(
     action_id TEXT PRIMARY KEY,
     amendment_id TEXT,
     action_code TEXT,
@@ -641,12 +641,12 @@ CREATE TABLE IF NOT EXISTS bicam_final.amendments_actions(
     action_type TEXT,
     source_system TEXT,
     source_system_code INTEGER,
-    FOREIGN KEY (amendment_id) REFERENCES bicam_final.amendments (amendment_id)
+    FOREIGN KEY (amendment_id) REFERENCES bicam_test.amendments (amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (action_id, amendment_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.amendments_actions_recorded_votes(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments_actions_recorded_votes(
     action_id TEXT,
     amendment_id TEXT,
     chamber TEXT,
@@ -655,27 +655,27 @@ CREATE TABLE IF NOT EXISTS bicam_final.amendments_actions_recorded_votes(
     roll_number INTEGER,
     session INTEGER,
     url TEXT,
-    FOREIGN KEY (action_id, amendment_id) REFERENCES bicam_final.amendments_actions (action_id, amendment_id)
+    FOREIGN KEY (action_id, amendment_id) REFERENCES bicam_test.amendments_actions (action_id, amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (action_id, amendment_id, url)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.amendments_texts(
+CREATE TABLE IF NOT EXISTS bicam_test.amendments_texts(
     amendment_id TEXT,
     date TIMESTAMP WITH TIME ZONE,
     type TEXT,
     raw_text TEXT,
     pdf TEXT,
     html TEXT,
-    FOREIGN KEY (amendment_id) REFERENCES bicam_final.amendments (amendment_id)
+    FOREIGN KEY (amendment_id) REFERENCES bicam_test.amendments (amendment_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (amendment_id, date, type)
 );
 
 -- Bills related tables
-CREATE TABLE IF NOT EXISTS bicam_final.bills_texts(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_texts(
     bill_id TEXT,
     date TEXT,
     type TEXT,
@@ -683,12 +683,12 @@ CREATE TABLE IF NOT EXISTS bicam_final.bills_texts(
     formatted_text TEXT,
     pdf TEXT,
     xml TEXT,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (bill_id, date, type)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_actions(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_actions(
     action_id TEXT PRIMARY KEY,
     bill_id TEXT,
     action_code TEXT,
@@ -699,23 +699,23 @@ CREATE TABLE IF NOT EXISTS bicam_final.bills_actions(
     source_system_code INTEGER,
     calendar TEXT,
     calendar_number INTEGER,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (action_id, bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_actions_committees(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_actions_committees(
     action_id TEXT,
     bill_id TEXT,
     committee_code TEXT,
-    FOREIGN KEY (action_id, bill_id) REFERENCES bicam_final.bills_actions (action_id, bill_id)
+    FOREIGN KEY (action_id, bill_id) REFERENCES bicam_test.bills_actions (action_id, bill_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (action_id, bill_id, committee_code)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_actions_recorded_votes(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_actions_recorded_votes(
     action_id TEXT,
     bill_id TEXT,
     chamber TEXT,
@@ -724,160 +724,160 @@ CREATE TABLE IF NOT EXISTS bicam_final.bills_actions_recorded_votes(
     roll_number INTEGER,
     session INTEGER,
     url TEXT,
-    FOREIGN KEY (action_id, bill_id) REFERENCES bicam_final.bills_actions (action_id, bill_id)
+    FOREIGN KEY (action_id, bill_id) REFERENCES bicam_test.bills_actions (action_id, bill_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (action_id, bill_id, url)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_related_bills(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_related_bills(
     bill_id TEXT,
     related_bill_id TEXT,
     identification_entity TEXT,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (related_bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (related_bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, related_bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_cbocostestimates(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_cbocostestimates(
     bill_id TEXT,
     description TEXT,
     pub_date TIMESTAMP WITH TIME ZONE,
     title TEXT,
     url TEXT,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, pub_date, url)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_cosponsors(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_cosponsors(
     bill_id TEXT,
     bioguide_id TEXT,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, bioguide_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_laws(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_laws(
     bill_id TEXT,
     law_id TEXT,
     law_number TEXT,
     law_type TEXT,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, law_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_notes(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_notes(
     bill_id TEXT,
     note_number INTEGER,
     note_text TEXT,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, note_number)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_notes_links(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_notes_links(
     bill_id TEXT,
     note_number INTEGER,
     link_name TEXT,
     link_url TEXT,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (bill_id, note_number) REFERENCES bicam_final.bills_notes (bill_id, note_number)
+    FOREIGN KEY (bill_id, note_number) REFERENCES bicam_test.bills_notes (bill_id, note_number)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (bill_id, note_number, link_url)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_sponsors(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_sponsors(
     bill_id TEXT,
     bioguide_id TEXT,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, bioguide_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_subjects(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_subjects(
     bill_id TEXT,
     subject TEXT,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, subject)
 );
 
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_reference_codes(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_reference_codes(
     bill_code_id TEXT PRIMARY KEY,
     bill_id TEXT,
     reference_code TEXT, -- combination of label and title
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills(bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills(bill_id)
     INITIALLY DEFERRED
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_reference_codes_sections(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_reference_codes_sections(
     bill_code_id TEXT,
     code_section TEXT,
-    FOREIGN KEY (bill_code_id) REFERENCES bicam_final.bills_reference_codes(bill_code_id)
+    FOREIGN KEY (bill_code_id) REFERENCES bicam_test.bills_reference_codes(bill_code_id)
     INITIALLY DEFERRED,
     UNIQUE (bill_code_id, code_section)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_reference_laws(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_reference_laws(
     bill_id TEXT,
     law_id TEXT, -- fix law_id
     law_type TEXT,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills(bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills(bill_id)
     INITIALLY DEFERRED,
     PRIMARY KEY (bill_id, law_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_reference_statutes(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_reference_statutes(
     bill_statute_id TEXT PRIMARY KEY,
     bill_id TEXT,
     reference_statute TEXT, -- combine label and title
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills(bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills(bill_id)
     INITIALLY DEFERRED
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_reference_statutes_pages(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_reference_statutes_pages(
     bill_statute_id TEXT,
     page TEXT, -- combine label and title
-    FOREIGN KEY (bill_statute_id) REFERENCES bicam_final.bills_reference_statutes(bill_statute_id)
+    FOREIGN KEY (bill_statute_id) REFERENCES bicam_test.bills_reference_statutes(bill_statute_id)
     INITIALLY DEFERRED,
     UNIQUE (bill_statute_id, page)
 );
 
 
 -- committeeprints related
-CREATE TABLE IF NOT EXISTS bicam_final.committeeprints_associated_bills(
+CREATE TABLE IF NOT EXISTS bicam_test.committeeprints_associated_bills(
     print_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (print_id) REFERENCES bicam_final.committeeprints (print_id)
+    FOREIGN KEY (print_id) REFERENCES bicam_test.committeeprints (print_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (print_id, bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeeprints_committees(
+CREATE TABLE IF NOT EXISTS bicam_test.committeeprints_committees(
     print_id TEXT,
     committee_code TEXT,
-    FOREIGN KEY (print_id) REFERENCES bicam_final.committeeprints (print_id)
+    FOREIGN KEY (print_id) REFERENCES bicam_test.committeeprints (print_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (print_id, committee_code)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeeprints_texts(
+CREATE TABLE IF NOT EXISTS bicam_test.committeeprints_texts(
     print_id TEXT,
     raw_text TEXT,
     formatted_text TEXT,
@@ -885,69 +885,69 @@ CREATE TABLE IF NOT EXISTS bicam_final.committeeprints_texts(
     html TEXT,
     xml TEXT,
     png TEXT,
-    FOREIGN KEY (print_id) REFERENCES bicam_final.committeeprints (print_id)
+    FOREIGN KEY (print_id) REFERENCES bicam_test.committeeprints (print_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (print_id, formatted_text, pdf, html, xml)
 );
 
 -- committeereports related
-CREATE TABLE IF NOT EXISTS bicam_final.committeereports_associated_bills(
+CREATE TABLE IF NOT EXISTS bicam_test.committeereports_associated_bills(
     report_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (report_id) REFERENCES bicam_final.committeereports (report_id)
+    FOREIGN KEY (report_id) REFERENCES bicam_test.committeereports (report_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (report_id, bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeereports_associated_treaties(
+CREATE TABLE IF NOT EXISTS bicam_test.committeereports_associated_treaties(
     report_id TEXT,
     treaty_id TEXT,
-    FOREIGN KEY (report_id) REFERENCES bicam_final.committeereports (report_id)
+    FOREIGN KEY (report_id) REFERENCES bicam_test.committeereports (report_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (treaty_id) REFERENCES bicam_final.treaties (treaty_id)
+    FOREIGN KEY (treaty_id) REFERENCES bicam_test.treaties (treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (report_id, treaty_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeereports_texts(
+CREATE TABLE IF NOT EXISTS bicam_test.committeereports_texts(
     report_id TEXT,
     raw_text TEXT,
     formatted_text TEXT,
     formatted_text_is_errata BOOLEAN,
     pdf TEXT,
     pdf_is_errata BOOLEAN,
-    FOREIGN KEY (report_id) REFERENCES bicam_final.committeereports (report_id)
+    FOREIGN KEY (report_id) REFERENCES bicam_test.committeereports (report_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (report_id, formatted_text, pdf)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeereports_members(
+CREATE TABLE IF NOT EXISTS bicam_test.committeereports_members(
     report_id TEXT,
     bioguide_id TEXT,
-    FOREIGN KEY (report_id) REFERENCES bicam_final.committeereports (report_id)
+    FOREIGN KEY (report_id) REFERENCES bicam_test.committeereports (report_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (report_id, bioguide_id)
 );
 
 -- committees related
-CREATE TABLE IF NOT EXISTS bicam_final.committees_bills(
+CREATE TABLE IF NOT EXISTS bicam_test.committees_bills(
     committee_code TEXT,
     bill_id TEXT,
     relationship_type TEXT,
     committee_action_date TIMESTAMP WITH TIME ZONE,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (committee_code, bill_id, relationship_type, committee_action_date)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committees_history(
+CREATE TABLE IF NOT EXISTS bicam_test.committees_history(
     committee_code TEXT,
     name TEXT,
     loc_name TEXT,
@@ -959,92 +959,92 @@ CREATE TABLE IF NOT EXISTS bicam_final.committees_history(
     nara_id TEXT,
     loc_linked_data_id TEXT,
     updated_at TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (committee_code, started_at, ended_at)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committees_subcommittees(
+CREATE TABLE IF NOT EXISTS bicam_test.committees_subcommittees(
     committee_code TEXT,
     subcommittee_code TEXT,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (subcommittee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (subcommittee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (committee_code, subcommittee_code)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committees_committeereports(
+CREATE TABLE IF NOT EXISTS bicam_test.committees_committeereports(
     committee_code TEXT,
     report_id TEXT,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (report_id) REFERENCES bicam_final.committeereports (report_id)
+    FOREIGN KEY (report_id) REFERENCES bicam_test.committeereports (report_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (committee_code, report_id)
 );
 
 -- hearings related
-CREATE TABLE IF NOT EXISTS bicam_final.hearings_committees(
+CREATE TABLE IF NOT EXISTS bicam_test.hearings_committees(
     hearing_id TEXT,
     committee_code TEXT,
     committee_name TEXT,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (hearing_id, committee_code)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.hearings_dates(
+CREATE TABLE IF NOT EXISTS bicam_test.hearings_dates(
     hearing_id TEXT,
     hearing_date DATE,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (hearing_id, hearing_date)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.hearings_texts(
+CREATE TABLE IF NOT EXISTS bicam_test.hearings_texts(
     hearing_id TEXT,
     raw_text TEXT,
     pdf TEXT,
     formatted_text TEXT,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (hearing_id, pdf, formatted_text)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.hearings_members( -- found via linking hearing_id in the hearings_metadata_granules table
+CREATE TABLE IF NOT EXISTS bicam_test.hearings_members( -- found via linking hearing_id in the hearings_metadata_granules table
     hearing_id TEXT,
     bioguide_id TEXT,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (hearing_id, bioguide_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.hearings_witnesses(
+CREATE TABLE IF NOT EXISTS bicam_test.hearings_witnesses(
     hearing_id TEXT,
     witness TEXT,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (hearing_id, witness)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.hearings_bills(
+CREATE TABLE IF NOT EXISTS bicam_test.hearings_bills(
     hearing_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (hearing_id, bill_id)
 
 );
 
 -- members related
-CREATE TABLE IF NOT EXISTS bicam_final.members_terms(
+CREATE TABLE IF NOT EXISTS bicam_test.members_terms(
     bioguide_id TEXT,
     member_type TEXT,
     chamber TEXT,
@@ -1062,96 +1062,96 @@ CREATE TABLE IF NOT EXISTS bicam_final.members_terms(
     facebook_url TEXT,
     youtube_url TEXT,
     other_url TEXT,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (bioguide_id, start_year, end_year)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.members_leadership_roles(
+CREATE TABLE IF NOT EXISTS bicam_test.members_leadership_roles(
     bioguide_id TEXT,
     role TEXT,
     congress INTEGER,
     chamber TEXT,
     is_current BOOLEAN,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (congress) REFERENCES bicam_final.congresses (congress_number)
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (bioguide_id, role, congress, chamber)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.members_party_history(
+CREATE TABLE IF NOT EXISTS bicam_test.members_party_history(
     bioguide_id TEXT,
     party_code TEXT,
     party_name TEXT,
     start_year INTEGER,
     end_year INTEGER,
-    FOREIGN KEY (bioguide_id) REFERENCES bicam_final.members (bioguide_id)
+    FOREIGN KEY (bioguide_id) REFERENCES bicam_test.members (bioguide_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (bioguide_id, party_code, start_year, end_year)
 );
 
 -- nominations related
-CREATE TABLE IF NOT EXISTS bicam_final.nominations_actions(
+CREATE TABLE IF NOT EXISTS bicam_test.nominations_actions(
     action_id TEXT PRIMARY KEY,
     nomination_id TEXT,
     action_code TEXT,
     action_type TEXT,
     action_date DATE,
     text TEXT,
-    FOREIGN KEY (nomination_id) REFERENCES bicam_final.nominations (nomination_id)
+    FOREIGN KEY (nomination_id) REFERENCES bicam_test.nominations (nomination_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (action_id, nomination_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.nominations_positions(
+CREATE TABLE IF NOT EXISTS bicam_test.nominations_positions(
     nomination_id TEXT,
     ordinal INTEGER,
     position_title TEXT,
     organization TEXT,
     intro_text TEXT,
     nominee_count INTEGER,
-    FOREIGN KEY (nomination_id) REFERENCES bicam_final.nominations (nomination_id)
+    FOREIGN KEY (nomination_id) REFERENCES bicam_test.nominations (nomination_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (nomination_id, ordinal)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.nominations_actions_committees(
+CREATE TABLE IF NOT EXISTS bicam_test.nominations_actions_committees(
     action_id TEXT,
     nomination_id TEXT,
     committee_code TEXT,
-    FOREIGN KEY (action_id, nomination_id) REFERENCES bicam_final.nominations_actions (action_id, nomination_id)
+    FOREIGN KEY (action_id, nomination_id) REFERENCES bicam_test.nominations_actions (action_id, nomination_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (action_id, nomination_id, committee_code)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.nominations_committeeactivities(
+CREATE TABLE IF NOT EXISTS bicam_test.nominations_committeeactivities(
     nomination_id TEXT,
     committee_code TEXT,
     activity_name TEXT,
     activity_date TIMESTAMP WITH TIME ZONE,
-    FOREIGN KEY (nomination_id) REFERENCES bicam_final.nominations (nomination_id)
+    FOREIGN KEY (nomination_id) REFERENCES bicam_test.nominations (nomination_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (nomination_id, committee_code, activity_date, activity_name)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.nominations_associated_hearings(
+CREATE TABLE IF NOT EXISTS bicam_test.nominations_associated_hearings(
     nomination_id TEXT,
     hearing_id TEXT,
-    FOREIGN KEY (nomination_id) REFERENCES bicam_final.nominations (nomination_id)
+    FOREIGN KEY (nomination_id) REFERENCES bicam_test.nominations (nomination_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (nomination_id, hearing_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.nominations_nominees(
+CREATE TABLE IF NOT EXISTS bicam_test.nominations_nominees(
     nomination_id TEXT,
     ordinal INTEGER,
     first_name TEXT,
@@ -1163,154 +1163,166 @@ CREATE TABLE IF NOT EXISTS bicam_final.nominations_nominees(
     effective_date DATE,
     predecessor_name TEXT,
     corps_code TEXT,
-    FOREIGN KEY (nomination_id, ordinal) REFERENCES bicam_final.nominations_positions (nomination_id, ordinal)
+    FOREIGN KEY (nomination_id, ordinal) REFERENCES bicam_test.nominations_positions (nomination_id, ordinal)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (nomination_id, ordinal, first_name, middle_name, last_name)
 );
 
 -- treaties related
-CREATE TABLE IF NOT EXISTS bicam_final.treaties_actions(
+CREATE TABLE IF NOT EXISTS bicam_test.treaties_actions(
     action_id TEXT PRIMARY KEY,
     treaty_id TEXT,
     action_code TEXT,
     action_date DATE,
     text TEXT,
     action_type TEXT,
-    FOREIGN KEY (treaty_id) REFERENCES bicam_final.treaties (treaty_id)
+    FOREIGN KEY (treaty_id) REFERENCES bicam_test.treaties (treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (action_id, treaty_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.treaties_actions_committees(
+CREATE TABLE IF NOT EXISTS bicam_test.treaties_actions_committees(
     action_id TEXT,
     treaty_id TEXT,
     committee_code TEXT,
-    FOREIGN KEY (action_id, treaty_id) REFERENCES bicam_final.treaties_actions (action_id, treaty_id)
+    FOREIGN KEY (action_id, treaty_id) REFERENCES bicam_test.treaties_actions (action_id, treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (action_id, treaty_id, committee_code)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.treaties_country_parties(
+CREATE TABLE IF NOT EXISTS bicam_test.treaties_country_parties(
     treaty_id TEXT,
     country TEXT,
-    FOREIGN KEY (treaty_id) REFERENCES bicam_final.treaties (treaty_id)
+    FOREIGN KEY (treaty_id) REFERENCES bicam_test.treaties (treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (treaty_id, country)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.treaties_index_terms(
+CREATE TABLE IF NOT EXISTS bicam_test.treaties_index_terms(
     treaty_id TEXT,
     index_term TEXT,
-    FOREIGN KEY (treaty_id) REFERENCES bicam_final.treaties (treaty_id)
+    FOREIGN KEY (treaty_id) REFERENCES bicam_test.treaties (treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (treaty_id, index_term)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.treaties_titles(
+CREATE TABLE IF NOT EXISTS bicam_test.treaties_titles(
     treaty_id TEXT,
     title TEXT,
     title_type TEXT,
-    FOREIGN KEY (treaty_id) REFERENCES bicam_final.treaties (treaty_id)
+    FOREIGN KEY (treaty_id) REFERENCES bicam_test.treaties (treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (treaty_id, title, title_type)
 );
 
 -- committeemeetings related (depends on bills, treaties, nominations, hearings)
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings_associated_bills(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings_associated_bills(
     meeting_id TEXT,
     bill_id TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES bicam_final.committeemeetings (meeting_id)
+    FOREIGN KEY (meeting_id) REFERENCES bicam_test.committeemeetings (meeting_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (bill_id) REFERENCES bicam_final.bills (bill_id)
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (meeting_id, bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings_associated_treaties(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings_associated_treaties(
     meeting_id TEXT,
     treaty_id TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES bicam_final.committeemeetings (meeting_id)
+    FOREIGN KEY (meeting_id) REFERENCES bicam_test.committeemeetings (meeting_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (treaty_id) REFERENCES bicam_final.treaties (treaty_id)
+    FOREIGN KEY (treaty_id) REFERENCES bicam_test.treaties (treaty_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (meeting_id, treaty_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings_associated_nominations(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings_associated_nominations(
     meeting_id TEXT,
     nomination_id TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES bicam_final.committeemeetings (meeting_id)
+    FOREIGN KEY (meeting_id) REFERENCES bicam_test.committeemeetings (meeting_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (nomination_id) REFERENCES bicam_final.nominations (nomination_id)
+    FOREIGN KEY (nomination_id) REFERENCES bicam_test.nominations (nomination_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (meeting_id, nomination_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings_meeting_documents(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings_meeting_documents(
     meeting_id TEXT,
     name TEXT,
     document_type TEXT,
     description TEXT,
     url TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES bicam_final.committeemeetings (meeting_id)
+    FOREIGN KEY (meeting_id) REFERENCES bicam_test.committeemeetings (meeting_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (meeting_id, url)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings_witness_documents(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings_witness_documents(
     meeting_id TEXT,
     document_type TEXT,
     url TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES bicam_final.committeemeetings (meeting_id)
+    FOREIGN KEY (meeting_id) REFERENCES bicam_test.committeemeetings (meeting_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (meeting_id, url)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings_witnesses(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings_witnesses(
     meeting_id TEXT,
     name TEXT,
     position TEXT,
     organization TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES bicam_final.committeemeetings (meeting_id)
+    FOREIGN KEY (meeting_id) REFERENCES bicam_test.committeemeetings (meeting_id)
         DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (meeting_id, name, position, organization)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings_associated_hearings(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings_associated_hearings(
     meeting_id TEXT,
     hearing_id TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES bicam_final.committeemeetings (meeting_id)
+    FOREIGN KEY (meeting_id) REFERENCES bicam_test.committeemeetings (meeting_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (hearing_id) REFERENCES bicam_final.hearings (hearing_id)
+    FOREIGN KEY (hearing_id) REFERENCES bicam_test.hearings (hearing_id)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (meeting_id, hearing_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.committeemeetings_committees(
+CREATE TABLE IF NOT EXISTS bicam_test.committeemeetings_committees(
     meeting_id TEXT,
     committee_code TEXT,
-    FOREIGN KEY (meeting_id) REFERENCES bicam_final.committeemeetings (meeting_id)
+    FOREIGN KEY (meeting_id) REFERENCES bicam_test.committeemeetings (meeting_id)
         DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (committee_code) REFERENCES bicam_final.committees (committee_code)
+    FOREIGN KEY (committee_code) REFERENCES bicam_test.committees (committee_code)
         DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (meeting_id, committee_code)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_final.bills_lobbied(
+CREATE TABLE IF NOT EXISTS bicam_test.bills_lobbied(
     filing_uuid TEXT,
     general_isue_code TEXT,
     bill_id TEXT,
     is_implementation BOOLEAN
 );
 
+-- Crosswalk table for VoteView integration
+CREATE TABLE IF NOT EXISTS bicam_test.crosswalk_bills_voteview(
+    bill_id TEXT,
+    voteview_bill_id TEXT,
+    congress INTEGER,
+    FOREIGN KEY (bill_id) REFERENCES bicam_test.bills (bill_id)
+        DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (congress) REFERENCES bicam_test.congresses (congress_number)
+        DEFERRABLE INITIALLY DEFERRED,
+    PRIMARY KEY (bill_id)
+);
+
 -- Finish off with granting permissions
 -- DO $$
 -- BEGIN
---     EXECUTE 'GRANT USAGE ON SCHEMA bicam_final TO ' || quote_ident(current_user);
---     EXECUTE 'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA bicam_final TO ' || quote_ident(current_user);
---     EXECUTE 'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA bicam_final TO ' || quote_ident(current_user);
+--     EXECUTE 'GRANT USAGE ON SCHEMA bicam_test TO ' || quote_ident(current_user);
+--     EXECUTE 'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA bicam_test TO ' || quote_ident(current_user);
+--     EXECUTE 'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA bicam_test TO ' || quote_ident(current_user);
 -- END $$;
 
 -- COMMIT;

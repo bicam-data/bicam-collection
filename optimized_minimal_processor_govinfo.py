@@ -1088,7 +1088,7 @@ class OptimizedDataProcessor:
 
         hearings = []
 
-        for item in data:
+        for item in [item for item in data if not item.get("packageId").startswith("GOVPUB-")]:
             package_id = item.get("packageId")
             # Derive hearing_id from package_id, following the SQL logic in datatypes/congressional_hearings.py
             hearing_id = None
