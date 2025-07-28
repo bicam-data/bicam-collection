@@ -14,7 +14,7 @@ import os
 
 from dotenv import load_dotenv
 
-from src.bicam_collection.lobbyist_matching.main import process_filings
+from .main import process_filings
 
 logging.basicConfig(level=logging.INFO)
 
