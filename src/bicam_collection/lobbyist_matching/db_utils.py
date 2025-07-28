@@ -376,10 +376,22 @@ class DatabaseInterface:
 
                         # Add pagination for non-random queries
                         if not random_sample and last_section_id is not None:
+                            # Convert last_section_id to the appropriate type
+                            # If section_id_col is expected to be integer, convert to int
+                            # Otherwise keep as string
+                            try:
+                                # Try to convert to int if it looks like a number
+                                if str(last_section_id).isdigit():
+                                    last_section_id_converted = int(last_section_id)
+                                else:
+                                    last_section_id_converted = str(last_section_id)
+                            except (ValueError, TypeError):
+                                last_section_id_converted = str(last_section_id)
+
                             query_parts.append(
                                 f"AND {section_id_col} > ${param_counter}"
                             )
-                            params.append(last_section_id)
+                            params.append(last_section_id_converted)
                             param_counter += 1
 
                         if specific_filings:
