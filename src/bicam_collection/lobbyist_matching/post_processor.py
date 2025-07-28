@@ -5,11 +5,7 @@ from typing import List
 from tqdm import tqdm
 from collections import defaultdict
 
-from matcher import (
-    ReferenceMatcher,
-    load_corpus_bills,
-    calculate_title_similarity
-)
+from matcher import ReferenceMatcher, load_corpus_bills, calculate_title_similarity
 from paragraph_processor import process_paragraphs
 
 """
@@ -25,10 +21,10 @@ It includes functions for:
 async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
     """
     Process unmatched references for potential bill number variations.
-    
+
     Checks unmatched references against bill number variants that differ by a single digit,
     looking for high confidence title matches. This helps catch OCR errors in bill numbers.
-    
+
     Args:
         pool: Database connection pool
         run_id: ID of the current matching run
@@ -595,7 +591,7 @@ async def post_process_all(pool: asyncpg.Pool, run_id: int) -> None:
             (post_process_wrong_titles, "Post-processing wrong titles"),
             (post_process_low_confidence, "Post-processing low confidence matches"),
             (deduplicate_matches, "Final deduplication"),
-            (process_paragraphs, "Processing paragraphs")
+            # (process_paragraphs, "Processing paragraphs")
         ]
         
         # Run each step with progress tracking

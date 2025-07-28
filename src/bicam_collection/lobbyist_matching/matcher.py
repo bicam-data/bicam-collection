@@ -1411,11 +1411,11 @@ class MatchingManager:
                                                     raise
                                                 logging.warning(f"Error storing matches (attempt {store_retry_count}/{max_retries}): {str(e)}")
                                                 await asyncio.sleep(store_retry_count * 2)
-                                    
+
                                     offset += len(refs)
                                     pbar.update(len(refs))
                                     break  # Success, exit retry loop
-                                    
+
                             except asyncio.TimeoutError:
                                 retry_count += 1
                                 if retry_count == max_retries:
@@ -1423,7 +1423,7 @@ class MatchingManager:
                                     raise
                                 logging.warning(f"Operation timed out (attempt {retry_count}/{max_retries}), retrying...")
                                 await asyncio.sleep(retry_count * 5)  # Exponential backoff
-                                
+
                             except Exception as e:
                                 retry_count += 1
                                 if retry_count == max_retries:
@@ -1431,16 +1431,16 @@ class MatchingManager:
                                     raise
                                 logging.warning(f"Operation failed (attempt {retry_count}/{max_retries}): {str(e)}")
                                 await asyncio.sleep(retry_count * 2)
-                
+
                 logging.info("Reference matching complete")
-                
+
         except Exception as e:
             logging.error(f"Error during matching: {str(e)}", exc_info=True)
             raise
 
 def process_batch(refs: List[Dict], bill_trie: BillTrie) -> List[MatchResult]:
     """Process a batch of references in a worker process.
-    
+
     Args:
         refs (List[Dict]): List of reference dictionaries to process
         bill_trie (BillTrie): Trie structure containing bill corpus
