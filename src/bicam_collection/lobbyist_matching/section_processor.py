@@ -14,20 +14,30 @@ Key components:
 - Reference context extraction with title association
 """
 
-import re
-from typing import List, Dict, Any, Optional, Tuple, Set
-from dataclasses import dataclass
 import logging
-from db_utils import FilingSection
-from timeout_handler import timeout_handler, BatchTimeoutManager
+import os
+import re
 import signal
+import sys
+from dataclasses import dataclass
+from typing import Any
+
+# Handle imports for both direct execution and module execution
+try:
+    from .db_utils import FilingSection
+    from .timeout_handler import BatchTimeoutManager, timeout_handler
+except ImportError:
+    # When run directly, add the current directory to path
+    sys.path.insert(0, os.path.dirname(__file__))
+    from db_utils import FilingSection
+    from timeout_handler import BatchTimeoutManager, timeout_handler
 
 logger = logging.getLogger(__name__)
 
 # Title-ending words and phrases that signal potential bill/law titles
 TITLE_ENDING_WORDS = {
     'Act',
-    'Bill', 
+    'Bill',
     'Resolution',
     'Appropriations',
     'Trade Agreement',
@@ -146,14 +156,14 @@ class ReferenceContext:
     start: int
     end: int
     text: str
-    title_before: Optional[str] = None
-    title_after: Optional[str] = None
+    title_before: str | None = None
+    title_after: str | None = None
     is_companion_group: bool = False
     reference_type: str = 'bill'  # 'bill' or 'law'
 
 
 
-def analyze_section_pattern(text: str) -> Dict[str, Any]:
+def analyze_section_pattern(text: str) -> dict[str, Any]:
     """
     Analyze a section of text to determine patterns of bill/law references.
     
@@ -165,14 +175,14 @@ def analyze_section_pattern(text: str) -> Dict[str, Any]:
     """
     # Split text into logical segments on newlines or periods
     segments = re.split(r'[.\n](?=\s*[A-Z])', text)
-    
+
     contexts = []
-    
+
     for segment in segments:
         # Find all bill/law references in this segment
         bill_refs = list(BILL_NUM_PATTERN.finditer(segment))
         law_refs = list(LAW_NUM_PATTERN.finditer(segment))
-        
+
         # Process each reference in the segment
         for ref in bill_refs + law_refs:
             ref_contexts = extract_reference_context(
@@ -181,12 +191,12 @@ def analyze_section_pattern(text: str) -> Dict[str, Any]:
                 ref.end(),
                 'bill' if ref in bill_refs else 'law'
             )
-            
+
             if isinstance(ref_contexts, list):
                 contexts.extend(ref_contexts)
             elif ref_contexts:
                 contexts.append(ref_contexts)
-    
+
     return {
         'pattern': 'mixed',  # Simplified since we're handling each case individually
         'contexts': contexts
@@ -209,19 +219,19 @@ def is_part_of_nested_title(text: str, ref_start: int, ref_end: int) -> bool:
     context_start = max(0, ref_start - 200)
     context_end = min(len(text), ref_end + 200)
     context = text[context_start:context_end]
-    
+
     for match in NESTED_TITLE_PATTERN.finditer(context):
         # Convert match positions to full text positions
         match_start = context_start + match.start()
         match_end = context_start + match.end()
-        
+
         # If reference falls within nested title, return True
         if match_start <= ref_start and match_end >= ref_end:
             return True
-            
+
     return False
 
-def extract_reference_context(text: str, start: int, end: int, ref_type: str) -> Optional[ReferenceContext]:
+def extract_reference_context(text: str, start: int, end: int, ref_type: str) -> ReferenceContext | None:
     """
     Extract context around a bill/law reference with title association.
     
@@ -235,8 +245,8 @@ def extract_reference_context(text: str, start: int, end: int, ref_type: str) ->
         Optional[ReferenceContext]: Context object if valid reference found, None otherwise
     """
     MAX_TITLE_DISTANCE = 300  # Increased to handle longer titles
-    
-    def find_title_before_reference(text: str, ref_start: int) -> Optional[str]:
+
+    def find_title_before_reference(text: str, ref_start: int) -> str | None:
         """Find title that comes before a bill reference."""
         title_pattern = re.compile(
             fr"""
@@ -253,14 +263,14 @@ def extract_reference_context(text: str, start: int, end: int, ref_type: str) ->
             """,
             re.VERBOSE | re.I
         )
-        
+
         look_behind = text[max(0, ref_start - MAX_TITLE_DISTANCE):ref_start]
         match = title_pattern.search(look_behind)
         if match:
             return match.group('title').strip()
         return None
 
-    def find_title_after_reference(text: str, ref_end: int) -> Optional[str]:
+    def find_title_after_reference(text: str, ref_end: int) -> str | None:
         """Find title that comes after a bill reference."""
         title_pattern = re.compile(
             fr"""
@@ -276,7 +286,7 @@ def extract_reference_context(text: str, start: int, end: int, ref_type: str) ->
             """,
             re.VERBOSE | re.I
         )
-        
+
         look_ahead = text[ref_end:min(len(text), ref_end + MAX_TITLE_DISTANCE)]
         match = title_pattern.search(look_ahead)
         if match:
@@ -285,15 +295,15 @@ def extract_reference_context(text: str, start: int, end: int, ref_type: str) ->
 
     # Look for title before reference
     title_before = find_title_before_reference(text, start)
-    
+
     # Look for title after reference if no title found before
     title_after = None
     if not title_before:
         title_after = find_title_after_reference(text, end)
-    
+
     # Extract companion bills if present
     reference_text = text[start:end].strip()
-    
+
     # Create context with the title if found
     return ReferenceContext(
         start=start,
@@ -304,7 +314,7 @@ def extract_reference_context(text: str, start: int, end: int, ref_type: str) ->
         reference_type=ref_type
     )
 
-def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
+def process_section_for_titles(text: str) -> list[dict[str, Any]]:
     """
     Process a section looking for titles with bill numbers in various formats.
     
@@ -331,7 +341,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
         """,
         re.VERBOSE | re.I
     )
-    
+
     for match in standalone_title_pattern.finditer(text):
         title_text = match.group('title').strip()
         if title_text and not is_part_of_nested_title(text, match.start(), match.end()):
@@ -341,7 +351,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
                 context_start = max(0, match.start() - 50)
                 context_end = min(len(text), match.end() + 50)
                 context = text[context_start:context_end]
-                
+
                 if not BILL_NUM_PATTERN.search(context):
                     all_matches.append({
                         'type': 'title',
@@ -350,7 +360,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
                         'title': title_text,
                         'text': title_text
                     })
-    
+
     colon_pattern = re.compile(
         fr"""
         (?P<bills>
@@ -368,7 +378,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
         """,
         re.VERBOSE | re.X
     )
-    
+
     # Pattern for "Title (Bill Numbers)"
     parenthetical_pattern = re.compile(
         fr"""
@@ -384,7 +394,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
         """,
         re.VERBOSE | re.I
     )
-    
+
         # Pattern for multiple bills and title in parentheses
     parenthetical_inline_pattern = re.compile(
         fr"""
@@ -404,7 +414,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
         """,
         re.VERBOSE | re.I
     )
-    
+
     # Pattern for bills and title without parentheses
     inline_pattern = re.compile(
         fr"""
@@ -423,7 +433,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
         """,
         re.VERBOSE | re.I
     )
-    
+
     # Pattern for "Bill Number - Title"
     post_reference_pattern = re.compile(
         fr"""
@@ -586,9 +596,9 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
         """,
         re.VERBOSE | re.I
     )
-    
-    
-    
+
+
+
     # Add pattern for title before bill in parentheses
     title_before_bill_pattern = re.compile(
         fr"""
@@ -659,16 +669,16 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
         sentence_end_pattern,
         bill_with_description_pattern
     ]
-    
+
     # Process all patterns
     for pattern in patterns:
         for match in pattern.finditer(text):
             title = match.group('title').strip()
             bills_text = match.group('bills')
-            
+
             # Extract all bill references from the bills text
             bill_refs = list(BILL_NUM_PATTERN.finditer(bills_text))
-            
+
             # Process each bill reference
             for bill_ref in bill_refs:
                 try:
@@ -676,7 +686,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
                     bill_type = standardize_bill_type(*components)
                     if bill_type:
                         bill_number = bill_ref.groups()[-1]
-                        
+
                         # Clean up title
                         # Remove introduced date if present
                         title = re.sub(r'\s*\(introduced\s+\d+/\d+/\d+\)', '', title)
@@ -686,11 +696,11 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
                         title = re.sub(r'\s*\((?:Reconciliation\s+Bill|[^)]*?\s+Bill)\)', '', title, flags=re.I)
                         # Clean up any remaining parentheses
                         title = re.sub(r'\s*\([^)]*\)', '', title)
-                        
+
                         # Skip if title is too short or just a descriptor
                         if len(title) < 4 or title.lower() in ['bill', 'act']:
                             continue
-                        
+
                         all_matches.append({
                             'title': title,
                             'bill_type': bill_type.lower(),
@@ -707,7 +717,7 @@ def process_section_for_titles(text: str) -> List[Dict[str, Any]]:
     return all_matches
 
 
-def identify_companion_groups(contexts: List[ReferenceContext]) -> List[ReferenceContext]:
+def identify_companion_groups(contexts: list[ReferenceContext]) -> list[ReferenceContext]:
     """
     Identify and mark companion bill groups with improved pattern recognition.
     
@@ -723,18 +733,18 @@ def identify_companion_groups(contexts: List[ReferenceContext]) -> List[Referenc
     """
     result = []
     i = 0
-    
+
     while i < len(contexts):
         current = contexts[i]
         group = [current]
         last_end = current.end
-        
+
         # Look ahead for sequential bill references
         j = i + 1
         while j < len(contexts):
             next_ref = contexts[j]
             between_text = contexts[0].text[last_end:next_ref.start]
-            
+
             # Check if references are part of a sequence
             if len(between_text.strip()) <= 50 and not re.search(r'\.|\n', between_text):
                 group.append(next_ref)
@@ -742,7 +752,7 @@ def identify_companion_groups(contexts: List[ReferenceContext]) -> List[Referenc
                 j += 1
             else:
                 break
-        
+
         # Process group
         if len(group) > 1:
             # Find all titles in the group
@@ -752,18 +762,18 @@ def identify_companion_groups(contexts: List[ReferenceContext]) -> List[Referenc
                     titles.append((ref.title_before, ref.start))
                 if ref.title_after:
                     titles.append((ref.title_after, ref.start))
-            
+
             # Match titles with closest references
             for idx, ref in enumerate(group):
                 closest_title = None
                 min_distance = float('inf')
-                
+
                 for title, title_start in titles:
                     distance = abs(title_start - ref.start)
                     if distance < min_distance:
                         min_distance = distance
                         closest_title = title
-                
+
                 # Create new context with matched title
                 if closest_title:
                     new_context = ReferenceContext(
@@ -778,16 +788,16 @@ def identify_companion_groups(contexts: List[ReferenceContext]) -> List[Referenc
                     result.append(new_context)
                 else:
                     result.append(ref)
-            
+
             i = j
         else:
             result.append(current)
             i += 1
-    
+
     return result
 
 
-def find_title_before(text: str) -> Optional[Tuple[str, int, int]]:
+def find_title_before(text: str) -> tuple[str, int, int] | None:
     """
     Find potential title before a reference.
     
@@ -821,7 +831,7 @@ def find_title_before(text: str) -> Optional[Tuple[str, int, int]]:
             )
     return None
 
-def find_title_after(text: str) -> Optional[Tuple[str, int, int]]:
+def find_title_after(text: str) -> tuple[str, int, int] | None:
     """
     Find potential title after a reference.
     
@@ -856,7 +866,7 @@ def find_title_after(text: str) -> Optional[Tuple[str, int, int]]:
             )
     return None
 
-def find_and_clean_titles(text: str, filing_year: Optional[int] = None) -> List[Dict[str, Any]]:
+def find_and_clean_titles(text: str, filing_year: int | None = None) -> list[dict[str, Any]]:
     """
     Find and clean all titles, including standalone titles and parenthesized references.
     
@@ -871,7 +881,7 @@ def find_and_clean_titles(text: str, filing_year: Optional[int] = None) -> List[
     Handles various title formats including parenthetical references and comma-separated titles.
     """
     all_matches = []
-    
+
     # First, find ALL bill and law numbers in the text
     for bill_match in BILL_NUM_PATTERN.finditer(text):
         try:
@@ -981,13 +991,13 @@ def find_and_clean_titles(text: str, filing_year: Optional[int] = None) -> List[
     return all_matches
 
 def add_reference_with_title(
-    all_titles: List[Dict],
-    covered_ranges: List[Tuple[int, int]],
-    seen_titles: Set[str],
+    all_titles: list[dict],
+    covered_ranges: list[tuple[int, int]],
+    seen_titles: set[str],
     context: ReferenceContext,
     title_text: str,
     title_before: bool,
-    filing_year: Optional[int]
+    filing_year: int | None
 ) -> None:
     """
     Add a reference with its associated title to the results.
@@ -1009,11 +1019,11 @@ def add_reference_with_title(
         # Determine actual start and end positions based on title position
         start = min(context.start, context.start - len(title_text) if title_before else context.start)
         end = max(context.end, context.end + len(title_text) if not title_before else context.end)
-        
+
         if not any(r_start <= start < r_end for r_start, r_end in covered_ranges):
             covered_ranges.append((start, end))
             seen_titles.add(cleaned_title.lower())
-            
+
             components = extract_reference_components(context.text)
             if components:
                 all_titles.append({
@@ -1028,10 +1038,10 @@ def add_reference_with_title(
                 })
 
 def add_standalone_reference(
-    all_titles: List[Dict],
-    covered_ranges: List[Tuple[int, int]],
+    all_titles: list[dict],
+    covered_ranges: list[tuple[int, int]],
     context: ReferenceContext,
-    filing_year: Optional[int]
+    filing_year: int | None
 ) -> None:
     """
     Add a standalone reference without title to the results.
@@ -1055,8 +1065,8 @@ def add_standalone_reference(
                 **components,
                 'text': context.text.strip()
             })
-            
-def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[int, Dict]:
+
+def detect_congress(text: str, matches: list[dict], filing_year: int) -> dict[int, dict]:
     """
     Detect congress numbers for all matches with comprehensive validation.
     
@@ -1077,14 +1087,14 @@ def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[in
     """
     congress_info = {}
     explicit_matches = []
-    
+
     # Find explicit congress mentions
     for match in CONGRESS_PATTERN.finditer(text):
         congress_num = int(re.search(r'\d+', match.group(0)).group())
         filing_year_congress = year_to_congress(filing_year)
         if abs(congress_num - filing_year_congress) <= 3:
             explicit_matches.append(congress_num)
-    
+
     # Get majority congress if multiple valid explicit matches
     majority_congress = max(explicit_matches, key=explicit_matches.count) if explicit_matches else None
 
@@ -1100,9 +1110,9 @@ def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[in
     for match in matches:
         match_start = match['start']
         title_text = match.get('title', '')  # Changed from 'text' to 'title'
-        
+
         logging.info(f"Match data: title={title_text}, text={match.get('text', '')}")  # Debug both fields
-        
+
         # Priority 1: Special prefixes indicate current congress
         if title_text and re.match(r'^(?:To |A bill to |A resolution )', title_text, re.I):
             congress_info[match_start] = {
@@ -1111,7 +1121,7 @@ def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[in
                 'confidence': 0.7
             }
             continue
-        
+
         # Priority 2: Century references use filing year
         if title_text and re.search(r'\b(?:2[0-1]|1\d)(?:st|nd|rd|th)\b(?:\s+[Cc]entury\b)?', title_text):
             congress_info[match_start] = {
@@ -1120,7 +1130,7 @@ def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[in
                 'confidence': 0.7
             }
             continue
-        
+
         # Priority 3: Explicit congress nearby
         if majority_congress:
             congress_info[match_start] = {
@@ -1129,7 +1139,7 @@ def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[in
                 'confidence': 1.0
             }
             continue
-            
+
         year_found = False
         if title_text:
             logging.info(f"Title text: {title_text}")
@@ -1140,10 +1150,10 @@ def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[in
                     logging.info(f"Pattern {i} matched! Match groups: {year_match.groups()}")
                     year = int(year_match.group(1))
                     full_year = 2000 + year if year < 50 else 1900 + year
-                    
+
                     congress_num = year_to_congress(full_year)
                     filing_year_congress = year_to_congress(filing_year)
-                    
+
                     if abs(congress_num - filing_year_congress) <= 3:
                         congress_info[match_start] = {
                             'number': congress_num,
@@ -1155,7 +1165,7 @@ def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[in
                         break
                 else:
                     logging.info(f"No match for pattern {i}")
-        
+
         if not year_found:
             logging.info("No year patterns matched, using filing year")
             congress_info[match_start] = {
@@ -1163,10 +1173,10 @@ def detect_congress(text: str, matches: List[Dict], filing_year: int) -> Dict[in
                 'source': 'filing_year',
                 'confidence': 0.7
             }
-    
+
     return congress_info
 
-def process_single_section(section: FilingSection, timeout_manager: Optional[BatchTimeoutManager] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def process_single_section(section: FilingSection, timeout_manager: BatchTimeoutManager | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Process a single section with improved logging.
     
@@ -1187,15 +1197,15 @@ def process_single_section(section: FilingSection, timeout_manager: Optional[Bat
     """
     text = section.text
     all_matches = []
-    
+
     try:
         logging.debug(f"Starting processing for section {section.section_id} (length: {len(text)})")
-        
+
         # Find and process all titles
         logging.debug(f"Finding titles in section {section.section_id}")
         title_matches = find_and_clean_titles(text, section.filing_year)
         logging.debug(f"Found {len(title_matches)} initial matches in section {section.section_id}")
-        
+
         # Process matches
         for match in title_matches:
             match.update({
@@ -1203,11 +1213,11 @@ def process_single_section(section: FilingSection, timeout_manager: Optional[Bat
                 'section_id': section.section_id
             })
             all_matches.append(match)
-        
+
         # Add congress information
         logging.debug(f"Detecting congress numbers for {len(all_matches)} matches in section {section.section_id}")
         congress_info = detect_congress(text, all_matches, section.filing_year)
-        
+
         final_results = []
         for match in all_matches:
             congress_data = congress_info.get(match['start'], {})
@@ -1217,11 +1227,11 @@ def process_single_section(section: FilingSection, timeout_manager: Optional[Bat
                 'congress_confidence': congress_data.get('confidence', 0.0)
             })
             final_results.append(match)
-        
+
         # Log summary of results
         logging.info(f"Section {section.section_id}: Found {len(final_results)} matches " +
                     f"({sum(1 for m in final_results if '_with_title' in m['type'])} with titles)")
-        
+
         # Track unmatched sections
         unmatched_sections = []
         if not final_results:
@@ -1232,9 +1242,9 @@ def process_single_section(section: FilingSection, timeout_manager: Optional[Bat
                 'filing_year': section.filing_year
             })
             logging.debug(f"No matches found in section {section.section_id}")
-        
+
         return final_results, unmatched_sections
-        
+
     except Exception as e:
         logging.error(f"Error processing section {section.section_id}: {str(e)}", exc_info=True)
         return [], []
@@ -1255,7 +1265,7 @@ def year_to_congress(year: int) -> int:
     """
     return ((year - 1789) // 2) + 1
 
-def standardize_bill_type(chamber: str, res_type: Optional[str], leg_type: Optional[str]) -> Optional[str]:
+def standardize_bill_type(chamber: str, res_type: str | None, leg_type: str | None) -> str | None:
     """
     Standardize bill type with caching for performance.
     
@@ -1274,11 +1284,11 @@ def standardize_bill_type(chamber: str, res_type: Optional[str], leg_type: Optio
     """
     if not chamber:
         return None
-    
+
     chamber = chamber.lower()
     res_type = res_type.lower() if res_type else None
     leg_type = leg_type.lower() if leg_type else None
-    
+
     if chamber.startswith('h'):
         if not res_type:
             if not leg_type or leg_type.startswith('b'):
@@ -1301,7 +1311,7 @@ def standardize_bill_type(chamber: str, res_type: Optional[str], leg_type: Optio
             return 'sjres'
     return None
 
-def process_single_section_with_timeout(section: FilingSection, timeout: int = 60) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def process_single_section_with_timeout(section: FilingSection, timeout: int = 60) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Process a single section with timeout handling.
     
@@ -1317,13 +1327,13 @@ def process_single_section_with_timeout(section: FilingSection, timeout: int = 6
     # Set up signal-based timeout
     signal.signal(signal.SIGALRM, timeout_handler)
     signal.alarm(timeout)
-    
+
     try:
         return process_single_section(section)
     finally:
         signal.alarm(0)
 
-def clean_title(title: str, filing_year: Optional[int] = None, is_special_case: bool = False) -> Tuple[Optional[str], bool, Optional[int]]:
+def clean_title(title: str, filing_year: int | None = None, is_special_case: bool = False) -> tuple[str | None, bool, int | None]:
     """
     Clean and validate a title.
     
@@ -1346,10 +1356,10 @@ def clean_title(title: str, filing_year: Optional[int] = None, is_special_case: 
     """
     if not isinstance(title, str):
         return None, False, None
-        
+
     congress_number = None
     is_law = False
-    
+
     # Remove common prefix patterns
     prefix_patterns = [
         r'^as\s+(?:amended|passed|reported|introduced|modified|marked[\s-]?up|drafted)(?:\s+(?:by|in|to)\s+[^,\.]*)?[,\s]+',
@@ -1357,30 +1367,30 @@ def clean_title(title: str, filing_year: Optional[int] = None, is_special_case: 
         r'^(?:the|a|an)\s+bill\s+(?:to|for|that)\s+[^,\.]*?[,\s]+',
         r'^(?:the|a|an)\s+resolution\s+(?:to|for|that)\s+[^,\.]*?[,\s]+',
     ]
-    
+
     for pattern in prefix_patterns:
         title = re.sub(pattern, '', title, flags=re.I)
-    
+
     # Clean up the title
     title = re.sub(r'^[,;\s:\.]+', '', title).strip()
     title = re.sub(r'^["\'\s]+', '', title).strip()
     title = re.sub(r'["\'\s]+$', '', title).strip()
-    
+
     # Remove any trailing garbage after valid endings
     valid_endings = '|'.join(TITLE_ENDING_WORDS)
     year_suffix = r'(?:\s*(?:of|,)\s*(?:19|20)\d{2})?'
     ending_pattern = fr'\b({valid_endings}){year_suffix}'
-    
+
     match = re.search(ending_pattern, title, re.I)
     if match:
         title = title[:match.end()].strip()
-    
+
     # For acronym titles, we reduce the minimum length requirement
     is_acronym = bool(re.match(r'^[A-Z]{2,}(?:\s*[-\']\s*[A-Z]+)*\s+(?:' + '|'.join(TITLE_ENDING_WORDS) + r')\b', title))
-    
+
     if not is_acronym and len(title.split()) < 2:
         return None, False, None
-    
+
     # Check for year in cleaned title
     year_match = re.search(r'(?:of|for|in)\s+(?:FY\s*)?(?:19|20)(\d{2})\b', title)
     if year_match:
@@ -1393,14 +1403,14 @@ def clean_title(title: str, filing_year: Optional[int] = None, is_special_case: 
         congress_number = act_congress
     else:
         congress_number = year_to_congress(filing_year) if filing_year else None
-    
+
     # Validate with acronym support
     if not validate_title(title, allow_acronyms=True):
         return None, False, None
 
     return title, is_law, congress_number
 
-def find_standalone_titles(text: str) -> List[Dict[str, Any]]:
+def find_standalone_titles(text: str) -> list[dict[str, Any]]:
     """
     Find standalone titles in text without associated bill/law references.
     
@@ -1415,7 +1425,7 @@ def find_standalone_titles(text: str) -> List[Dict[str, Any]]:
     2. Acronym-style title patterns
     """
     titles = []
-    
+
     # Pattern for standard titles
     standard_title_pattern = fr"""
         (?:^|\.|\n|\s)                        # Start of text, sentence, line or space
@@ -1427,7 +1437,7 @@ def find_standalone_titles(text: str) -> List[Dict[str, Any]]:
         )
         (?=\.|$|\n|\s)                        # End of sentence, text, line or space
     """
-    
+
     # New pattern for acronym-style acts
     acronym_title_pattern = fr"""
         (?:^|\.|\n|\s)                        # Start boundaries
@@ -1441,12 +1451,12 @@ def find_standalone_titles(text: str) -> List[Dict[str, Any]]:
         )
         (?=\.|$|\n|\s)                        # End boundaries
     """
-    
+
     patterns = [
         re.compile(standard_title_pattern, re.VERBOSE | re.I),
         re.compile(acronym_title_pattern, re.VERBOSE | re.I)
     ]
-    
+
     for pattern in patterns:
         for match in pattern.finditer(text):
             title_text = match.group('title').strip()
@@ -1459,7 +1469,7 @@ def find_standalone_titles(text: str) -> List[Dict[str, Any]]:
                         'text': title_text,
                         'boundary_type': 'standalone'
                     })
-    
+
     return titles
 
 def validate_title(title: str, allow_acronyms: bool = False) -> bool:
@@ -1482,28 +1492,28 @@ def validate_title(title: str, allow_acronyms: bool = False) -> bool:
     # Must have minimum length
     if len(title.split()) < 1:  # Reduced for acronyms
         return False
-    
+
     # Check if it's an acronym title
     if allow_acronyms and re.match(r'^[A-Z]{2,}(?:\s*[-\']\s*[A-Z]+)*\s+(?:' + '|'.join(TITLE_ENDING_WORDS) + r')\b', title):
         return True
-        
+
     # Standard title validation
     if not (title[0].isupper() or title.lower().startswith('the ')):
         return False
-        
+
     # Must end with a valid suffix (including year variations)
     valid_ending = False
     for ending_word in TITLE_ENDING_WORDS:
         # Match exact ending or ending with year
-        if (title.endswith(ending_word) or 
+        if (title.endswith(ending_word) or
             re.search(fr'{ending_word}\s*(?:of|,)\s*(?:19|20)\d{{2}}$', title)):
             valid_ending = True
             break
-            
+
     return valid_ending
 
 
-def extract_bill_range(start_num: str, end_num: str, bill_type: str) -> List[BillNumber]:
+def extract_bill_range(start_num: str, end_num: str, bill_type: str) -> list[BillNumber]:
     """
     Extract a range of sequential bill numbers between start and end.
     
@@ -1526,7 +1536,7 @@ def extract_bill_range(start_num: str, end_num: str, bill_type: str) -> List[Bil
         end = int(re.sub(r'\D', '', end_num))
         if end < start or (end - start) > 100:  # Sanity check
             return []
-        return [BillNumber(str(i), i == start, i == end) 
+        return [BillNumber(str(i), i == start, i == end)
                 for i in range(start, end + 1)]
     except ValueError:
         return []
@@ -1551,7 +1561,7 @@ def standardize_law_number(law_text: str) -> str:
     return f"PL{nums}"
 
 
-def extract_reference_components(reference_text: str) -> Dict[str, Any]:
+def extract_reference_components(reference_text: str) -> dict[str, Any]:
     """
     Extract and parse components from a bill or law reference string.
     
@@ -1605,7 +1615,7 @@ def extract_reference_components(reference_text: str) -> Dict[str, Any]:
                         'is_range': False
                     }
 
-        
+
         law_match = LAW_NUM_PATTERN.match(reference_text)
         if law_match:
             try:
@@ -1616,9 +1626,9 @@ def extract_reference_components(reference_text: str) -> Dict[str, Any]:
                 }
             except (IndexError, AttributeError):
                 pass
-        
+
         return {}
-        
+
     except Exception as e:
         logging.error(f"Error in extract_reference_components: {str(e)}")
         return {}

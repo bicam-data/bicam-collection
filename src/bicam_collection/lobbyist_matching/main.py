@@ -38,15 +38,29 @@ import psutil
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from .batch_processor import BatchProcessor
-from .db_utils import DatabaseInterface
-from .matcher import MatchingManager
-from .post_processor import post_process_all
-from .schema_setup import (
-    create_schema,
-    initialize_run,
-)
-from .timeout_handler import TimeoutTracker
+# Handle imports for both direct execution and module execution
+try:
+    from .batch_processor import BatchProcessor
+    from .db_utils import DatabaseInterface
+    from .matcher import MatchingManager
+    from .post_processor import post_process_all
+    from .schema_setup import (
+        create_schema,
+        initialize_run,
+    )
+    from .timeout_handler import TimeoutTracker
+except ImportError:
+    # When run directly, add the current directory to path
+    sys.path.insert(0, os.path.dirname(__file__))
+    from batch_processor import BatchProcessor
+    from db_utils import DatabaseInterface
+    from matcher import MatchingManager
+    from post_processor import post_process_all
+    from schema_setup import (
+        create_schema,
+        initialize_run,
+    )
+    from timeout_handler import TimeoutTracker
 
 matching_manager = MatchingManager()
 

@@ -10,23 +10,32 @@ to actual bills in the congressional corpus. It includes:
 - Functions for processing references in parallel
 """
 
-import gc
-from typing import Dict, List, Set, Optional, Tuple, NamedTuple
-from dataclasses import dataclass
-import re
-from collections import defaultdict
-import logging
-import asyncpg
-from rapidfuzz import fuzz
-from tqdm import tqdm
 import asyncio
-from multiprocessing import Pool
-from functools import lru_cache
+import gc
+import logging
 import multiprocessing as mp
+import os
+import re
+import sys
+from collections import defaultdict
+from dataclasses import dataclass
+from functools import lru_cache
+from multiprocessing import Pool
+from typing import NamedTuple
+
+import asyncpg
 import polars as pl
 import psutil
+from rapidfuzz import fuzz
+from tqdm import tqdm
 
-from section_processor import TITLE_ENDING_WORDS
+# Handle imports for both direct execution and module execution
+try:
+    from .section_processor import TITLE_ENDING_WORDS
+except ImportError:
+    # When run directly, add the current directory to path
+    sys.path.insert(0, os.path.dirname(__file__))
+    from section_processor import TITLE_ENDING_WORDS
 
 logging.basicConfig(level=logging.INFO)
 
@@ -60,7 +69,7 @@ class MemoryMonitor:
     """
     def __init__(self, threshold_percent=80):
         self.threshold = threshold_percent
-        
+
     def check_memory(self):
         """Check memory usage and cleanup if above threshold.
         
@@ -88,31 +97,31 @@ class BillInfo:
     congress: int
     bill_type: str
     bill_number: str
-    titles: Tuple[str, ...]
-    official_titles: Tuple[str, ...]
-    law_number: Optional[str] = None
-    
+    titles: tuple[str, ...]
+    official_titles: tuple[str, ...]
+    law_number: str | None = None
+
     def __post_init__(self):
         # Convert lists to tuples if necessary
         if isinstance(self.titles, list):
             object.__setattr__(self, 'titles', tuple(self.titles or ()))
         if isinstance(self.official_titles, list):
             object.__setattr__(self, 'official_titles', tuple(self.official_titles or ()))
-        
+
         # Ensure we always have tuples, even if None was passed
         if self.titles is None:
             object.__setattr__(self, 'titles', ())
         if self.official_titles is None:
             object.__setattr__(self, 'official_titles', ())
-    
+
     def __hash__(self):
         return hash((self.congress, self.bill_type, self.bill_number))
-    
+
     def __eq__(self, other):
         if not isinstance(other, BillInfo):
             return False
-        return (self.congress == other.congress and 
-                self.bill_type == other.bill_type and 
+        return (self.congress == other.congress and
+                self.bill_type == other.bill_type and
                 self.bill_number == other.bill_number)
 
 class MatchResult(NamedTuple):
@@ -132,18 +141,18 @@ class MatchResult(NamedTuple):
         matched_law_number (Optional[str]): Law number of matched bill
         bill_id (Optional[str]): Full bill ID of matched bill
     """
-    reference_id: Optional[int]
+    reference_id: int | None
     match_type: str
     confidence_score: float
-    extracted_title: Optional[str]
-    extracted_bill_number: Optional[str]
-    extracted_law_number: Optional[str]
-    matched_congress: Optional[int] = None
-    matched_bill_type: Optional[str] = None
-    matched_bill_number: Optional[str] = None
-    matched_title: Optional[str] = None
-    matched_law_number: Optional[str] = None
-    bill_id: Optional[str] = None
+    extracted_title: str | None
+    extracted_bill_number: str | None
+    extracted_law_number: str | None
+    matched_congress: int | None = None
+    matched_bill_type: str | None = None
+    matched_bill_number: str | None = None
+    matched_title: str | None = None
+    matched_law_number: str | None = None
+    bill_id: str | None = None
 
 @dataclass
 class AppropriationsBill:
@@ -158,9 +167,9 @@ class AppropriationsBill:
     """
     bill_type: str
     bill_number: str
-    congresses: Set[int]  # Track all congresses this bill appears in
-    titles: Set[str]      # All appropriations-related titles
-    normalized_titles: Set[str]  # Normalized versions for matching
+    congresses: set[int]  # Track all congresses this bill appears in
+    titles: set[str]      # All appropriations-related titles
+    normalized_titles: set[str]  # Normalized versions for matching
 
 class AppropriationsTrie:
     """Specialized structure for appropriations bills.
@@ -172,9 +181,9 @@ class AppropriationsTrie:
         title_to_bills (Dict): Maps normalized titles to bill identifiers
     """
     def __init__(self):
-        self.bills: Dict[Tuple[str, str], AppropriationsBill] = {}  # (bill_type, number) -> AppropriationsBill
-        self.title_to_bills: Dict[str, Set[Tuple[str, str]]] = defaultdict(set)  # normalized title -> set of (type, number)
-    
+        self.bills: dict[tuple[str, str], AppropriationsBill] = {}  # (bill_type, number) -> AppropriationsBill
+        self.title_to_bills: dict[str, set[tuple[str, str]]] = defaultdict(set)  # normalized title -> set of (type, number)
+
     def add_bill(self, bill: BillInfo) -> None:
         """Add a bill if it's an appropriations bill.
         
@@ -183,10 +192,10 @@ class AppropriationsTrie:
         """
         has_appropriations = False
         appropriations_titles = set()
-        
+
         # Convert to tuples before combining
         all_titles = tuple(filter(None, tuple(bill.titles or ()) + tuple(bill.official_titles or ())))
-        
+
         # Check all titles for appropriations
         for title in all_titles:
             if not title:
@@ -194,10 +203,10 @@ class AppropriationsTrie:
             if 'appropriation' in title.lower():
                 has_appropriations = True
                 appropriations_titles.add(title)
-        
+
         if not has_appropriations:
             return
-        
+
         key = (bill.bill_type, bill.bill_number)
         if key not in self.bills:
             self.bills[key] = AppropriationsBill(
@@ -213,13 +222,13 @@ class AppropriationsTrie:
             self.bills[key].normalized_titles.update(
                 normalize_appropriations_title(t) for t in appropriations_titles
             )
-        
+
         # Update title index
         for title in appropriations_titles:
             normalized = normalize_appropriations_title(title)
             self.title_to_bills[normalized].add(key)
-    
-    def find_matching_bills(self, title: str) -> List[Tuple[AppropriationsBill, str, float]]:
+
+    def find_matching_bills(self, title: str) -> list[tuple[AppropriationsBill, str, float]]:
         """Find matching appropriations bills for a title.
         
         Args:
@@ -230,7 +239,7 @@ class AppropriationsTrie:
         """
         normalized_query = normalize_appropriations_title(title)
         matches = []
-        
+
         for bill_key in self.title_to_bills.get(normalized_query, set()):
             bill = self.bills[bill_key]
             # Find the best matching original title
@@ -243,7 +252,7 @@ class AppropriationsTrie:
                     best_title = orig_title
             if best_title:
                 matches.append((bill, best_title, best_score))
-        
+
         return sorted(matches, key=lambda x: x[2], reverse=True)
 
 class BillTrie:
@@ -263,7 +272,7 @@ class BillTrie:
         self.law_nodes = {}
         self.official_titles = {}
         self.memory_monitor = MemoryMonitor()
-    
+
     def add_bill(self, bill: BillInfo):
         """Add a bill to the trie with memory monitoring.
         
@@ -272,24 +281,24 @@ class BillTrie:
         """
         if self.memory_monitor.check_memory():
             logging.info("Memory threshold reached, performed cleanup")
-            
+
         if bill.congress not in self.congress_nodes:
             self.congress_nodes[bill.congress] = {}
         if bill.bill_type not in self.congress_nodes[bill.congress]:
             self.congress_nodes[bill.congress][bill.bill_type] = {}
-            
+
         self.congress_nodes[bill.congress][bill.bill_type][bill.bill_number] = bill
-        
+
         if bill.law_number:
             self.law_nodes[bill.law_number] = bill
-            
+
         for title in bill.official_titles:
             normalized_title = normalize_title(title)
             if normalized_title not in self.official_titles:
                 self.official_titles[normalized_title] = set()
             self.official_titles[normalized_title].add(bill)
-    
-    def get_bill(self, congress: int, bill_type: str, bill_number: str) -> Optional[BillInfo]:
+
+    def get_bill(self, congress: int, bill_type: str, bill_number: str) -> BillInfo | None:
         """Get a bill by congress, type and number.
         
         Args:
@@ -304,8 +313,8 @@ class BillTrie:
             return self.congress_nodes[congress][bill_type][bill_number]
         except KeyError:
             return None
-    
-    def get_by_law(self, law_number: str) -> Optional[BillInfo]:
+
+    def get_by_law(self, law_number: str) -> BillInfo | None:
         """Get a bill by law number.
         
         Args:
@@ -315,9 +324,9 @@ class BillTrie:
             BillInfo if found, None otherwise
         """
         return self.law_nodes.get(law_number)
-    
+
     @lru_cache(maxsize=100000)
-    def get_by_official_title(self, title: str) -> Set[BillInfo]:
+    def get_by_official_title(self, title: str) -> set[BillInfo]:
         """Get bills matching an official title.
         
         Args:
@@ -369,13 +378,13 @@ class ReferenceMatcher:
                 "Transportation, Housing and Urban Development, and Related Agencies Appropriations Act"
             ]
         }
-        
+
         # Build appropriations trie
         for congress in self.bill_trie.congress_nodes:
             for bill_type in self.bill_trie.congress_nodes[congress]:
                 for bill_number, bill in self.bill_trie.congress_nodes[congress][bill_type].items():
                     self.appropriations_trie.add_bill(bill)
-    
+
     def initialize_pools(self):
         """Initialize process pools for parallel matching."""
         if self.pools is None:
@@ -394,7 +403,7 @@ class ReferenceMatcher:
             self.pools = None
             gc.collect()
 
-    def match_reference(self, reference: Dict) -> Optional[MatchResult]:
+    def match_reference(self, reference: dict) -> MatchResult | None:
         """Match a single reference to corpus bills.
         
         Args:
@@ -407,13 +416,13 @@ class ReferenceMatcher:
             if not reference or 'reference_id' not in reference:
                 logging.warning("Invalid reference object")
                 return None
-            
+
             ref_type = reference.get('reference_type')
             logging.info(f"Matching reference type: {ref_type}")
             # Skip combined types
             if ref_type in ('number_in_combined', 'title_in_combined'):
                 return None
-            
+
             if ref_type in ('bill', 'bill_with_title', 'bill_with_title_combined'):
                 return self._match_bill_number(reference)
             elif ref_type in ('law', 'law_with_title'):
@@ -426,8 +435,8 @@ class ReferenceMatcher:
         except Exception as e:
             logging.error(f"Error matching reference {reference.get('reference_id')}: {str(e)}")
             return self._create_unmatched(reference)
-    
-    def _match_bill_number(self, reference: Dict) -> MatchResult:
+
+    def _match_bill_number(self, reference: dict) -> MatchResult:
         """Match reference with bill number.
         
         Args:
@@ -439,29 +448,29 @@ class ReferenceMatcher:
         congress = reference.get('congress_number')
         bill_type = reference.get('bill_type')
         bill_number = reference.get('bill_number')
-        
+
         logging.info(f"Attempting bill number match - Congress: {congress}, Type: {bill_type}, Number: {bill_number}")
-        
+
         if not all([congress, bill_type, bill_number]):
             logging.warning(f"Missing required fields - Congress: {congress}, Type: {bill_type}, Number: {bill_number}")
             return self._create_unmatched(reference)
-            
+
         bill = self.bill_trie.get_bill(congress, bill_type, bill_number)
         if not bill:
             logging.warning(f"No matching bill found in trie for {bill_type}{bill_number}-{congress}")
             return self._create_unmatched(reference)
-        
+
         logging.info(f"Found matching bill in trie: {bill}")
-            
+
         # Match title if present
         if reference.get('title'):
             return self._match_with_title(reference, bill)
-        
+
         # Number only match
-        corpus_title = (bill.official_titles[0] if bill.official_titles 
-                       else bill.titles[0] if bill.titles 
+        corpus_title = (bill.official_titles[0] if bill.official_titles
+                       else bill.titles[0] if bill.titles
                        else None)
-        
+
         return MatchResult(
             reference_id=reference['reference_id'],
             match_type='high_confidence_match',
@@ -476,7 +485,7 @@ class ReferenceMatcher:
             matched_law_number=None,
             bill_id=f"{bill_type}{bill_number}-{congress}"
         )
-    
+
     @staticmethod
     def standardize_law_number(law_text: str) -> str:
         """Standardize law number format to match trie.
@@ -492,7 +501,7 @@ class ReferenceMatcher:
         # Return standardized format with no space
         return f"PL{nums}"
 
-    def _match_law_number(self, reference: Dict) -> MatchResult:
+    def _match_law_number(self, reference: dict) -> MatchResult:
         """Match reference with law number.
         
         Args:
@@ -503,9 +512,9 @@ class ReferenceMatcher:
         """
         law_number = reference.get('law_number')
         if not law_number:
-            logging.warning(f"No law number provided in reference")
+            logging.warning("No law number provided in reference")
             return self._create_unmatched(reference)
-            
+
         # Standardize the format before lookup
         standardized_law = self.standardize_law_number(law_number)  # Note the self. here
         logging.info(f"Looking up law number {law_number} (standardized: {standardized_law})")
@@ -513,11 +522,11 @@ class ReferenceMatcher:
         if not bill:
             logging.warning(f"No match found for law number {standardized_law}")
             return self._create_unmatched(reference)
-        
+
         # Match title if present
         if reference.get('title'):
             return self._match_with_title(reference, bill)
-        
+
         return MatchResult(
             reference_id=reference['reference_id'],
             match_type='high_confidence_match',
@@ -532,8 +541,8 @@ class ReferenceMatcher:
             matched_law_number=law_number,
             bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}"
         )
-    
-    def _match_title_only(self, reference: Dict) -> Optional[MatchResult]:
+
+    def _match_title_only(self, reference: dict) -> MatchResult | None:
         """Match reference by title only.
         
         Args:
@@ -544,61 +553,61 @@ class ReferenceMatcher:
         """
         if not reference.get('title'):
             return self._create_unmatched(reference)
-        
+
         # Check if this is an appropriations title
         if 'approp' in reference['title'].lower():
             result = self._match_appropriations_title(reference)
             if result:
                 return result
-        
+
         extracted_title = reference['title']
         congress_info = reference.get('congress_number')
 
         # Handle acronym titles specially
         is_acronym = bool(re.match(r'^[A-Z]{2,}(?:\s*[-\']\s*[A-Z]+)*\s+(?:' + '|'.join(TITLE_ENDING_WORDS) + r')\b', extracted_title))
-        
+
         # Adjust threshold based on title type
         base_threshold = 0.6 if not is_acronym else 0.9
-        
+
         # Create two versions of the title for matching
         year_pattern = re.compile(r'\bof\s+(?:19|20)\d{2}\b')
         titles_to_check = [extracted_title]
         if not year_pattern.search(extracted_title):
             titles_to_check.append(year_pattern.sub('', extracted_title).strip())
-        
+
         best_match = None
         best_score = 0
-        
+
         for title_variant in titles_to_check:
             normalized_title = normalize_title(title_variant)
             corpus_title_set = self.bill_trie.get_by_official_title(normalized_title)
-            
+
             for bill in corpus_title_set:
                 if congress_info and bill.congress != congress_info:
                     continue
-                    
+
                 for bill_title in bill.official_titles:
                     if not bill_title:
                         continue
-                    
+
                     # Calculate similarity score with word match bonus
                     base_score = calculate_title_similarity(title_variant, bill_title)
-                    
+
                     # Add bonus for exact word matches
                     title_words = set(re.findall(r'\b\w+\b', title_variant.lower()))
                     corpus_words = set(re.findall(r'\b\w+\b', bill_title.lower()))
                     word_overlap = len(title_words & corpus_words) / max(len(title_words), len(corpus_words))
-                    
+
                     final_score = base_score * 0.7 + word_overlap * 0.3
-                    
+
                     if final_score > best_score and final_score >= base_threshold:
                         best_score = final_score
                         best_match = (bill, bill_title, final_score)
-        
+
         if best_match:
             bill, matched_title, confidence = best_match
             match_type = 'high_confidence_match' if confidence >= 0.8 else 'moderate_confidence_match'
-            
+
             return MatchResult(
                 reference_id=reference['reference_id'],
                 match_type=match_type,
@@ -610,10 +619,10 @@ class ReferenceMatcher:
                 matched_title=matched_title,
                 bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}"
             )
-        
+
         return self._create_unmatched(reference)
-    
-    def _match_with_title(self, reference: Dict, bill: BillInfo) -> MatchResult:
+
+    def _match_with_title(self, reference: dict, bill: BillInfo) -> MatchResult:
         """Match reference title with bill titles.
         
         Args:
@@ -626,17 +635,17 @@ class ReferenceMatcher:
         if not reference or not reference.get('title'):
             logging.debug("No reference or title provided, returning unmatched")
             return self._create_unmatched(reference)
-        
+
         extracted_title = reference['title']
         reference_id = reference.get('reference_id')
-        
+
         if reference_id is None:
             logging.warning("Reference has no reference_id.")
-        
+
         logging.debug(f"\n=== Starting title match for reference {reference_id or 'Unknown'} ===")
         logging.debug(f"Extracted title: '{extracted_title}'")
         logging.debug(f"Bill info: Congress {bill.congress}, {bill.bill_type}{bill.bill_number}")
-        
+
         # Determine if this is a formal title that should match against official titles first
         formal_title_patterns = [
             r'^To\s+',
@@ -644,17 +653,17 @@ class ReferenceMatcher:
             r'^A (?:joint\s+|concurrent\s+)?resolution\s+',
             r'^[A-Z][a-z]+ing\b(?!.*(?:Act|Bill|Resolution)$)'
         ]
-        
+
         is_formal_title = any(re.match(pattern, extracted_title) for pattern in formal_title_patterns)
         logging.debug(f"Is formal title format? {is_formal_title}")
-        
+
         # Determine which titles to check first based on format
         if is_formal_title:
             primary_titles = tuple(bill.official_titles or ())
             secondary_titles = tuple(bill.titles or ())
-            
+
             normalized_extracted = normalize_title(extracted_title)
-            
+
             # First check for prefix matches in primary titles
             for title in primary_titles:
                 if not title:
@@ -674,7 +683,7 @@ class ReferenceMatcher:
                         matched_title=title,
                         bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}"
                     )
-            
+
             # If no prefix match in primary, check secondary
             for title in secondary_titles:
                 if not title:
@@ -697,9 +706,9 @@ class ReferenceMatcher:
         else:
             primary_titles = tuple(bill.titles or ())
             secondary_titles = tuple(bill.official_titles or ())
-        
+
         logging.debug(f"\nChecking primary titles first ({len(primary_titles) if primary_titles else 0} titles):")
-        
+
         # First check for exact matches in primary titles
         normalized_extracted = normalize_title(extracted_title)
         for title in (primary_titles or []):
@@ -720,7 +729,7 @@ class ReferenceMatcher:
                     matched_title=title,
                     bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}"
                 )
-        
+
         # If no exact match in primary, check secondary
         logging.debug(f"\nChecking secondary titles ({len(secondary_titles) if secondary_titles else 0} titles):")
         for title in (secondary_titles or []):
@@ -741,47 +750,47 @@ class ReferenceMatcher:
                     matched_title=title,
                     bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}"
                 )
-        
+
         # If no exact matches, proceed with fuzzy matching on all titles
         year_pattern = re.compile(r'\bof\s+(?:19|20)\d{2}\b')
         has_year = bool(year_pattern.search(extracted_title))
-        
+
         best_score = 0
         best_title = None
-        
+
         all_titles = tuple(filter(None, primary_titles + secondary_titles))
         logging.debug(f"\nProceeding with fuzzy matching against all {len(all_titles)} titles:")
-        
+
         for i, title in enumerate(all_titles, 1):
             logging.debug(f"\nComparing with title {i}: '{title}'")
-            
+
             corpus_title_to_check = (
-                year_pattern.sub('', title).strip() 
-                if not has_year 
+                year_pattern.sub('', title).strip()
+                if not has_year
                 else title
             )
-            
+
             title_to_check = (
-                year_pattern.sub('', extracted_title).strip() 
-                if not has_year 
+                year_pattern.sub('', extracted_title).strip()
+                if not has_year
                 else extracted_title
             )
-            
+
             score = calculate_title_similarity(title_to_check, corpus_title_to_check)
             logging.debug(f"Similarity score: {score}")
-            
+
             if score > best_score:
                 logging.debug(f"New best score! Previous: {best_score}, New: {score}")
                 best_score = score
                 best_title = title
-        
+
         if best_title is None:
             logging.warning(f"No matching title found for reference {reference['reference_id']}")
             return self._create_unmatched(reference)
-        
-        match_type = ('high_confidence_match' if best_score >= self.wrong_title_threshold 
+
+        match_type = ('high_confidence_match' if best_score >= self.wrong_title_threshold
                     else 'wrong_title')
-        
+
         return MatchResult(
             reference_id=reference['reference_id'],
             match_type=match_type,
@@ -795,8 +804,8 @@ class ReferenceMatcher:
             matched_title=best_title,
             bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}"
         )
-    
-    def _create_unmatched(self, reference: Dict, match_type: str = 'unmatched') -> MatchResult:
+
+    def _create_unmatched(self, reference: dict, match_type: str = 'unmatched') -> MatchResult:
         """Create unmatched result with all required fields.
         
         Args:
@@ -820,8 +829,8 @@ class ReferenceMatcher:
             matched_law_number=None,
             bill_id=None
         )
-    
-    def _match_appropriations_title(self, reference: Dict) -> Optional[MatchResult]:
+
+    def _match_appropriations_title(self, reference: dict) -> MatchResult | None:
         """Special matching for appropriations titles.
         
         Attempts to match appropriations bill titles using a specialized trie structure.
@@ -834,14 +843,14 @@ class ReferenceMatcher:
         """
         if not reference or not reference.get('title'):
             return None
-        
+
         matches = self.appropriations_trie.find_matching_bills(reference['title'])
         if not matches:
             return None
-        
+
         best_match = matches[0]
         bill, matched_title, confidence = best_match
-        
+
         return MatchResult(
             reference_id=reference.get('reference_id'),
             match_type='high_confidence_match' if confidence >= 0.9 else 'wrong_title',
@@ -872,7 +881,7 @@ async def combine_nearby_references(pool: asyncpg.Pool, run_id: int) -> None:
     """
     try:
         logging.info("Starting reference combination analysis...")
-        
+
         async with pool.acquire() as conn:
             # First get max existing reference_id
             max_ref_id = await conn.fetchval("""
@@ -880,7 +889,7 @@ async def combine_nearby_references(pool: asyncpg.Pool, run_id: int) -> None:
                 FROM lobbied_bill_matching.extracted_references
                 WHERE run_id = $1
             """, run_id)
-            
+
             # Fetch all references at once into memory
             all_refs = await conn.fetch("""
                 SELECT 
@@ -927,14 +936,14 @@ async def combine_nearby_references(pool: asyncpg.Pool, run_id: int) -> None:
                         next_pos = i + 1
 
                         # Look for companion bills
-                        while (next_pos < len(refs) and 
+                        while (next_pos < len(refs) and
                                refs[next_pos]['reference_type'] == 'number' and
                                refs[next_pos]['start_position'] - companion_numbers[-1]['end_position'] <= 5):
                             companion_numbers.append(refs[next_pos])
                             next_pos += 1
 
                         # Look for title
-                        if (next_pos < len(refs) and 
+                        if (next_pos < len(refs) and
                             refs[next_pos]['reference_type'] == 'title' and
                             refs[next_pos]['start_position'] - companion_numbers[-1]['end_position'] <= 10):
 
@@ -956,11 +965,11 @@ async def combine_nearby_references(pool: asyncpg.Pool, run_id: int) -> None:
                             # Create combined references with new reference_ids
                             for num_ref in companion_numbers:
                                 combined_ref = (
-                                    run_id, 
-                                    filing_uuid, 
+                                    run_id,
+                                    filing_uuid,
                                     section_id,
                                     'bill_with_title_combined',
-                                    num_ref['bill_type'], 
+                                    num_ref['bill_type'],
                                     num_ref['bill_id'],
                                     title_ref['title'],
                                     num_ref['start_position'],
@@ -972,7 +981,7 @@ async def combine_nearby_references(pool: asyncpg.Pool, run_id: int) -> None:
                                 all_updates.append(combined_ref)
                                 logging.debug(f"Assigning new reference_id {next_ref_id} to combined reference.")
                                 next_ref_id += 1
-                            
+
                             i = next_pos + 1
                             continue
                     i += 1
@@ -1018,7 +1027,7 @@ async def combine_nearby_references(pool: asyncpg.Pool, run_id: int) -> None:
         logging.error(f"Error during reference combination: {str(e)}", exc_info=True)
         raise
 
-def extract_year_from_title(title: str) -> Optional[int]:
+def extract_year_from_title(title: str) -> int | None:
     """Extract year from title and convert to congress number.
     
     Args:
@@ -1033,7 +1042,7 @@ def extract_year_from_title(title: str) -> Optional[int]:
         r'\bFY\s*(?:19|20)?\d{2}\b',  # Fiscal year
         r'\b(?:of|for|in)\s+(?:19|20)\d{2}\b'  # Year with preposition
     ]
-    
+
     for pattern in year_patterns:
         match = re.search(pattern, title)
         if match:
@@ -1042,7 +1051,7 @@ def extract_year_from_title(title: str) -> Optional[int]:
             if len(year_str) == 2:  # Handle two-digit years
                 year = 2000 + year if year < 50 else 1900 + year
             return ((year - 1789) // 2) + 1
-    
+
     return None
 
 @lru_cache(maxsize=100000)
@@ -1057,17 +1066,17 @@ def normalize_title(title: str) -> str:
     """
     if not title:
         return ""
-    
-    
+
+
     # Remove year patterns at end of title
     title = re.sub(r',\s*(?:19|20)\d{2}(?:\s*$|\s*(?:and|through)\s*(?:19|20)\d{2}\s*$)', '', title)
-    
+
     # Remove "of {year}" patterns
     title = re.sub(r'\bof\s+(?:19|20)\d{2}\b', '', title)
-    
+
     # Normalize whitespace while preserving case
     title = ' '.join(title.split())
-    
+
     return title
 
 def calculate_title_similarity(title1: str, title2: str) -> float:
@@ -1083,32 +1092,32 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
     # Normalize spacing but preserve case
     title1 = normalize_title(title1)
     title2 = normalize_title(title2)
-    
+
     # Quick length check
     if abs(len(title1) - len(title2)) / max(len(title1), len(title2)) > 0.5:
         return 0.0
-        
+
     # Calculate case-sensitive word overlap
     words1 = set(title1.split())
     words2 = set(title2.split())
     word_overlap = len(words1 & words2) / max(len(words1), len(words2))
-    
+
     # Require at least some minimum word overlap
     if word_overlap < 0.3:  # At least 30% of words should match
         return 0.0
-    
+
     # Calculate case-sensitive string similarity
     fuzzy_score = fuzz.ratio(title1, title2) / 100.0
-    
+
     # Weight word overlap more heavily than fuzzy matching
     weighted_score = 0.3 * fuzzy_score + 0.7 * word_overlap
-    
+
     # Additional penalty for length difference
     length_ratio = min(len(title1), len(title2)) / max(len(title1), len(title2))
-    
+
     return weighted_score * length_ratio
 
-def get_congress_range(congress: Optional[int], source: str) -> List[int]:
+def get_congress_range(congress: int | None, source: str) -> list[int]:
     """Get range of congresses to search.
     
     Args:
@@ -1140,9 +1149,9 @@ async def load_corpus_bills(pool: asyncpg.Pool) -> BillTrie:
         Exception: If there is an error loading bills
     """
     trie = BillTrie()
-    
+
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
+        rows = await conn.fetch(r"""
             WITH staging_bills AS (
                 SELECT 
                     NULLIF(TRIM(CAST(b.congress AS TEXT)), '')::INTEGER as congress,
@@ -1192,14 +1201,14 @@ async def load_corpus_bills(pool: asyncpg.Pool) -> BillTrie:
             UNION ALL
             SELECT * FROM relational_bills
         """)
-        
+
         logging.info(f"Loaded {len(rows)} bills from corpus")
-        
+
         for row in tqdm(rows, desc="Building bill trie"):
             try:
                 if not row['congress'] or not row['bill_type'] or not row['bill_number']:
                     continue
-                    
+
                 bill = BillInfo(
                     congress=row['congress'],
                     bill_type=row['bill_type'],
@@ -1212,12 +1221,12 @@ async def load_corpus_bills(pool: asyncpg.Pool) -> BillTrie:
             except Exception as e:
                 logging.error(f"Error processing bill row: {str(e)}")
                 continue
-            
+
         logging.info(f"Built trie with {len(trie.congress_nodes)} congress nodes")
-    
+
     return trie
 
-def standardize_bill_type(chamber: str, res_type: Optional[str] = None, leg_type: Optional[str] = None) -> Optional[str]:
+def standardize_bill_type(chamber: str, res_type: str | None = None, leg_type: str | None = None) -> str | None:
     """Standardize bill type based on chamber and resolution type.
     
     Args:
@@ -1230,11 +1239,11 @@ def standardize_bill_type(chamber: str, res_type: Optional[str] = None, leg_type
     """
     if not chamber:
         return None
-        
+
     chamber = chamber.lower().replace('-', '').strip()
     res_type = res_type.lower().replace('-', '').strip() if res_type else None
     leg_type = leg_type.lower().replace('-', '').strip() if leg_type else None
-    
+
     if chamber.startswith('h'):
         if not res_type:
             if not leg_type or leg_type.startswith('b'):
@@ -1262,10 +1271,10 @@ def standardize_bill_type(chamber: str, res_type: Optional[str] = None, leg_type
 class MatchingManager:
     """Manages bill matching state and processes."""
     def __init__(self):
-        self.bill_trie: Optional[BillTrie] = None
-        self.matcher: Optional[ReferenceMatcher] = None
+        self.bill_trie: BillTrie | None = None
+        self.matcher: ReferenceMatcher | None = None
         self._lock = asyncio.Lock()
-    
+
     async def initialize(self, pool: asyncpg.Pool):
         """Initialize the bill trie and matcher if not already done.
         
@@ -1278,9 +1287,9 @@ class MatchingManager:
                 self.bill_trie = await load_corpus_bills(pool)
                 self.matcher = ReferenceMatcher(self.bill_trie)
                 logging.info("Bill trie initialized and ready")
-    
 
-                
+
+
 
     async def match_references(self, pool: asyncpg.Pool, run_id: int, max_retries: int = 3, batch_size: int = 10000) -> None:
         """Match all references for a run with retries and batching.
@@ -1296,10 +1305,10 @@ class MatchingManager:
         """
         if self.matcher is None:
             await self.initialize(pool)
-            
+
         try:
             logging.info(f"Starting reference matching for run {run_id}")
-            
+
             async with pool.acquire() as conn:
                 # Get total count first
                 total_count = await conn.fetchval("""
@@ -1307,13 +1316,13 @@ class MatchingManager:
                     FROM lobbied_bill_matching.extracted_references
                     WHERE run_id = $1
                 """, run_id)
-            
+
                 if not total_count:
                     logging.warning(f"No references found for run {run_id}")
                     return
-                    
+
                 logging.info(f"Found {total_count} references to match")
-                
+
                 # Process in batches with retries
                 offset = 0
                 with tqdm(total=total_count, desc="Matching references") as pbar:
@@ -1323,11 +1332,11 @@ class MatchingManager:
                             try:
                                 async with conn.transaction():
                                 # ... rest of code unchanged ...
-                                
+
 
                                     # Set longer timeout for large queries
                                     await conn.execute('SET statement_timeout = 300000')  # 5 minutes
-                                    
+
                                     # Fetch batch of references
                                     refs = await conn.fetch("""
                                         SELECT 
@@ -1352,10 +1361,10 @@ class MatchingManager:
                                         OFFSET $2
                                         LIMIT $3
                                     """, run_id, offset, batch_size)
-                                    
+
                                     if not refs:
                                         break
-                                    
+
                                     # Process matches
                                     # Use self.matcher instead of creating new one
                                     matches = []
@@ -1380,7 +1389,7 @@ class MatchingManager:
                                             ))
                                         except Exception as e:
                                             logging.error(f"Error matching reference {ref['reference_id']}: {str(e)}")
-                                    
+
                                     # Store matches with retry
                                     if matches:
                                         store_retry_count = 0
@@ -1416,7 +1425,7 @@ class MatchingManager:
                                     pbar.update(len(refs))
                                     break  # Success, exit retry loop
 
-                            except asyncio.TimeoutError:
+                            except TimeoutError:
                                 retry_count += 1
                                 if retry_count == max_retries:
                                     logging.error(f"Operation timed out after {max_retries} attempts")
@@ -1438,7 +1447,7 @@ class MatchingManager:
             logging.error(f"Error during matching: {str(e)}", exc_info=True)
             raise
 
-def process_batch(refs: List[Dict], bill_trie: BillTrie) -> List[MatchResult]:
+def process_batch(refs: list[dict], bill_trie: BillTrie) -> list[MatchResult]:
     """Process a batch of references in a worker process.
 
     Args:
@@ -1459,8 +1468,8 @@ def process_batch(refs: List[Dict], bill_trie: BillTrie) -> List[MatchResult]:
             logging.error(f"Error processing reference {ref.get('reference_id')}: {str(e)}")
             continue
     return results
-    
-async def store_matches(conn: asyncpg.Pool, run_id: int, matches: List[Optional[MatchResult]]) -> None:
+
+async def store_matches(conn: asyncpg.Pool, run_id: int, matches: list[MatchResult | None]) -> None:
     """Store match results in database with retries and chunking.
     
     Args:
@@ -1473,10 +1482,10 @@ async def store_matches(conn: asyncpg.Pool, run_id: int, matches: List[Optional[
     """
     # Filter out None values and validate matches
     valid_matches = [
-        match for match in matches 
+        match for match in matches
         if match is not None and hasattr(match, 'reference_id') and match.reference_id is not None
     ]
-    
+
     if not valid_matches:
         return
 
@@ -1487,7 +1496,7 @@ async def store_matches(conn: asyncpg.Pool, run_id: int, matches: List[Optional[
 
     for i in range(0, len(valid_matches), chunk_size):
         chunk = valid_matches[i:i + chunk_size]
-        
+
         for attempt in range(max_retries):
             try:
                 await conn.executemany("""
@@ -1525,7 +1534,7 @@ async def store_matches(conn: asyncpg.Pool, run_id: int, matches: List[Optional[
                     for match in chunk
                 ])
                 break  # Success - exit retry loop
-                
+
             except Exception as e:
                 if attempt == max_retries - 1:  # Last attempt
                     logging.error(f"Error storing matches after {max_retries} attempts: {str(e)}")
@@ -1538,10 +1547,10 @@ def normalize_appropriations_title(title: str) -> str:
     """Normalize appropriations bill titles for comparison."""
     # Remove fiscal year references
     title = re.sub(r'\b(?:for\s+)?(?:fiscal\s+year|FY)\s*(?:19|20)\d{2}\b', '', title, flags=re.I)
-    
+
     # Replace hyphens with commas
     title = re.sub(r'\s*-\s*', ', ', title)
-    
+
     # Expand common acronyms and abbreviations
     acronyms = {
         'HUD': 'Housing and Urban Development',
@@ -1565,14 +1574,14 @@ def normalize_appropriations_title(title: str) -> str:
         'Interior': 'Department of the Interior',
         'Homeland': 'Department of Homeland Security',
     }
-    
+
     for acronym, full_name in acronyms.items():
         title = re.sub(r'\b' + acronym + r'\b', full_name, title, flags=re.I)
-    
+
     # Remove common suffixes
     title = re.sub(r'\s*(?:bill|act|appropriations|approps?)\s*$', '', title, flags=re.I)
-    
+
     # Normalize spacing
     title = re.sub(r'\s+', ' ', title).strip()
-    
+
     return title
