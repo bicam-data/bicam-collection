@@ -12,7 +12,9 @@
     is_main: true
     create_raw: true
     id_fields: [package_id]
-
+    related_tables:
+    - committees
+    - shorttitle
 
   processing:
     batch_size: 100

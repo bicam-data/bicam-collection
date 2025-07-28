@@ -280,28 +280,33 @@ class StreamlinedCleaner:
 
         # Process all tables
         tasks = []
+        skipped_results = {}
+
         for table in tables:
             # Skip if already processed (unless rerun)
             if not rerun and resume and cleaning_checkpoint.should_skip_table(table):
                 logger.info(f"Skipping already processed table {table}")
-                tasks.append(
-                    (table, {"success": True, "records_processed": 0, "skipped": True})
-                )
+                skipped_results[table] = {
+                    "success": True,
+                    "records_processed": 0,
+                    "skipped": True,
+                }
             else:
                 tasks.append(process_table_with_semaphore(table))
 
         # Wait for all tasks
-        results = await asyncio.gather(
-            *[
-                t
-                if asyncio.iscoroutine(t)
-                else asyncio.create_task(asyncio.coroutine(lambda t=t: t)())
-                for t in tasks
-            ]
-        )
+        if tasks:
+            results = await asyncio.gather(*tasks)
+            # Convert results to dict format
+            for _, result in enumerate(results):
+                if isinstance(result, tuple) and len(result) == 2:
+                    table_name, stats = result
+                    skipped_results[table_name] = stats
+        else:
+            results = []
 
-        # Convert to dict
-        return dict(results) if all(isinstance(r, tuple) for r in results) else {}
+        # Return the combined results
+        return skipped_results
 
     async def _process_single_table(
         self,
@@ -474,6 +479,12 @@ class StreamlinedCleaner:
 
         # Try custom logic first
         if custom_logic:
+            # Clear any previous override on the custom logic instance
+            if hasattr(custom_logic, "_clear_target_table_override"):
+                custom_logic._clear_target_table_override()
+            elif hasattr(custom_logic, "_target_table_override"):
+                custom_logic._target_table_override = None
+
             # Look for specific cleaning method - try both table-specific and data-type-specific
             method_names = [
                 f"_clean_{table}_singular",

@@ -7,9 +7,9 @@ SET CONSTRAINTS ALL DEFERRED;
 CREATE TABLE IF NOT EXISTS bicam_govinfo.bills(
     package_id TEXT PRIMARY KEY,
     bill_id TEXT,
-    bill_version TEXT,
-    origin_chamber TEXT, -- needs to be lowered
-    current_chamber TEXT, -- needs to be lowered
+    version_code TEXT,
+    origin_chamber TEXT,
+    current_chamber TEXT,
     is_appropriation BOOLEAN,
     is_private BOOLEAN,
     pages INTEGER,

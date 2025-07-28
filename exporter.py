@@ -20,17 +20,19 @@ BILLS_EXTRA_TABLES = [
     "ref_bill_summary_version_codes",
     "ref_bill_version_codes",
     "ref_title_type_codes",
-    "crosswalk_bills_voteview"
+    "crosswalk_bills_voteview",
 ]
+
 
 def get_prefix(table_name):
     """
     Determine the correct prefix for a table, skipping ref_ and crosswalk_ prefixes
     """
     # Skip ref_ and crosswalk_ prefixes
-    if table_name.startswith(('ref_', 'crosswalk_')):
+    if table_name.startswith(("ref_", "crosswalk_")):
         return None
-    return table_name.split('_')[0]
+    return table_name.split("_")[0]
+
 
 def write_chunks_to_csv(chunks, temp_csv):
     """Write chunks to CSV file with proper encoding for text fields"""
@@ -38,22 +40,23 @@ def write_chunks_to_csv(chunks, temp_csv):
     for chunk in chunks:
         chunk.to_csv(
             temp_csv,
-            mode='w' if first_chunk else 'a',
+            mode="w" if first_chunk else "a",
             index=False,
             header=first_chunk,
-            encoding='utf-8'
+            encoding="utf-8",
         )
         first_chunk = False
         # Clear chunk from memory
         del chunk
         gc.collect()
 
+
 def export_schema_tables(
     db_config,
     schema,
     output_dir,
     clean_dir=False,
-    prefix_filter=None  # Added prefix filter argument
+    prefix_filter=None,  # Added prefix filter argument
 ):
     """
     Export tables from a PostgreSQL schema into zip files grouped by table prefix.
@@ -81,7 +84,9 @@ def export_schema_tables(
         """
 
         tables_df = pd.read_sql_query(query, conn, params=[schema])
-        all_table_names = tables_df['table_name'].tolist() # Keep a list of all tables for ref checks
+        all_table_names = tables_df[
+            "table_name"
+        ].tolist()  # Keep a list of all tables for ref checks
 
         # Group tables by prefix
         prefix_groups = defaultdict(list)
@@ -91,21 +96,28 @@ def export_schema_tables(
                 prefix_groups[prefix].append(table)
 
         # Add special reference tables to bills group if it exists
-        if 'bills' in prefix_groups:
+        if "bills" in prefix_groups:
             for ref_table in BILLS_EXTRA_TABLES:
                 # Check if ref_table exists in the database schema
-                if ref_table in all_table_names and ref_table not in prefix_groups['bills']:
-                    prefix_groups['bills'].append(ref_table)
+                if (
+                    ref_table in all_table_names
+                    and ref_table not in prefix_groups["bills"]
+                ):
+                    prefix_groups["bills"].append(ref_table)
 
         # Filter groups if a prefix_filter is provided
         if prefix_filter:
             if prefix_filter in prefix_groups:
-                logger.info(f"Filtering export to only include the '{prefix_filter}' prefix.")
+                logger.info(
+                    f"Filtering export to only include the '{prefix_filter}' prefix."
+                )
                 target_group = prefix_groups[prefix_filter]
                 prefix_groups = {prefix_filter: target_group}
             else:
-                logger.warning(f"Warning: Prefix '{prefix_filter}' not found or has no associated tables. No tables will be exported.")
-                prefix_groups = {} # Clear groups to prevent export
+                logger.warning(
+                    f"Warning: Prefix '{prefix_filter}' not found or has no associated tables. No tables will be exported."
+                )
+                prefix_groups = {}  # Clear groups to prevent export
 
         # Clear tables DataFrame from memory
         del tables_df
@@ -120,12 +132,12 @@ def export_schema_tables(
             if os.path.exists(zip_path):
                 os.remove(zip_path)
 
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 # Create progress bar for tables in this group
                 for table in tqdm(group_tables, desc=f"Exporting {prefix} tables"):
                     # Get row count for progress bar
                     count_query = f"SELECT COUNT(*) FROM {schema}.{table}"
-                    row_count = pd.read_sql_query(count_query, conn).iloc[0,0]
+                    row_count = pd.read_sql_query(count_query, conn).iloc[0, 0]
 
                     chunk_size = 10000
 
@@ -137,20 +149,22 @@ def export_schema_tables(
                     logger.info(f"\nExporting {table} ({row_count:,} rows)")
 
                     # Process chunks directly to CSV instead of holding in memory
-                    with tqdm(total=row_count, desc=f"Rows from {table}", leave=False) as pbar:
+                    with tqdm(
+                        total=row_count, desc=f"Rows from {table}", leave=False
+                    ) as pbar:
                         first_chunk = True
                         for chunk_df in pd.read_sql_query(
                             f"SELECT * FROM {schema}.{table}",
                             conn,
-                            chunksize=chunk_size
+                            chunksize=chunk_size,
                         ):
                             # Write chunk directly to CSV
                             chunk_df.to_csv(
                                 temp_csv,
-                                mode='a' if not first_chunk else 'w',
+                                mode="a" if not first_chunk else "w",
                                 header=first_chunk,
                                 index=False,
-                                encoding='utf-8'
+                                encoding="utf-8",
                             )
                             first_chunk = False
                             pbar.update(len(chunk_df))
@@ -178,22 +192,34 @@ def export_schema_tables(
             os.remove(master_zip_path)
 
         logger.info("\nCreating master bicam.zip file...")
-        with zipfile.ZipFile(master_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        with zipfile.ZipFile(master_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
             prefix_zip_count = 0
-            for file in sorted(os.listdir(output_dir)): # Sort for consistent order
+            for file in sorted(os.listdir(output_dir)):  # Sort for consistent order
                 if file.startswith("bicam_") and file.endswith(".zip"):
                     individual_zip_path = os.path.join(output_dir, file)
                     zip_file.write(individual_zip_path, file)
                     prefix_zip_count += 1
-            logger.info(f"Created {master_zip_path} containing {prefix_zip_count} prefix zip files.")
+            logger.info(
+                f"Created {master_zip_path} containing {prefix_zip_count} prefix zip files."
+            )
 
     finally:
         conn.close()
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Export PostgreSQL schema tables to CSV files')
-    parser.add_argument('--clean', action='store_true', help='Clean output directory before export')
-    parser.add_argument('--prefix', type=str, default=None, help='Only export tables with this prefix (e.g., bills)') # Added prefix argument
+    parser = argparse.ArgumentParser(
+        description="Export PostgreSQL schema tables to CSV files"
+    )
+    parser.add_argument(
+        "--clean", action="store_true", help="Clean output directory before export"
+    )
+    parser.add_argument(
+        "--prefix",
+        type=str,
+        default=None,
+        help="Only export tables with this prefix (e.g., bills)",
+    )  # Added prefix argument
     args = parser.parse_args()
 
     db_config = {
@@ -201,13 +227,13 @@ if __name__ == "__main__":
         "database": os.getenv("POSTGRESQL_DATABASE"),
         "user": os.getenv("POSTGRESQL_USER"),
         "password": os.getenv("POSTGRESQL_PASSWORD"),
-        "port": os.getenv("POSTGRESQL_PORT")
+        "port": os.getenv("POSTGRESQL_PORT"),
     }
 
     export_schema_tables(
         db_config=db_config,
         schema="bicam",
-        output_dir="/mnt/big_data/database-congress/bicam-exports",
+        output_dir="/mnt/big_data/database-congress/bicam-exports-new",
         clean_dir=args.clean,
-        prefix_filter=args.prefix # Pass prefix argument
+        prefix_filter=args.prefix,  # Pass prefix argument
     )
