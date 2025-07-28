@@ -11,10 +11,17 @@ import asyncio
 import logging
 import multiprocessing as mp
 import os
+import sys
 
 from dotenv import load_dotenv
 
-from .main import process_filings
+# Handle imports for both direct execution and module execution
+try:
+    from .main import process_filings
+except ImportError:
+    # When run directly, add the parent directory to path
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from main import process_filings
 
 logging.basicConfig(level=logging.INFO)
 
