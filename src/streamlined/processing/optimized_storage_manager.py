@@ -1832,7 +1832,7 @@ class OptimizedCleanerStorage:
                         checkpoint.current_offset = offset
                         checkpoint.current_item_id = batch[-1].get(
                             "source_doc_id",
-                            batch[-1].get(self.id_field, batch[-1].get("id", "")),
+                            batch[-1].get("id", ""),
                         )
                         checkpoint.processed_items = records_yielded
                         checkpoint.current_table = table_name
@@ -1917,7 +1917,7 @@ class OptimizedCleanerStorage:
     async def _bulk_copy_production(
         self, conn: asyncpg.Connection, table_name: str, records: list[dict[str, Any]]
     ) -> int:
-        """Use COPY for fast bulk inserts to production."""
+        """Use COPY for fast bulk inserts to production with conflict handling."""
         if not records:
             return 0
 
@@ -1928,15 +1928,54 @@ class OptimizedCleanerStorage:
         # Fast direct conversion to tuples using list comprehension
         records_data = [tuple(record.get(col) for col in columns) for record in records]
 
-        await conn.copy_records_to_table(
-            table_name,
-            records=records_data,
-            columns=columns,
-            schema_name=self.production_schema,
-            timeout=300.0,
-        )
+        try:
+            # Use a temporary table approach to handle conflicts
+            temp_table = f"temp_{table_name}_{id(records)}"
 
-        return len(records)
+            # Create temp table with same structure
+            await conn.execute(f"""
+                CREATE TEMP TABLE {temp_table}
+                AS SELECT * FROM {self.production_schema}.{table_name}
+                WHERE FALSE
+            """)
+
+            # Copy data to temp table
+            await conn.copy_records_to_table(
+                temp_table,
+                records=records_data,
+                columns=columns,
+                timeout=300.0,
+            )
+
+            # Insert from temp table with ON CONFLICT DO NOTHING
+            columns_str = ", ".join(columns)
+            insert_sql = f"""
+                INSERT INTO {self.production_schema}.{table_name} ({columns_str})
+                SELECT {columns_str} FROM {temp_table}
+                ON CONFLICT DO NOTHING
+            """
+
+            result = await conn.execute(insert_sql)
+
+            # Extract affected rows from result
+            if result:
+                parts = result.split()
+                if len(parts) >= 2:
+                    return int(parts[1])
+
+            return len(records)
+
+        except Exception as e:
+            logger.error(
+                f"Error copying record {records[0]} to {table_name}: {e}", exc_info=True
+            )
+            raise
+        finally:
+            # Clean up temp table
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                await conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
 
     async def _bulk_upsert_via_temp(
         self,

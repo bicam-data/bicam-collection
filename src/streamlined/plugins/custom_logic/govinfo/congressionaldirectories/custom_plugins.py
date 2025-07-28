@@ -8,7 +8,6 @@ This module contains all the custom logic for congressional directories data typ
 """
 
 import logging
-import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -34,7 +33,7 @@ class CongressionalDirectoriesFetcher:
         self.data_type = data_type
 
 
-class CongressionalDirectoriesCleaner(BaseCleanerLogic):
+class CongressionaldirectoriesCleanerLogic(BaseCleanerLogic):
     """
     Congressional Directories cleaner logic extracted from CongressionalDirectoriesCleaner class.
     Contains all the custom cleaning methods for congressional directories data.
@@ -58,9 +57,8 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
             "congressionaldirectories_granules": [
                 "congressionaldirectories_granules",
                 "congressionaldirectories_granules_members",
-                "congressionaldirectories_granules_online",
                 "congressionaldirectories_granules_members_name",
-            ],
+            ]
         }
 
         # TODO: fix bioguideids, get proper metadata
@@ -121,7 +119,7 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                 while True:
                     # Join granules with members, online data, and member names - flattened into one big table
                     query = f"""
-                    SELECT
+                    SELECT DISTINCT
                         g.id as granule_id,
                         g.granuleid,
                         g.packageid,
@@ -164,9 +162,6 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                         COALESCE(gm.membername, gmn.parsed) as membername,
                         gm.authorityid,
                         gm.list_index as member_list_index,
-                        -- Online data (joined)
-                        go.value as online_value,
-                        go.list_index as online_list_index,
                         -- Members name data (joined, for reference)
                         gmn.parsed as membername_parsed,
                         gmn.authority_fnf as membername_authority_fnf,
@@ -180,11 +175,9 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                         ON g.id = gm.granule_id
                     LEFT JOIN {self.staging_schema}.congressionaldirectories_granules_members_name gmn
                         ON gm.id = gmn.members_id
-                    LEFT JOIN {self.staging_schema}.congressionaldirectories_granules_online go
-                        ON g.id = go.granule_id
                     WHERE g.granuleclass = 'CONGRESSMEMBERSTATE'
                     AND g.subgranuleclass != 'STATEDELEGATION'
-                    ORDER BY g.processed_at DESC, gm.list_index, go.list_index
+                    ORDER BY g.processed_at DESC, gm.list_index
                     LIMIT {chunk_size} OFFSET {offset}
                     """
 
@@ -220,7 +213,7 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                 )
                 raise
 
-    async def _clean_congressionaldirectories_granules_singular(
+    async def _clean_congressionaldirectories_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """
@@ -278,25 +271,24 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
 
         # Apply congressional directories-specific cleaning logic
         filtered_cleaned = {
-            "package_id": str(cleaned.get("package_id", "ID_ERROR")),
-            "title": str(cleaned.get("title", None)),
+            "package_id": cleaned.get("packageid", "ID_ERROR"),
+            "title": cleaned.get("title", None),
             "congress": self.safe_int(cleaned.get("congress", None)),
             "issued_at": self.standardize_date(cleaned.get("dateissued", None)),
-            "branch": str(cleaned.get("branch", None)),
-            "government_author1": str(cleaned.get("governmentauthor1", None)),
-            "government_author2": str(cleaned.get("governmentauthor2", None)),
-            "publisher": str(cleaned.get("publisher", None)),
-            "collection_code": str(cleaned.get("collectioncode", None)),
-            "ils_system_id": str(cleaned.get("otheridentifier_ils_system_id", None)),
-            "migrated_doc_id": str(cleaned.get("otheridentifier_migrated_doc_id", None)),
-            "su_doc_class_number": str(cleaned.get("sudocclassnumber", None)),
-            "text_url": str(cleaned.get("download_txtlink", None)),
-            "pdf_url": str(cleaned.get("download_pdflink", None)),
+            "branch": cleaned.get("branch", None),
+            "government_author1": cleaned.get("governmentauthor1", None),
+            "government_author2": cleaned.get("governmentauthor2", None),
+            "publisher": cleaned.get("publisher", None),
+            "collection_code": cleaned.get("collectioncode", None),
+            "ils_system_id": cleaned.get("otheridentifier_ils_system_id", None),
+            "migrated_doc_id": cleaned.get("otheridentifier_migrated_doc_id", None),
+            "su_doc_class_number": cleaned.get("sudocclassnumber", None),
+            "text_url": cleaned.get("download_txtlink", None),
+            "pdf_url": cleaned.get("download_pdflink", None),
             "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
         }
 
         return filtered_cleaned
-
 
     # Add other cleaning methods for bills sub-tables
     async def _clean_congressionaldirectories_granules_singular(
@@ -350,71 +342,29 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
         go.list_index as online_list_index
         """
 
+        self._register_target_table_override("members")
+
         cleaned = record_data.copy()
-        if "writerep" not in cleaned.get("online_value"):
-            if (
-                ".house.gov" in cleaned.get("online_value")
-                or ".senate.gov" in cleaned.get("online_value")
-            ) and "@" not in cleaned.get("online_value"):
-                official_url = cleaned.get("online_value")
-            elif (
-                ".house.gov" in cleaned.get("online_value")
-                or ".senate.gov" in cleaned.get("online_value")
-            ) and "@" in cleaned.get("online_value"):
-                email_address = cleaned.get("online_value")
-            else:
-                official_url = None
-                email_address = None
-            if "twitter" in cleaned.get("online_value"):
-                twitter_url = cleaned.get("online_value")
-            else:
-                twitter_url = None
-            if "facebook" in cleaned.get("online_value"):
-                facebook_url = cleaned.get("online_value")
-            else:
-                facebook_url = None
-            if "youtube" in cleaned.get("online_value"):
-                youtube_url = cleaned.get("online_value")
-            else:
-                youtube_url = None
-            if "instagram" in cleaned.get("online_value"):
-                instagram_url = cleaned.get("online_value")
-            else:
-                instagram_url = None
-        else:
-            official_url = None
-            email_address = None
-            twitter_url = None
-            facebook_url = None
-            youtube_url = None
-            instagram_url = None
+
         # Map fields from the flat joined row to the members table
         filtered_cleaned = {
-            "granule_id": str(
-                cleaned.get("granuleid") or "ID_ERROR"
-            ),
-            "package_id": str(
-                cleaned.get("packageid") or "ID_ERROR"
-            ),
-            "bioguide_id": str(
-                cleaned.get("bioguideid") or None
-            ),
+            "granule_id": str(cleaned.get("granuleid") or "ID_ERROR"),
+            "package_id": str(cleaned.get("packageid") or "ID_ERROR"),
+            "bioguide_id": str(cleaned.get("bioguideid") or None),
             "membername": str(cleaned.get("membername") or None),
-            "title": str(cleaned.get("title") or None),
+            "title": str(cleaned.get("title")),
             "biography": self.clean_long_text(cleaned.get("biography")),
             "member_type": str(cleaned.get("category") or None),
-            "chamber": self.standardize_chamber(cleaned.get("chamber") or None),
-            "population": self.safe_int(cleaned.get("population") or None),
-            "gpo_id": str(cleaned.get("gpoid") or None),
-            "authority_id": str(
-                cleaned.get("authorityid") or None
-            ),
-            "email_address": str(email_address or None),
-            "official_url": str(official_url or None),
-            "twitter_url": str(twitter_url or None),
-            "instagram_url": str(instagram_url or None),
-            "facebook_url": str(facebook_url or None),
-            "youtube_url": str(youtube_url or None),
+            "chamber": self.standardize_chamber(cleaned.get("chamber")),
+            "population": self.safe_int(cleaned.get("population")),
+            "gpo_id": cleaned.get("gpoid"),
+            "authority_id": cleaned.get("authorityid"),
+            "email_address": None,
+            "official_url": None,
+            "twitter_url": None,
+            "instagram_url": None,
+            "facebook_url": None,
+            "youtube_url": None,
             "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
         }
 
@@ -426,6 +376,8 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
         Post-processing for congressional directories:
         - Extract ISBNs from the staging table's otheridentifiers_isbn column (JSON array)
         - Insert each ISBN into the production congressional_directories_isbn table
+        - Extract zipcodes from granules and insert into members_zipcodes table
+        - Extract online values and update members table
         """
         import json
 
@@ -444,15 +396,15 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                 async with conn.transaction():
                     # Fetch package_id and otheridentifiers_isbn from staging
                     fetch_sql = f"""
-                        SELECT packageid, otheridentifiers_isbn
+                        SELECT packageid, otheridentifier_isbn
                         FROM {self.staging_schema}.congressionaldirectories
-                        WHERE otheridentifiers_isbn IS NOT NULL
+                        WHERE otheridentifier_isbn IS NOT NULL
                     """
                     rows = await conn.fetch(fetch_sql)
                     isbn_records = []
                     for row in rows:
                         package_id = row["packageid"]
-                        isbns_json = row["otheridentifiers_isbn"]
+                        isbns_json = row["otheridentifier_isbn"]
                         if not isbns_json:
                             continue
                         try:
@@ -463,17 +415,24 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                             elif not isinstance(isbns, list):
                                 continue
                         except Exception as e:
-                            logger.error(f"Error parsing ISBN JSON for package_id {package_id}: {e}")
+                            logger.error(
+                                f"Error parsing ISBN JSON for package_id {package_id}: {e}"
+                            )
                             continue
                         for isbn in isbns:
-                            if not isbn or not str(isbn).strip() and isbn != "\\u00a0":
+                            if (
+                                not isbn
+                                or not str(isbn).strip()
+                                and " " not in isbn
+                                and "u00a0" not in isbn
+                            ):
                                 continue
                             isbn_records.append((package_id, str(isbn).strip()))
 
                     # Insert into production table, avoiding duplicates
                     if isbn_records:
                         insert_sql = f"""
-                            INSERT INTO {self.production_schema}.congressional_directories_isbn (package_id, isbn)
+                            INSERT INTO {self.production_schema}.congressionaldirectories_isbn (package_id, isbn)
                             VALUES ($1, $2)
                             ON CONFLICT DO NOTHING
                         """
@@ -483,7 +442,9 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                                 await conn.execute(insert_sql, rec[0], rec[1])
                                 rows_inserted += 1
                             except Exception as e:
-                                logger.error(f"Error inserting ISBN {rec[1]} for package_id {rec[0]}: {e}")
+                                logger.error(
+                                    f"Error inserting ISBN {rec[1]} for package_id {rec[0]}: {e}"
+                                )
                         results["operations"].append(
                             {
                                 "name": "extract_and_insert_isbns",
@@ -492,18 +453,22 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                             }
                         )
                         results["rows_affected"] += rows_inserted
-                        logger.info(f"Inserted {rows_inserted} congressional directories ISBN records")
+                        logger.info(
+                            f"Inserted {rows_inserted} congressional directories ISBN records"
+                        )
                     else:
                         results["operations"].append(
                             {
                                 "name": "extract_and_insert_isbns",
                                 "status": "success",
                                 "rows_affected": 0,
-                                "note": "No ISBNs found to insert"
+                                "note": "No ISBNs found to insert",
                             }
                         )
             except Exception as e:
-                logger.error(f"Error extracting/inserting congressional directories ISBNs: {e}")
+                logger.error(
+                    f"Error extracting/inserting congressional directories ISBNs: {e}"
+                )
                 results["operations"].append(
                     {
                         "name": "extract_and_insert_isbns",
@@ -513,41 +478,24 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                 )
                 results["status"] = "partial_failure"
 
-        return results
-
-    async def _post_process_congressionaldirectories_granules(self) -> dict[str, Any]:
-        """
-        Post-processing for congressional directories granules:
-        - Extract zipcodes from the staging table's zipcodes column (space-separated string)
-        - Insert each zipcode into the production members_zipcodes table
-          with package_id, granule_id, bioguide_id, and the zipcode
-        """
-        results = {
-            "status": "success",
-            "operations": [],
-            "rows_affected": 0,
-        }
-
-        if not self.db_pool:
-            raise ValueError("Database pool not configured")
-
-        async with self.db_pool.acquire() as conn:
+            # Operation 2: Extract and insert zipcodes
             try:
                 # Fetch all relevant records from the staging table
                 fetch_sql = f"""
                     SELECT
                         g.packageid AS package_id,
-                        g.id AS granule_id,
+                        g.granuleid AS granule_id,
                         gm.bioguideid AS bioguide_id,
-                        gm.zipcodes AS zipcodes
+                        g.zipcodes AS zipcodes
                     FROM {self.staging_schema}.congressionaldirectories_granules g
                     LEFT JOIN {self.staging_schema}.congressionaldirectories_granules_members gm
                         ON g.id = gm.granule_id
-                    WHERE gm.zipcodes IS NOT NULL AND TRIM(gm.zipcodes) <> ''
+                    WHERE g.zipcodes IS NOT NULL AND TRIM(g.zipcodes) <> ''
                 """
                 rows = await conn.fetch(fetch_sql)
 
                 zipcode_records = []
+                logger.info(f"Found {len(rows)} zipcode records to insert")
                 for row in rows:
                     package_id = row["package_id"]
                     granule_id = row["granule_id"]
@@ -558,7 +506,9 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                     # Split by whitespace, filter out empty strings
                     zipcodes = [z for z in str(zipcodes_str).split() if z]
                     for zipcode in zipcodes:
-                        zipcode_records.append((package_id, granule_id, bioguide_id, zipcode))
+                        zipcode_records.append(
+                            (package_id, granule_id, bioguide_id, zipcode)
+                        )
 
                 rows_inserted = 0
                 if zipcode_records:
@@ -568,14 +518,16 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                         VALUES ($1, $2, $3, $4)
                         ON CONFLICT DO NOTHING
                     """
-                    for rec in zipcode_records:
-                        try:
-                            await conn.execute(insert_sql, *rec)
-                            rows_inserted += 1
-                        except Exception as e:
-                            logger.error(
-                                f"Error inserting zipcode {rec[3]} for package_id {rec[0]}, granule_id {rec[1]}, bioguide_id {rec[2]}: {e}"
-                            )
+                    try:
+                        # Use executemany for efficient batch insert
+                        await conn.executemany(insert_sql, zipcode_records)
+                        rows_inserted = len(zipcode_records)
+                    except Exception as e:
+                        logger.error(
+                            f"Error batch inserting zipcodes: {e}"
+                        )
+                        # Optionally, you could fall back to single inserts here if needed
+
                     results["operations"].append(
                         {
                             "name": "extract_and_insert_zipcodes",
@@ -584,21 +536,135 @@ class CongressionalDirectoriesCleaner(BaseCleanerLogic):
                         }
                     )
                     results["rows_affected"] += rows_inserted
-                    logger.info(f"Inserted {rows_inserted} congressional directories member zipcode records")
+                    logger.info(
+                        f"Inserted {rows_inserted} congressional directories member zipcode records"
+                    )
                 else:
                     results["operations"].append(
                         {
                             "name": "extract_and_insert_zipcodes",
                             "status": "success",
                             "rows_affected": 0,
-                            "note": "No zipcodes found to insert"
+                            "note": "No zipcodes found to insert",
                         }
                     )
             except Exception as e:
-                logger.error(f"Error extracting/inserting congressional directories member zipcodes: {e}")
+                logger.error(
+                    f"Error extracting/inserting congressional directories member zipcodes: {e}"
+                )
                 results["operations"].append(
                     {
                         "name": "extract_and_insert_zipcodes",
+                        "status": "error",
+                        "error": str(e),
+                    }
+                )
+                results["status"] = "partial_failure"
+
+            # Operation 3: Extract and insert online values
+            try:
+                # Fetch granule_id and value from staging
+                fetch_sql = f"""
+                    SELECT granule_id, value
+                    FROM {self.staging_schema}.congressionaldirectories_granules_online
+                    WHERE value IS NOT NULL
+                    ORDER BY list_index
+                """
+                rows = await conn.fetch(fetch_sql)
+
+                # Group by granule_id to collect all online values for each member
+                granule_online_values = {}
+                for row in rows:
+                    granule_id = row["granule_id"]
+                    value = row["value"]
+                    if not value or "writerep" in value:
+                        continue
+
+                    if granule_id not in granule_online_values:
+                        granule_online_values[granule_id] = {
+                            "email_address": None,
+                            "official_url": None,
+                            "twitter_url": None,
+                            "facebook_url": None,
+                            "instagram_url": None,
+                            "youtube_url": None,
+                            "other_url": None,
+                        }
+
+                    # Categorize the online value
+                    if ".gov" in value and "@" not in value:
+                        granule_online_values[granule_id]["official_url"] = value
+                    elif "@mail" in value:
+                        granule_online_values[granule_id]["email_address"] = value
+                    elif "twitter" in value or "x.com" in value:
+                        granule_online_values[granule_id]["twitter_url"] = value
+                    elif "facebook" in value:
+                        granule_online_values[granule_id]["facebook_url"] = value
+                    elif "instagram" in value:
+                        granule_online_values[granule_id]["instagram_url"] = value
+                    elif "youtube" in value:
+                        granule_online_values[granule_id]["youtube_url"] = value
+                    else:
+                        granule_online_values[granule_id]["other_url"] = value
+
+                # Update members table with online values
+                rows_updated = 0
+                if granule_online_values:
+                    update_sql = f"""
+                        UPDATE {self.production_schema}.members AS m
+                        SET email_address = $1, official_url = $2, twitter_url = $3,
+                            facebook_url = $4, instagram_url = $5, youtube_url = $6,
+                            other_url = $7
+                        FROM {self.staging_schema}.congressionaldirectories_granules g
+                        WHERE g.granuleid = m.granule_id
+                        AND g.id = $8
+                    """
+                    for granule_id, online_values in granule_online_values.items():
+                        try:
+                            await conn.execute(
+                                update_sql,
+                                online_values["email_address"],
+                                online_values["official_url"],
+                                online_values["twitter_url"],
+                                online_values["facebook_url"],
+                                online_values["instagram_url"],
+                                online_values["youtube_url"],
+                                online_values["other_url"],
+                                granule_id
+                            )
+                            rows_updated += 1
+                        except Exception as e:
+                            logger.error(
+                                f"Error updating online values for granule_id {granule_id}: {e}"
+                            )
+
+                    results["operations"].append(
+                        {
+                            "name": "extract_and_insert_online_values",
+                            "status": "success",
+                            "rows_affected": rows_updated,
+                        }
+                    )
+                    results["rows_affected"] += rows_updated
+                    logger.info(
+                        f"Updated {rows_updated} congressional directories member online values"
+                    )
+                else:
+                    results["operations"].append(
+                        {
+                            "name": "extract_and_insert_online_values",
+                            "status": "success",
+                            "rows_affected": 0,
+                            "note": "No online values found to update",
+                        }
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Error extracting/inserting congressional directories member online values: {e}"
+                )
+                results["operations"].append(
+                    {
+                        "name": "extract_and_insert_online_values",
                         "status": "error",
                         "error": str(e),
                     }

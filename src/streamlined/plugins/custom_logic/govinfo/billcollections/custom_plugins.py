@@ -7,12 +7,15 @@ This module contains all the custom logic for bill collections data type includi
 
 """
 
+import hashlib
+import json
 import logging
-import re
-from collections.abc import AsyncGenerator
 from typing import Any
 
+from streamlined.plugins.base import BaseCleanerLogic
+
 logger = logging.getLogger(__name__)
+
 
 class BillCollectionsFetcher:
     """
@@ -30,13 +33,14 @@ class BillCollectionsFetcher:
     def __init__(self, data_type: str = "billcollections"):
         self.data_type = data_type
 
-class BillCollectionsCleaner:
+
+class BillcollectionsCleanerLogic(BaseCleanerLogic):
     """
     Bill Collections cleaner logic extracted from BillCollectionsCleaner class.
     Contains all the custom cleaning methods for bill collections data.
     """
 
-    #TODO: no granules do everuthing
+    # TODO: no granules do everuthing
 
     def __init__(
         self,
@@ -52,106 +56,7 @@ class BillCollectionsCleaner:
         self.db_pool = None
 
         # Set bills-specific multi-table processing configuration
-        self.multi_table_data_types = {
-            "bills_texts": ["bills_texts", "bills_texts_formats"],
-            # Add other bills multi-table data types here as needed
-        }
-
-    async def _stream_bills_texts_joined_chunks(
-        self, chunk_size: int
-    ) -> AsyncGenerator[list[dict[str, Any]], None]:
-        """
-        Stream joined data from bills_texts_staging and bills_texts_formats_staging.
-        Properly aggregates multiple formats per text record.
-        """
-        if not self.db_pool:
-            raise ValueError("Database pool not configured")
-
-        async with self.db_pool.acquire() as conn:
-            try:
-                # First, check if both tables exist
-                tables_exist_query = """
-                SELECT COUNT(*) FROM information_schema.tables
-                WHERE table_schema = $1
-                AND table_name IN ('bills_texts', 'bills_texts_formats')
-                """
-                tables_count = await conn.fetchval(
-                    tables_exist_query, self.staging_schema
-                )
-
-                if tables_count < 2:
-                    logger.warning(
-                        "One or both bills_texts staging tables do not exist"
-                    )
-                    return
-
-                # Get total count for logging
-                count_query = f"""
-                SELECT COUNT(DISTINCT bt.id)
-                FROM {self.staging_schema}.bills_texts bt
-                """
-                total_count = await conn.fetchval(count_query)
-
-                if total_count == 0:
-                    logger.info("No bills_texts records found")
-                    return
-
-                logger.info(
-                    f"Streaming {total_count} bills_texts records with formats in chunks of {chunk_size}"
-                )
-
-                # Stream using pagination with aggregated formats
-                offset = 0
-                while True:
-                    # Use JSON aggregation to collect all formats for each text
-                    query = f"""
-                    SELECT
-                        bt.*,
-                        COALESCE(
-                            json_agg(
-                                json_build_object('type', btf.type, 'url', btf.url)
-                                ORDER BY btf.type
-                            ) FILTER (WHERE btf.type IS NOT NULL),
-                            '[]'::json
-                        ) as formats_json
-                    FROM {self.staging_schema}.bills_texts bt
-                    LEFT JOIN {self.staging_schema}.bills_texts_formats btf
-                        ON bt.bill_id = btf.bill_id AND bt.list_index = btf.list_index
-                    GROUP BY bt.id, bt.bill_id, bt.list_index, bt.date, bt.type,
-                                bt.processed_at
-                    ORDER BY bt.processed_at DESC
-                    LIMIT {chunk_size} OFFSET {offset}
-                    """
-
-                    rows = await conn.fetch(query)
-                    if not rows:
-                        break
-
-                    chunk = []
-                    for row in rows:
-                        try:
-                            row_dict = dict(row)
-                            chunk.append(row_dict)
-                        except Exception as e:
-                            logger.error(
-                                f"Error converting bills_texts row to dict: {e}, row type: {type(row)}, row: {row}"
-                            )
-                            continue
-
-                    if chunk:  # Only yield if we have valid records
-                        yield chunk
-
-                    offset += chunk_size
-
-                    # Log progress periodically
-                    if offset % (chunk_size * 10) == 0:
-                        logger.debug(
-                            f"Streamed {offset} bills_texts records with formats"
-                        )
-
-            except Exception as e:
-                logger.error(f"Error streaming bills_texts with formats: {e}")
-                raise
+        self.multi_table_data_types = {}
 
     async def _clean_billcollections_singular(
         self, record_data: dict[str, Any]
@@ -241,93 +146,111 @@ class BillCollectionsCleaner:
         if all([bill_type, bill_number, congress]):
             bill_id = f"{bill_type}{bill_number}-{congress}"
         else:
-            raise ValueError(f"Invalid bill_id format: {bill_id}")
+            raise ValueError(
+                f"Invalid bill_id format: bill_type={bill_type}, bill_number={bill_number}, congress={congress}. Record is {cleaned}"
+            )
 
         # Apply bills-specific cleaning logic
         filtered_cleaned = {
             "package_id": str(cleaned.get("packageid", "ID_ERROR")),
             "bill_id": str(bill_id),
-            "latest_bill_version": str(cleaned.get("billversion", None)),
-            "origin_chamber": str(
-                self.standardize_chamber(cleaned.get("originchamber", None))
-            ),
-            "current_chamber": str(
-                self.standardize_chamber(cleaned.get("currentchamber", None))
-            ),
-            "is_appropriation": bool(cleaned.get("isappropriation", None)),
-            "is_private": bool(cleaned.get("isprivate", None)),
+            "version_code": cleaned.get("billversion", None),
+            "origin_chamber": self.standardize_chamber(cleaned.get("originchamber")),
+            "current_chamber": self.standardize_chamber(cleaned.get("currentchamber")),
+            "is_appropriation": cleaned.get("isappropriation") == "true"
+            if cleaned.get("isappropriation")
+            else None,
+            "is_private": cleaned.get("isprivate") == "true"
+            if cleaned.get("isprivate")
+            else None,
             "pages": self.safe_int(cleaned.get("pages", None)),
             "issued_at": self.standardize_date(cleaned.get("dateissued", None)),
-            "government_author1": str(cleaned.get("governmentauthor1", None)),
-            "government_author2": str(cleaned.get("governmentauthor2", None)),
-            "publisher": str(cleaned.get("publisher", None)),
-            "collection_code": str(cleaned.get("collectioncode", None)),
-            "stock_number": str(cleaned.get("otheridentifier_stock_number", None)),
-            "su_doc_class_number": str(cleaned.get("sudocclassnumber", None)),
-            "migrated_doc_id": str(cleaned.get("otheridentifier_migrated_doc_id", None)),
-            "child_ils_system_id": str(cleaned.get("otheridentifier_child_ils_system_id", None)),
-            "parent_ils_system_id": str(cleaned.get("otheridentifier_parent_ils_system_id", None)),
-            "mods_url": str(cleaned.get("download_modslink", None)),
-            "pdf_url": str(cleaned.get("download_pdflink", None)),
-            "premis_url": str(cleaned.get("download_premislink", None)),
-            "txt_url": str(cleaned.get("download_txtlink", None)),
-            "xml_url": str(cleaned.get("download_xmllink", None)),
-            "zip_url": str(cleaned.get("download_ziplink", None)),
+            "government_author1": cleaned.get("governmentauthor1"),
+            "government_author2": cleaned.get("governmentauthor2"),
+            "publisher": cleaned.get("publisher"),
+            "collection_code": cleaned.get("collectioncode"),
+            "stock_number": cleaned.get("otheridentifier_stock_number"),
+            "su_doc_class_number": cleaned.get("sudocclassnumber"),
+            "migrated_doc_id": cleaned.get("otheridentifier_migrated_doc_id"),
+            "child_ils_system_id": cleaned.get("otheridentifier_child_ils_system_id"),
+            "parent_ils_system_id": cleaned.get("otheridentifier_parent_ils_system_id"),
+            "mods_url": cleaned.get("download_modslink"),
+            "pdf_url": cleaned.get("download_pdflink"),
+            "premis_url": cleaned.get("download_premislink"),
+            "txt_url": cleaned.get("download_txtlink"),
+            "xml_url": cleaned.get("download_xmllink"),
+            "zip_url": cleaned.get("download_ziplink"),
             "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
         }
 
         return filtered_cleaned
 
-    async def _clean_bills_actions_singular(
+    async def _clean_billcollections_committees_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Custom cleaning logic for bills actions records."""
+        """
+        Custom cleaning logic for individual bills records.
+        STAGING COLUMNS:
+        - type          text,
+        - chamber       text,
+        - authorityid   text,
+        - committeename text,
+        - id            text,
+        - package_id    text,
+        - list_index    text
+
+        FINAL COLUMNS:
+        - package_id TEXT,
+        - committee_code TEXT,
+        - committee_name TEXT,
+        """
+        # logger.info(f"Cleaning committees: {record_data}")
         cleaned = record_data.copy()
 
         filtered_cleaned = {
-            "action_id": str(cleaned.get("id", "ID_ERROR")),
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "action_code": str(cleaned.get("actioncode", None)),
-            "action_date": self.standardize_date(cleaned.get("actiondate", None)),
-            "text": self.clean_long_text(cleaned.get("text", None)),
-            "action_type": str(cleaned.get("type", None)),
-            "source_system": str(cleaned.get("sourcesystem_name", None)),
-            "source_system_code": self.safe_int(cleaned.get("sourcesystem_code", None)),
-            "calendar": str(cleaned.get("calendarnumber_calendar", None)),
-            "calendar_number": self.safe_int(
-                cleaned.get("calendarnumber_number", None)
-            ),
+            "package_id": cleaned.get("package_id", "ID_ERROR"),
+            "committee_code": cleaned.get("authorityid", "ID_ERROR"),
+            "committee_name": cleaned.get("committeename", None),
         }
 
         return filtered_cleaned
 
-    # Add other cleaning methods for bills sub-tables
-    async def _clean_bills_cosponsors_singular(
+    async def _clean_billcollections_shorttitle_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Custom cleaning logic for bills cosponsors records."""
+        """
+        Custom cleaning logic for individual bills records.
+        STAGING COLUMNS:
+        - type       text,
+        - title      text,
+        - id         text,
+        - package_id text,
+        - list_index text,
+        - level      text
+        FINAL COLUMNS:
+        - package_id TEXT,
+        - short_title TEXT,
+        - level TEXT,
+        - type TEXT,
+        """
+
+        # logger.info(f"Cleaning shorttitle: {record_data}")
+
+        self._register_target_table_override("billcollections_shorttitles")
+
         cleaned = record_data.copy()
 
         filtered_cleaned = {
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "bioguide_id": str(cleaned.get("bioguideid", "ID_ERROR")),
-            "display_name": str(cleaned.get("fullname", None)),
-            "party": str(cleaned.get("party", None)),
-            "state": str(cleaned.get("state", None)),
-            "district": self.safe_int(cleaned.get("district", None)),
-            "is_original_cosponsor": bool(cleaned.get("isoriginalcosponsor", None)),
-            "sponsorship_date": self.standardize_date(
-                cleaned.get("sponsorshipdate", None)
-            ),
-            "sponsorship_withdrawal_date": self.standardize_date(
-                cleaned.get("sponsorshipwithdrawndate", None)
-            ),
+            "package_id": cleaned.get("package_id", "ID_ERROR"),
+            "short_title": cleaned.get("title", None),
+            "level": cleaned.get("level", None),
+            "type": cleaned.get("type", None),
         }
 
         return filtered_cleaned
 
     # Add post-processing methods
-    async def _post_process_bills(self) -> dict[str, Any]:
+    async def _post_process_billcollections(self) -> dict[str, Any]:
         """Post-processing operations specific to bills data."""
         if not self.db_pool:
             raise ValueError("Database pool not configured")
@@ -338,84 +261,285 @@ class BillCollectionsCleaner:
             "rows_affected": 0,
         }
 
-        async with self.db_pool.acquire() as conn:
-            # Operation 1: Populate is_law field based on bills_laws table
-            try:
-                async with conn.transaction():
-                    sql = f"""
-                        UPDATE {self.production_schema}.bills
-                        SET is_law = CASE
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM {self.production_schema}.bills_laws bl
-                                WHERE bl.bill_id = bills.bill_id
-                            ) THEN true
-                            ELSE false
-                        END
-                        WHERE is_law IS NULL;
+        # ? Operation 1: population sponsors/cosponsors
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Process in batches to avoid timeout
+                batch_size = 10000
+                offset = 0
+                sponsor_records = []
+                cosponsor_records = []
+
+                while True:
+                    # Fetch batch of records from staging
+                    fetch_sql = f"""
+                        SELECT m.package_id, m.bioguideid AS bioguide_id, COALESCE(m.membername, mn.parsed) AS name, m.role
+                        FROM {self.staging_schema}.billcollections_members AS m
+                        LEFT JOIN {self.staging_schema}.billcollections_members_name AS mn
+                        ON m.id = mn.members_id
+                        ORDER BY m.package_id
+                        LIMIT {batch_size} OFFSET {offset}
                     """
+                    rows = await conn.fetch(fetch_sql, timeout=60.0)
 
-                    result = await conn.execute(sql)
-                    rows_affected = int(result.split()[-1]) if result.split() else 0
+                    if not rows:
+                        break
 
-                    results["operations"].append(
-                        {
-                            "name": "populate_is_law_field",
-                            "status": "success",
-                            "rows_affected": rows_affected,
-                        }
+                    # Process batch
+                    for row in rows:
+                        if row["role"] == "SPONSOR":
+                            sponsor_records.append(
+                                {
+                                    "package_id": row["package_id"],
+                                    "bioguide_id": row["bioguide_id"],
+                                    "name": row["name"],
+                                }
+                            )
+                        elif row["role"] == "COSPONSOR":
+                            cosponsor_records.append(
+                                {
+                                    "package_id": row["package_id"],
+                                    "bioguide_id": row["bioguide_id"],
+                                    "name": row["name"],
+                                }
+                            )
+
+                    offset += batch_size
+                    logger.info(
+                        f"Processed {len(rows)} sponsor/cosponsor records (offset: {offset})"
                     )
-                    results["rows_affected"] += rows_affected
 
-                    logger.info(f"Updated is_law for {rows_affected} bills")
+                # Insert sponsor records
+                if sponsor_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.billcollections_sponsors (package_id, bioguide_id, name)
+                        VALUES (%s, %s, %s)
+                    """
+                    await conn.executemany(insert_sql, sponsor_records)
+                sponsor_rows_affected = len(sponsor_records)
 
-            except Exception as e:
-                logger.error(f"Error populating is_law field: {e}")
+                if cosponsor_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.billcollections_cosponsors (package_id, bioguide_id, name)
+                        VALUES (%s, %s, %s)
+                    """
+                    await conn.executemany(insert_sql, cosponsor_records)
+                cosponsor_rows_affected = len(cosponsor_records)
+
                 results["operations"].append(
                     {
-                        "name": "populate_is_law_field",
-                        "status": "error",
-                        "error": str(e),
+                        "name": "populate_sponsors_field",
+                        "status": "success",
+                        "rows_affected": sponsor_rows_affected,
                     }
                 )
-                results["status"] = "partial_failure"
+                results["rows_affected"] += sponsor_rows_affected
+
+                logger.info(f"Updated sponsors for {sponsor_rows_affected} bills")
+
+                results["operations"].append(
+                    {
+                        "name": "populate_cosponsors_field",
+                        "status": "success",
+                        "rows_affected": cosponsor_rows_affected,
+                    }
+                )
+                results["rows_affected"] += cosponsor_rows_affected
+                logger.info(f"Updated cosponsors for {cosponsor_rows_affected} bills")
+
+        except Exception as e:
+            logger.error(f"Error populating sponsors field: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "populate_sponsors_field",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+
+        # ? Operation 2: populate references
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all records from staging with timeout
+                fetch_sql = f"""
+                SELECT package_id, collectioncode, contents FROM {self.staging_schema}.billcollections_references
+                """
+                rows = await conn.fetch(fetch_sql, timeout=300.0)
+
+                reference_law_records = []
+                reference_statute_records = []
+                reference_code_records = []
+                reference_statute_page_records = []
+                reference_code_section_records = []
+                for row in rows:
+                    # Parse contents if it's a JSON string
+                    contents = row.get("contents", [])
+                    if isinstance(contents, str):
+                        try:
+                            contents = json.loads(contents)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse JSON contents: {contents}")
+                            continue
+
+                    if row["collectioncode"] == "PLAW" and contents:
+                        for content in contents:
+                            reference_law_records.append(
+                                {
+                                    "package_id": row["package_id"],
+                                    "law_id": f"PL{content.get('congress')}-{content.get('number')}",
+                                    "law_type": content.get("label", "")
+                                    .split(" ")[0]
+                                    .lower()
+                                    if content.get("label", "")
+                                    else None,
+                                    "law_number": f"{content.get('congress')}-{content.get('number')}",
+                                    "order_number": self.safe_int(
+                                        content.get("number")
+                                    ),
+                                    "congress": self.safe_int(content.get("congress")),
+                                }
+                            )
+                    elif row["collectioncode"] == "STATUTE" and contents:
+                        for content in contents:
+                            bill_statute_id = hashlib.sha256(
+                                f"{row['package_id']}-{content['label']}-{content['pages']}-{content['title']}".encode()
+                            ).hexdigest()[:16]
+                            reference_statute_records.append(
+                                {
+                                    "bill_statute_id": bill_statute_id,
+                                    "package_id": row["package_id"],
+                                    "reference_statute": f"{content.get('label', '').lower()}{content.get('title', '')}",
+                                }
+                            )
+                            pages = content.get("pages", [])
+                            if isinstance(pages, str):
+                                try:
+                                    pages = json.loads(pages)
+                                except json.JSONDecodeError:
+                                    pages = []
+
+                            for page in pages:
+                                reference_statute_page_records.append(
+                                    {
+                                        "bill_statute_id": bill_statute_id,
+                                        "page": page,
+                                    }
+                                )
+                    elif row["collectioncode"] == "USCODE" and contents:
+                        for content in contents:
+                            bill_code_id = hashlib.sha256(
+                                f"{row['package_id']}-{content.get('sections', '')}-{content.get('title', '')}".encode()
+                            ).hexdigest()[:16]
+                            reference_code_records.append(
+                                {
+                                    "bill_code_id": bill_code_id,
+                                    "package_id": row["package_id"],
+                                    "reference_code": f"{content.get('label', '').replace('.', '')}-{content.get('title', '')}",
+                                }
+                            )
+                            sections = content.get("sections", [])
+                            if isinstance(sections, str):
+                                try:
+                                    sections = json.loads(sections)
+                                except json.JSONDecodeError:
+                                    sections = []
+
+                            for section in sections:
+                                reference_code_section_records.append(
+                                    {
+                                        "bill_code_id": bill_code_id,
+                                        "section": section,
+                                    }
+                                )
+                if reference_law_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.billcollections_reference_laws (package_id, law_id, law_type, law_number, order_number, congress)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """
+                    await conn.executemany(insert_sql, reference_law_records)
+                    reference_law_rows_affected = len(reference_law_records)
+                    results["operations"].append(
+                        {
+                            "name": "populate_reference_laws_field",
+                            "status": "success",
+                            "rows_affected": reference_law_rows_affected,
+                        }
+                    )
+                    results["rows_affected"] += reference_law_rows_affected
+                if reference_statute_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.billcollections_reference_statutes (bill_statute_id, package_id, reference_statute)
+                        VALUES (%s, %s, %s)
+                    """
+                    await conn.executemany(insert_sql, reference_statute_records)
+                    reference_statute_rows_affected = len(reference_statute_records)
+                    results["operations"].append(
+                        {
+                            "name": "populate_reference_statutes_field",
+                            "status": "success",
+                            "rows_affected": reference_statute_rows_affected,
+                        }
+                    )
+                    results["rows_affected"] += reference_statute_rows_affected
+                if reference_code_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.billcollections_reference_codes (bill_code_id, package_id, reference_code)
+                        VALUES (%s, %s, %s)
+                    """
+                    await conn.executemany(insert_sql, reference_code_records)
+                    reference_code_rows_affected = len(reference_code_records)
+                    results["operations"].append(
+                        {
+                            "name": "populate_reference_codes_field",
+                            "status": "success",
+                            "rows_affected": reference_code_rows_affected,
+                        }
+                    )
+                    results["rows_affected"] += reference_code_rows_affected
+                if reference_statute_page_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.billcollections_reference_statutes_pages (bill_statute_id, page)
+                        VALUES (%s, %s)
+                    """
+                    await conn.executemany(insert_sql, reference_statute_page_records)
+                    reference_statute_page_rows_affected = len(
+                        reference_statute_page_records
+                    )
+                    results["operations"].append(
+                        {
+                            "name": "populate_reference_statutes_pages_field",
+                            "status": "success",
+                            "rows_affected": reference_statute_page_rows_affected,
+                        }
+                    )
+                    results["rows_affected"] += reference_statute_page_rows_affected
+                if reference_code_section_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.billcollections_reference_codes_sections (bill_code_id, code_section)
+                        VALUES (%s, %s)
+                    """
+                    await conn.executemany(insert_sql, reference_code_section_records)
+                    reference_code_section_rows_affected = len(
+                        reference_code_section_records
+                    )
+                    results["operations"].append(
+                        {
+                            "name": "populate_reference_codes_sections_field",
+                            "status": "success",
+                            "rows_affected": reference_code_section_rows_affected,
+                        }
+                    )
+                    results["rows_affected"] += reference_code_section_rows_affected
+        except Exception as e:
+            logger.error(f"Error populating references field: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "populate_references_field",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
 
         return results
-
-    # Helper methods from base cleaner
-    def safe_int(self, value: Any, default: int = None) -> int | None:
-        """Safely convert value to int."""
-        if value is None:
-            return default
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return default
-
-    def standardize_chamber(self, chamber: str) -> str | None:
-        """Standardize chamber names."""
-        if not chamber:
-            return None
-        chamber_lower = chamber.lower()
-        if chamber_lower in ["house", "h"]:
-            return "house"
-        elif chamber_lower in ["senate", "s"]:
-            return "senate"
-        else:
-            return chamber_lower
-
-    def standardize_date(self, date_str: str) -> str | None:
-        """Standardize date strings."""
-        if not date_str:
-            return None
-        # Add date parsing logic here
-        return date_str
-
-    def clean_long_text(self, text: str) -> str | None:
-        """Clean long text fields."""
-        if not text:
-            return None
-        # Add text cleaning logic here
-        return text.strip()
-
-
