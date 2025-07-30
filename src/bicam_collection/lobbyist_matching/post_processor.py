@@ -287,9 +287,10 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
                             "matched_congress": new_match.matched_congress,
                             "matched_bill_type": new_match.matched_bill_type,
                             "matched_bill_number": new_match.matched_bill_number,
-                            "bill_id": new_match.bill_id,
                             "matched_title": new_match.matched_title,
                             "confidence_score": new_match.confidence_score,
+                            "update_source": "wrong_title_correction",
+                            "updated_bill_id": new_match.bill_id,
                         }
                     )
                     continue
@@ -311,9 +312,10 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
                                 "matched_congress": new_match.matched_congress,
                                 "matched_bill_type": new_match.matched_bill_type,
                                 "matched_bill_number": new_match.matched_bill_number,
-                                "bill_id": new_match.bill_id,
                                 "matched_title": new_match.matched_title,
                                 "confidence_score": new_match.confidence_score,
+                                "update_source": "wrong_title_correction",
+                                "updated_bill_id": new_match.bill_id,
                             }
                         )
                         break
@@ -329,18 +331,20 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
                             matched_congress = $2,
                             matched_bill_type = $3,
                             matched_bill_number = $4,
-                            bill_id = $5,
-                            matched_title = $6,
-                            confidence_score = $7
-                        WHERE match_id = $8
+                            matched_title = $5,
+                            confidence_score = $6,
+                            update_source = $7,
+                            updated_bill_id = $8
+                        WHERE match_id = $9
                     """,
                         update["match_type"],
                         update["matched_congress"],
                         update["matched_bill_type"],
                         update["matched_bill_number"],
-                        update["bill_id"],
                         update["matched_title"],
                         update["confidence_score"],
+                        update["update_source"],
+                        update["updated_bill_id"],
                         update["match_id"],
                     )
 
@@ -464,7 +468,8 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                                 )
                                 UPDATE lobbied_bill_matching.reference_matches
                                 SET match_type = 'DUPLICATE'
-                                WHERE match_id IN (
+                                WHERE run_id = $1
+                                AND match_id IN (
                                     SELECT match_id 
                                     FROM ranked_matches 
                                     WHERE rn > 1
