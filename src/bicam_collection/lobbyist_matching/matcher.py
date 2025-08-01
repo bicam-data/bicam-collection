@@ -481,8 +481,9 @@ class ReferenceMatcher:
             matched_congress=congress,
             matched_bill_type=bill_type,
             matched_bill_number=bill_number,
-            matched_title=corpus_title,
             matched_law_number=None,
+
+            matched_title=corpus_title,
             bill_id=f"{bill_type}{bill_number}-{congress}"
         )
 
@@ -1383,8 +1384,8 @@ class MatchingManager:
                                                 match.matched_congress,
                                                 match.matched_bill_type,
                                                 match.matched_bill_number,
-                                                match.matched_law_number,
                                                 match.matched_title,
+                                                match.matched_law_number,
                                                 match.bill_id
                                             ))
                                         except Exception as e:
@@ -1511,10 +1512,10 @@ async def store_matches(conn: asyncpg.Pool, run_id: int, matches: list[MatchResu
                         matched_congress,
                         matched_bill_type,
                         matched_bill_number,
-                        matched_law_number,
                         matched_title,
+                        matched_law_number,
                         bill_id
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 """, [
                     (
                         run_id,
@@ -1527,8 +1528,8 @@ async def store_matches(conn: asyncpg.Pool, run_id: int, matches: list[MatchResu
                         match.matched_congress,
                         match.matched_bill_type,
                         match.matched_bill_number,
-                        match.matched_law_number,
                         match.matched_title,
+                        match.matched_law_number,
                         match.bill_id
                     )
                     for match in chunk
