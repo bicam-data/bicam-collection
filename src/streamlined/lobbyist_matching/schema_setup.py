@@ -21,33 +21,35 @@ Tables are created in the 'lobbied_bill_matching' schema.
 """
 
 import json
-from typing import Dict, List, Optional
+
 import asyncpg
 
 
 async def create_schema(pool: asyncpg.Pool, rebuild_matches_only: bool = False):
     """Create all necessary database tables and indexes.
-    
+
     Creates the complete database schema including tables for tracking runs,
     storing extracted references, matches, timeouts, and comparison results.
-    
+
     Args:
         pool (asyncpg.Pool): Database connection pool
-        rebuild_matches_only (bool): If True, only recreates the matches table. 
+        rebuild_matches_only (bool): If True, only recreates the matches table.
                                    If False, rebuilds entire schema.
-    
+
     Note:
         Requires user confirmation before proceeding with schema changes.
         Creates indexes for optimized query performance.
         Sets up views for simplified reference querying.
     """
-    
+
     # Get confirmation before proceeding with schema changes
-    confirmation = input("\nWARNING: This will drop and recreate database tables. Are you sure you want to proceed? (y/N): ")
-    if confirmation.lower() != 'y':
+    confirmation = input(
+        "\nWARNING: This will drop and recreate database tables. Are you sure you want to proceed? (y/N): "
+    )
+    if confirmation.lower() != "y":
         print("Operation cancelled.")
         return
-    
+
     async with pool.acquire() as conn:
         if not rebuild_matches_only:
             await conn.execute("""
@@ -265,21 +267,23 @@ async def create_schema(pool: asyncpg.Pool, rebuild_matches_only: bool = False):
             ON lobbied_bill_matching.compare_lobbied_bills(bill_id);
         """)
 
-async def get_random_filings(pool: asyncpg.Pool, num_filings: int = None) -> List[str]:
+
+async def get_random_filings(pool: asyncpg.Pool, num_filings: int = None) -> list[str]:
     """Get random filing UUIDs with a minimum number of sections.
-    
+
     Retrieves random filings from the database that have valid issue text sections.
-    
+
     Args:
         pool (asyncpg.Pool): Database connection pool
         num_filings (int, optional): Number of filings to retrieve. If None, returns all.
-        
+
     Returns:
         List[str]: List of filing records containing UUID, section ID and issue text
     """
     async with pool.acquire() as conn:
         if num_filings:
-            return await conn.fetch("""
+            return await conn.fetch(
+                """
                 SELECT
                     f.filing_uuid, fs.section_id, fst.issue_text
                 FROM relational___lda.filings f
@@ -291,7 +295,9 @@ async def get_random_filings(pool: asyncpg.Pool, num_filings: int = None) -> Lis
                 AND length(fst.issue_text) > 3
                 ORDER BY random()
                 LIMIT $1
-            """, num_filings)
+            """,
+                num_filings,
+            )
         else:
             return await conn.fetch("""
                 SELECT
@@ -305,27 +311,29 @@ async def get_random_filings(pool: asyncpg.Pool, num_filings: int = None) -> Lis
                 AND length(fst.issue_text) > 3
             """)
 
+
 async def initialize_run(
     pool: asyncpg.Pool,
     total_filings: int,
     total_sections: int,
-    parameters: Optional[Dict] = None
+    parameters: dict | None = None,
 ) -> int:
     """Initialize a new processing run.
-    
+
     Creates a new run record in the processing_runs table.
-    
+
     Args:
         pool (asyncpg.Pool): Database connection pool
         total_filings (int): Total number of filings to process
         total_sections (int): Total number of sections to process
         parameters (Dict, optional): Additional run parameters to store
-        
+
     Returns:
         int: ID of the newly created run
     """
     async with pool.acquire() as conn:
-        return await conn.fetchval("""
+        return await conn.fetchval(
+            """
             INSERT INTO lobbied_bill_matching.processing_runs (
                 total_filings,
                 total_sections,
@@ -336,16 +344,17 @@ async def initialize_run(
         """,
             total_filings,
             total_sections,
-            json.dumps(parameters) if parameters else None
+            json.dumps(parameters) if parameters else None,
         )
+
 
 async def update_reference_types(pool: asyncpg.Pool) -> None:
     """Update reference_type check constraint to include new types.
-    
+
     Updates the check constraint on the extracted_references table to include
     all valid reference types. Handles errors gracefully by ensuring a constraint
     always exists.
-    
+
     Args:
         pool (asyncpg.Pool): Database connection pool
     """

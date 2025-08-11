@@ -9,11 +9,13 @@ matching operations. It includes:
 - Summary reporting of timeout statistics
 """
 
+import logging
 import signal
 from dataclasses import dataclass
-from typing import List, Any
+from typing import Any
+
 import asyncpg
-import logging
+
 
 @dataclass
 class TimeoutSection:
@@ -43,7 +45,6 @@ class RegexTimeout(Exception):
     
     Used to interrupt long-running regex operations that exceed the timeout threshold.
     """
-    pass
 
 def timeout_handler(signum, frame):
     """Signal handler for timeout.
@@ -57,7 +58,7 @@ def timeout_handler(signum, frame):
     """
     raise RegexTimeout("Regex pattern matching timed out")
 
-def finditer_with_timeout(pattern, text: str, timeout: int = 30) -> List[Any]:
+def finditer_with_timeout(pattern, text: str, timeout: int = 30) -> list[Any]:
     """Execute finditer with a timeout.
     
     Wraps re.finditer() with a timeout mechanism to prevent infinite/long-running matches.
@@ -74,11 +75,11 @@ def finditer_with_timeout(pattern, text: str, timeout: int = 30) -> List[Any]:
         RegexTimeout: If matching exceeds timeout duration
     """
     matches = []
-    
+
     # Set up signal-based timeout
     signal.signal(signal.SIGALRM, timeout_handler)
     signal.alarm(timeout)
-    
+
     try:
         # Collect all matches
         matches.extend(pattern.finditer(text))
@@ -96,11 +97,11 @@ class TimeoutTracker:
         pool (asyncpg.Pool): Database connection pool
         timeouts (List[TimeoutSection]): Collection of timeout events
     """
-    
+
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
-        self.timeouts: List[TimeoutSection] = []
-    
+        self.timeouts: list[TimeoutSection] = []
+
     async def initialize_tracking(self, run_id: int):
         """Initialize timeout tracking table.
         
@@ -125,7 +126,7 @@ class TimeoutTracker:
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-    
+
     async def store_timeout(self, run_id: int, timeout_info: TimeoutSection):
         """Store information about a timed-out section.
         
@@ -159,7 +160,7 @@ class TimeoutTracker:
                 timeout_info.processing_time,
                 timeout_info.error_message
             )
-    
+
     async def store_all_timeouts(self, run_id: int):
         """Store all collected timeouts.
         
@@ -170,7 +171,7 @@ class TimeoutTracker:
         """
         for timeout in self.timeouts:
             await self.store_timeout(run_id, timeout)
-    
+
     def add_timeout(self, timeout: TimeoutSection):
         """Add a timeout to the collection.
         
@@ -178,7 +179,7 @@ class TimeoutTracker:
             timeout (TimeoutSection): Timeout event to add
         """
         self.timeouts.append(timeout)
-    
+
     async def print_summary(self, run_id: int):
         """Print summary of timed-out sections.
         
@@ -199,7 +200,7 @@ class TimeoutTracker:
                 WHERE run_id = $1
                 GROUP BY pattern_type
             """, run_id)
-            
+
             if timeouts:
                 logging.info("\nTimeout Summary:")
                 logging.info("----------------")
@@ -210,7 +211,7 @@ class TimeoutTracker:
                     logging.info(f"  Average processing time: {t['avg_time']:.2f} seconds")
                     logging.info(f"  Affected filings: {t['num_filings']}")
                     logging.info("")
-                    
+
 class BatchTimeoutManager:
     """Manage timeouts for a batch of sections.
     
@@ -219,11 +220,11 @@ class BatchTimeoutManager:
     Attributes:
         tracker (TimeoutTracker): Tracker instance for storing timeout events
     """
-    
+
     def __init__(self, tracker: TimeoutTracker):
         self.tracker = tracker
-    
-    def handle_timeout(self, 
+
+    def handle_timeout(self,
                         filing_uuid: str,
                         section_id: str,
                         chunk_id: int,

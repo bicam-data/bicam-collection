@@ -11,10 +11,11 @@ with the appropriate paragraphs. It provides functionality for:
 """
 
 import logging
-from typing import List
+import re
+
 import asyncpg
 from tqdm import tqdm
-import re
+
 
 async def process_paragraphs(pool: asyncpg.Pool, run_id: int) -> None:
     """Process sections into paragraphs and match bills.
@@ -39,12 +40,12 @@ async def process_paragraphs(pool: asyncpg.Pool, run_id: int) -> None:
             DELETE FROM lobbied_bill_matching.paragraph_matches 
             WHERE run_id = $1
         """, run_id)
-        
+
         await conn.execute("""
             DELETE FROM lobbied_bill_matching.section_paragraphs 
             WHERE run_id = $1
         """, run_id)
-        
+
         # Get sections and their bills
         sections = await conn.fetch("""
             SELECT DISTINCT 
@@ -64,20 +65,20 @@ async def process_paragraphs(pool: asyncpg.Pool, run_id: int) -> None:
             WHERE e.run_id = $1
             GROUP BY fs.filing_uuid, fs.section_id, fst.issue_text
         """, run_id)
-        
+
         for section in tqdm(sections, desc="Processing sections"):
             paragraphs = split_into_paragraphs(section['text'])
-            
+
             # Store paragraphs and match bills
             current_pos = 0
             for i, para in enumerate(paragraphs, 1):
                 start_pos = section['text'].find(para, current_pos)
                 if start_pos == -1:
                     continue
-                
+
                 end_pos = start_pos + len(para)
                 current_pos = end_pos
-                
+
                 # Store paragraph
                 paragraph_id = await conn.fetchval("""
                     INSERT INTO lobbied_bill_matching.section_paragraphs (
@@ -86,17 +87,17 @@ async def process_paragraphs(pool: asyncpg.Pool, run_id: int) -> None:
                     ) VALUES ($1, $2, $3, $4, $5, $6)
                     RETURNING paragraph_id
                 """, run_id, section['section_id'], para, i, start_pos, end_pos)
-                
+
                 if paragraph_id is None:
                     logging.warning(f"Failed to insert paragraph for section {section['section_id']}")
                     continue
-                
+
                 # Match bills to paragraph
                 if section['match_ids'] and section['start_positions'] and section['end_positions']:
                     for match_id, bill_start, bill_end in zip(
                         section['match_ids'],
                         section['start_positions'],
-                        section['end_positions']
+                        section['end_positions'], strict=False
                     ):
                         if match_id is not None and start_pos <= bill_start and bill_end <= end_pos:
                             try:
@@ -109,7 +110,7 @@ async def process_paragraphs(pool: asyncpg.Pool, run_id: int) -> None:
                             except Exception as e:
                                 logging.error(f"Error inserting paragraph match: {str(e)}")
 
-def split_into_paragraphs(text: str) -> List[str]:
+def split_into_paragraphs(text: str) -> list[str]:
     """Split text into logical paragraphs.
     
     This function splits text into paragraphs using the following rules:
@@ -131,27 +132,27 @@ def split_into_paragraphs(text: str) -> List[str]:
     """
     if not text:
         return []
-    
+
     # Normalize newlines
     text = text.replace('\r\n', '\n').replace('\r', '\n')
-    
+
     # Split on paragraph breaks
     splits = text.split('\n\n')
     paragraphs = []
-    
+
     for split in splits:
         # Further split on newlines and semicolons
         subsplits = re.split(r'(?:\n|;\s+)', split)
-        
+
         for subsplit in subsplits:
             cleaned = ' '.join(subsplit.split())
             if cleaned and not cleaned.isspace():
                 paragraphs.append(cleaned)
-    
+
     # Handle single paragraph case
     if not paragraphs and text.strip():
         paragraphs = [' '.join(text.split())]
-    
+
     # Remove duplicates while preserving order
     seen = set()
     return [p for p in paragraphs if not (p in seen or seen.add(p))]

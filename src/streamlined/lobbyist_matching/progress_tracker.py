@@ -14,10 +14,11 @@ The tracker uses SQLite for persistence and provides methods to:
 - Query progress and state information
 """
 
-import sqlite3
-import logging
-from typing import Optional, Dict, Any, List
 import json
+import logging
+import sqlite3
+from typing import Any
+
 
 class ProgressTracker:
     """Tracks progress of bill reference extraction and matching runs.
@@ -33,7 +34,7 @@ class ProgressTracker:
         tracker.start_run(1, {"sample_size": 1000})
         tracker.mark_filings_processed(1, ["uuid1", "uuid2"])
     """
-    
+
     def __init__(self, db_path: str = "progress.db"):
         """Initialize progress tracker.
         
@@ -42,7 +43,7 @@ class ProgressTracker:
         """
         self.db_path = db_path
         self.setup_db()
-        
+
     def setup_db(self):
         """Create SQLite database and required tables.
         
@@ -54,7 +55,7 @@ class ProgressTracker:
         conn = sqlite3.connect(self.db_path)
         try:
             c = conn.cursor()
-            
+
             # Create tables
             c.execute("""
                 CREATE TABLE IF NOT EXISTS runs (
@@ -69,7 +70,7 @@ class ProgressTracker:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             c.execute("""
                 CREATE TABLE IF NOT EXISTS processed_filings (
                     run_id INTEGER,
@@ -79,7 +80,7 @@ class ProgressTracker:
                     PRIMARY KEY (run_id, filing_uuid)
                 )
             """)
-            
+
             c.execute("""
                 CREATE TABLE IF NOT EXISTS processed_sections (
                     run_id INTEGER,
@@ -89,12 +90,12 @@ class ProgressTracker:
                     PRIMARY KEY (run_id, section_id)
                 )
             """)
-            
+
             conn.commit()
         finally:
             conn.close()
-    
-    def start_run(self, run_id: int, parameters: Optional[Dict] = None) -> None:
+
+    def start_run(self, run_id: int, parameters: dict | None = None) -> None:
         """Initialize a new processing run.
         
         Args:
@@ -112,7 +113,7 @@ class ProgressTracker:
             logging.info(f"Started tracking run {run_id}")
         finally:
             conn.close()
-    
+
     def update_stage(self, run_id: int, stage: str) -> None:
         """Update the processing stage of a run.
         
@@ -132,8 +133,8 @@ class ProgressTracker:
             logging.info(f"Updated run {run_id} to stage: {stage}")
         finally:
             conn.close()
-    
-    def mark_filings_processed(self, run_id: int, filing_uuids: List[str]) -> None:
+
+    def mark_filings_processed(self, run_id: int, filing_uuids: list[str]) -> None:
         """Mark multiple filings as processed for a run.
         
         Args:
@@ -142,7 +143,7 @@ class ProgressTracker:
         """
         if not filing_uuids:
             return
-            
+
         conn = sqlite3.connect(self.db_path)
         try:
             c = conn.cursor()
@@ -151,7 +152,7 @@ class ProgressTracker:
                 INSERT OR REPLACE INTO processed_filings (run_id, filing_uuid, status)
                 VALUES (?, ?, 'completed')
             """, [(run_id, uuid) for uuid in filing_uuids])
-            
+
             # Update last filing in runs table
             c.execute("""
                 UPDATE runs 
@@ -162,8 +163,8 @@ class ProgressTracker:
             conn.commit()
         finally:
             conn.close()
-    
-    def get_last_filing(self) -> Optional[str]:
+
+    def get_last_filing(self) -> str | None:
         """Get the UUID of the last processed filing.
         
         Returns:
@@ -182,8 +183,8 @@ class ProgressTracker:
             return result[0] if result else None
         finally:
             conn.close()
-    
-    def get_unprocessed_filings(self, run_id: int, filing_uuids: List[str]) -> List[str]:
+
+    def get_unprocessed_filings(self, run_id: int, filing_uuids: list[str]) -> list[str]:
         """Get list of filings that haven't been processed yet.
         
         Args:
@@ -195,7 +196,7 @@ class ProgressTracker:
         """
         if not filing_uuids:
             return []
-            
+
         conn = sqlite3.connect(self.db_path)
         try:
             c = conn.cursor()
@@ -204,13 +205,13 @@ class ProgressTracker:
                 SELECT filing_uuid FROM processed_filings
                 WHERE run_id = ? AND filing_uuid IN ({placeholders})
             """, (run_id, *filing_uuids))
-            
+
             processed = {row[0] for row in c.fetchall()}
             return [uuid for uuid in filing_uuids if uuid not in processed]
         finally:
             conn.close()
-    
-    def get_run_progress(self, run_id: int) -> Dict[str, Any]:
+
+    def get_run_progress(self, run_id: int) -> dict[str, Any]:
         """Get progress information for a run.
         
         Args:
@@ -237,22 +238,22 @@ class ProgressTracker:
                 WHERE run_id = ?
             """, (run_id,))
             row = c.fetchone()
-            
+
             if not row:
                 return None
-                
+
             c.execute("""
                 SELECT COUNT(*) FROM processed_filings
                 WHERE run_id = ?
             """, (run_id,))
             filing_count = c.fetchone()[0]
-            
+
             c.execute("""
                 SELECT COUNT(*) FROM processed_sections
                 WHERE run_id = ?
             """, (run_id,))
             section_count = c.fetchone()[0]
-            
+
             return {
                 'status': row[0],
                 'stage': row[1],
@@ -263,4 +264,4 @@ class ProgressTracker:
                 'processed_sections': section_count
             }
         finally:
-            conn.close() 
+            conn.close()

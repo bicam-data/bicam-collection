@@ -8,13 +8,13 @@ This module contains all the custom logic for congressional reports data type in
 """
 
 # TODO TABLES:
-# serialset data
-# serialset topics
-# submittedby members
-# references bills
-# references other
-# ils_system_id table
-# committees
+# serialset data - congressionalreports
+# serialset topics - congressionalreports
+# submittedby members - congressionalreports
+# references bills - congressionalreports_granules
+# references other - congressionalreports
+# ils_system_id table - congressionalreports
+# committees - congressionalreports_committees
 
 import hashlib
 import json
@@ -540,79 +540,39 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             "rows_affected": 0,
         }
 
-        # ? Operation 1: population sponsors/cosponsors
+        # ? Operation 1: ils system id
         try:
             async with self.db_pool.acquire() as conn, conn.transaction():
                 # Fetch all records from staging
                 fetch_sql = f"""
-                    SELECT m.package_id, m.bioguideid AS bioguide_id, COALESCE(m.membername, mn.parsed) AS name, m.role
-                    FROM {self.staging_schema}.billcollections_members AS m
-                    LEFT JOIN {self.staging_schema}.billcollections_members_name AS mn
-                    ON m.id = mn.members_id
+                    SELECT package_id, otheridentifier_ils_system_id
+                    FROM {self.staging_schema}.congressionalreports
                 """
                 rows = await conn.fetch(fetch_sql)
 
-                sponsor_records = []
-                cosponsor_records = []
-
+                # json load the otheridentifier_ils_system_id value as a list, then insert into the ils_system_id table
                 for row in rows:
-                    if row["role"] == "SPONSOR":
-                        sponsor_records.append(
-                            {
-                                "package_id": row["package_id"],
-                                "bioguide_id": row["bioguide_id"],
-                                "name": row["name"],
-                            }
-                        )
-                    elif row["role"] == "COSPONSOR":
-                        cosponsor_records.append(
-                            {
-                                "package_id": row["package_id"],
-                                "bioguide_id": row["bioguide_id"],
-                                "name": row["name"],
-                            }
-                        )
-
-                # Insert sponsor records
-                if sponsor_records:
+                    ils_system_id = json.loads(row["otheridentifier_ils_system_id"])
                     insert_sql = f"""
-                        INSERT INTO {self.production_schema}.billcollections_sponsors (package_id, bioguide_id, name)
-                        VALUES (%s, %s, %s)
-                    """
-                    await conn.executemany(insert_sql, sponsor_records)
-                sponsor_rows_affected = len(sponsor_records)
+                            INSERT INTO {self.production_schema}.ils_system_id (package_id, ils_system_id)
+                            VALUES (%s, %s)
+                        """
+                    for ils_id in ils_system_id:
+                        await conn.execute(insert_sql, row["package_id"], ils_id)
+                        results["rows_affected"] += 1
+                    results["operations"].append(
+                        {
+                            "name": "populate_ils_system_id_field",
+                            "status": "success",
+                            "rows_affected": len(ils_system_id),
+                        }
+                    )
+                    results["rows_affected"] += len(ils_system_id)
 
-                if cosponsor_records:
-                    insert_sql = f"""
-                        INSERT INTO {self.production_schema}.billcollections_cosponsors (package_id, bioguide_id, name)
-                        VALUES (%s, %s, %s)
-                    """
-                    await conn.executemany(insert_sql, cosponsor_records)
-                cosponsor_rows_affected = len(cosponsor_records)
-
-                results["operations"].append(
-                    {
-                        "name": "populate_sponsors_field",
-                        "status": "success",
-                        "rows_affected": sponsor_rows_affected,
-                    }
-                )
-                results["rows_affected"] += sponsor_rows_affected
-
-                logger.info(f"Updated sponsors for {sponsor_rows_affected} bills")
-
-                results["operations"].append(
-                    {
-                        "name": "populate_cosponsors_field",
-                        "status": "success",
-                        "rows_affected": cosponsor_rows_affected,
-                    }
-                )
-                results["rows_affected"] += cosponsor_rows_affected
-                logger.info(f"Updated cosponsors for {cosponsor_rows_affected} bills")
+                logger.info(f"Updated ils_system_id for {results['rows_affected']} congressional reports")
 
         except Exception as e:
-            logger.error(f"Error populating sponsors field: {e}", exc_info=True)
+            logger.error(f"Error populating ils_system_id field: {e}", exc_info=True)
             results["operations"].append(
                 {
                     "name": "populate_sponsors_field",
@@ -622,12 +582,61 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             )
             results["status"] = "partial_failure"
 
-        # ? Operation 2: populate references
+        # ? Operation 2: serialset data
         try:
             async with self.db_pool.acquire() as conn, conn.transaction():
                 # Fetch all records from staging
                 fetch_sql = f"""
-                SELECT package_id, collectioncode, contents FROM {self.staging_schema}.billcollections_references
+                SELECT package_id, serialset_bagid, serialset_docid, serialset_serialsetnumber, agency, volume, otheridentifier_oclc, otheridentifier_lccn, otheridentifier_issn FROM {self.staging_schema}.congressionalreports_serialset
+                """
+                rows = await conn.fetch(fetch_sql)
+
+                serialset_records = []
+                for row in rows:
+                    serialset_records.append(
+                        {
+                            "package_id": row["package_id"],
+                            "bag_id": row["serialset_bagid"],
+                            "doc_id": row["serialset_docid"],
+                            "serialset_number": row["serialset_serialsetnumber"],
+                            "agency": row["agency"],
+                            "volume": row["volume"],
+                            "oclc_number": row["otheridentifier_oclc"],
+                            "lccn_number": row["otheridentifier_lccn"],
+                            "issn_number": row["otheridentifier_issn"],
+                        }
+                    )
+                if serialset_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.congressionalreports_serialset (package_id, bag_id, doc_id, serialset_number, agency, volume, oclc_number, lccn_number, issn_number)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    await conn.executemany(insert_sql, serialset_records)
+                    serialset_rows_affected = len(serialset_records)
+                    results["operations"].append(
+                        {
+                            "name": "populate_serialset_field",
+                            "status": "success",
+                            "rows_affected": serialset_rows_affected,
+                        }
+                    )
+                    results["rows_affected"] += serialset_rows_affected
+        except Exception as e:
+            logger.error(f"Error populating serialset field: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "populate_serialset_field",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+        # ? Operation 3: references
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all records from staging
+                fetch_sql = f"""
+                SELECT package_id, collectioncode, contents FROM {self.staging_schema}.congressionalreports_references
                 """
                 rows = await conn.fetch(fetch_sql)
 
@@ -636,6 +645,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 reference_code_records = []
                 reference_statute_page_records = []
                 reference_code_section_records = []
+
                 for row in rows:
                     # Parse contents if it's a JSON string
                     contents = row.get("contents", [])
