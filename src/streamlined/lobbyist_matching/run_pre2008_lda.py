@@ -141,7 +141,7 @@ async def main():
                     run_id,
                 )
 
-            sections: list[FilingSection] = []
+            sections: list[dict] = []
             for row in rows:
                 # Fetch the text for each section
                 async with db.pool.acquire() as conn:
@@ -165,12 +165,12 @@ async def main():
                         end = min(length, start + approx_chunk_len)
                         chunk_text = text[start:end]
                         sections.append(
-                            FilingSection(
-                                filing_uuid=str(rec["filing_uuid"]),
-                                section_id=f"{rec['section_id']}-chunk-{start}-{end}",
-                                text=chunk_text,
-                                filing_year=rec["filing_year"],
-                            )
+                            {
+                                "filing_uuid": str(rec["filing_uuid"]),
+                                "section_id": f"{rec['section_id']}-chunk-{start}-{end}",
+                                "issue_text": chunk_text,
+                                "filing_year": rec["filing_year"],
+                            }
                         )
                         start = end
 
@@ -242,13 +242,13 @@ async def main():
                     """
                 )
 
-        sections: list[FilingSection] = [
-            FilingSection(
-                filing_uuid=str(r["filing_uuid"]),
-                section_id=str(r["section_id"]),
-                text=r["text"] or "",
-                filing_year=r["filing_year"],
-            )
+        sections: list[dict] = [
+            {
+                "filing_uuid": str(r["filing_uuid"]),
+                "section_id": str(r["section_id"]),
+                "issue_text": (r["text"] or ""),
+                "filing_year": r["filing_year"],
+            }
             for r in rows
             if r["text"] and len(r["text"]) > 3
         ]
