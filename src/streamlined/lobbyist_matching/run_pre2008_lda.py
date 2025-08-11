@@ -257,7 +257,7 @@ async def main():
             logger.error("No sections found matching criteria")
             return
 
-        total_filings = len({s.filing_uuid for s in sections})
+        total_filings = len({s["filing_uuid"] for s in sections})
 
         run_id = await initialize_run(
             db.pool,
