@@ -19,14 +19,20 @@ from dotenv import load_dotenv
 try:
     from streamlined.lobbyist_matching.batch_processor import BatchProcessor
     from streamlined.lobbyist_matching.db_utils import DatabaseInterface, FilingSection
-    from streamlined.lobbyist_matching.main import process_filings
+    from streamlined.lobbyist_matching.main import ensure_schema_exists
+    from streamlined.lobbyist_matching.matcher import MatchingManager
+    from streamlined.lobbyist_matching.post_processor import post_process_all
+    from streamlined.lobbyist_matching.schema_setup import initialize_run
     from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
 except ImportError:
     # When run directly, add the parent directory to path
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from streamlined.lobbyist_matching.batch_processor import BatchProcessor
     from streamlined.lobbyist_matching.db_utils import DatabaseInterface, FilingSection
-    from streamlined.lobbyist_matching.main import process_filings
+    from streamlined.lobbyist_matching.main import ensure_schema_exists
+    from streamlined.lobbyist_matching.matcher import MatchingManager
+    from streamlined.lobbyist_matching.post_processor import post_process_all
+    from streamlined.lobbyist_matching.schema_setup import initialize_run
     from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
 
 logging.basicConfig(level=logging.INFO)
@@ -195,18 +201,112 @@ async def main():
         logger.info(f"Max concurrent batches: {args.max_batches}")
         logger.info(f"Workers per batch: {args.workers_per_batch}")
 
-        # Run the processing
-        run_id = await process_filings(
-            db_config=db_config,
-            table_config=table_config,
-            sample_size=args.sample_size,
+        # Custom pre-2008 pipeline (process_filings doesn't accept table_config)
+        db = await DatabaseInterface.create_pool(
+            min_size=2,
+            max_size=10,
+            **db_config,
+        )
+
+        await ensure_schema_exists(db.pool)
+
+        # Fetch sections from pre-2008 table
+        async with db.pool.acquire() as conn:
+            if args.sample_size:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT cts.filing_uuid,
+                           cts.section_id,
+                           cts.issue_text AS text,
+                           f.filing_year
+                    FROM raw___lda_pre2008.cleaned_text_sections cts
+                    JOIN relational___lda.filings f
+                      ON cts.filing_uuid = f.filing_uuid
+                    WHERE {table_config["additional_where"]}
+                    ORDER BY random()
+                    LIMIT $1
+                    """,
+                    args.sample_size,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT cts.filing_uuid,
+                           cts.section_id,
+                           cts.issue_text AS text,
+                           f.filing_year
+                    FROM raw___lda_pre2008.cleaned_text_sections cts
+                    JOIN relational___lda.filings f
+                      ON cts.filing_uuid = f.filing_uuid
+                    WHERE {table_config["additional_where"]}
+                    """
+                )
+
+        sections: list[FilingSection] = [
+            FilingSection(
+                filing_uuid=str(r["filing_uuid"]),
+                section_id=str(r["section_id"]),
+                text=r["text"] or "",
+                filing_year=r["filing_year"],
+            )
+            for r in rows
+            if r["text"] and len(r["text"]) > 3
+        ]
+
+        if not sections:
+            logger.error("No sections found matching criteria")
+            return
+
+        total_filings = len({s.filing_uuid for s in sections})
+
+        run_id = await initialize_run(
+            db.pool,
+            total_filings=total_filings,
+            total_sections=len(sections),
+            parameters={
+                "description": args.description,
+                "batch_size": args.batch_size,
+                "max_concurrent_batches": args.max_batches,
+                "max_workers_per_batch": args.workers_per_batch
+                or (mp.cpu_count() // 4),
+                "min_sections_per_filing": args.min_sections,
+                "sample_size": args.sample_size,
+                "source": "pre2008",
+                "version": "2.0",
+            },
+        )
+
+        timeout_tracker = TimeoutTracker(db.pool)
+        await timeout_tracker.initialize_tracking(run_id)
+
+        processor = BatchProcessor(
+            db=db,
             batch_size=args.batch_size,
             max_concurrent_batches=args.max_batches,
-            max_workers_per_batch=args.workers_per_batch,
-            min_sections_per_filing=args.min_sections,
-            description=args.description,
-            # No year_range needed since pre-2008 data is already filtered
+            max_workers_per_batch=args.workers_per_batch or (mp.cpu_count() // 4),
+            timeout_tracker=timeout_tracker,
         )
+        await processor.process_all_sections(run_id, sections)
+
+        # Matching and post-processing
+        matching_manager = MatchingManager()
+        await matching_manager.initialize(db.pool)
+        await matching_manager.match_references(db.pool, run_id)
+        await post_process_all(db.pool, run_id)
+
+        # Mark run complete
+        async with db.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE lobbied_bill_matching.processing_runs
+                SET status = 'completed',
+                    end_time = CURRENT_TIMESTAMP
+                WHERE run_id = $1
+                """,
+                run_id,
+            )
+
+        await db.close()
 
         logger.info("\n✅ Processing completed successfully!")
         logger.info(f"📊 Run ID: {run_id}")
