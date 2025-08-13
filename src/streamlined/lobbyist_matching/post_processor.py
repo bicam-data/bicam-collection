@@ -46,7 +46,7 @@ async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
                     r.section_id
                 FROM lobbied_bill_matching.extracted_references r
                 LEFT JOIN lobbied_bill_matching.reference_matches m 
-                    ON r.reference_id = m.reference_id
+                    ON r.reference_id = m.reference_id AND m.run_id = $1
                 WHERE r.run_id = $1
                 AND (m.match_type = 'unmatched' OR m.match_id IS NULL)
                 AND r.bill_id IS NOT NULL
@@ -257,6 +257,7 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
                 JOIN lobbied_bill_matching.reference_matches m 
                     ON r.reference_id = m.reference_id
                 WHERE r.run_id = $1
+                AND m.run_id = $1
                 AND m.match_type = 'wrong_title'
             """,
                 run_id,
@@ -421,6 +422,7 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                             JOIN lobbied_bill_matching.extracted_references e 
                                 ON m.reference_id = e.reference_id
                             WHERE e.run_id = $1
+                            AND m.run_id = $1
                             AND m.bill_id IS NOT NULL
                             AND ($2::text IS NULL OR m.bill_id > $2)
                             ORDER BY bill_id
@@ -455,6 +457,7 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                                     JOIN lobbied_bill_matching.extracted_references e 
                                         ON m.reference_id = e.reference_id
                                     WHERE e.run_id = $1
+                                    AND m.run_id = $1
                                     AND m.bill_id = $2
                                 )
                                 UPDATE lobbied_bill_matching.reference_matches
@@ -555,6 +558,7 @@ async def post_process_low_confidence(pool: asyncpg.Pool, run_id: int) -> None:
                 JOIN lobbied_bill_matching.reference_matches m 
                     ON r.reference_id = m.reference_id
                 WHERE r.run_id = $1
+                AND m.run_id = $1
                 AND m.match_type = 'high_confidence_match'
                 AND m.confidence_score < 0.6
                 AND m.update_source IS NULL

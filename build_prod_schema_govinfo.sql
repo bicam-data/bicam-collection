@@ -182,12 +182,15 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_reference_bills(
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports(
     package_id TEXT PRIMARY KEY,
     report_id TEXT,
+    granule_id TEXT,
+    parent_report_id TEXT,
     title TEXT,
     subtitle TEXT,
     chamber TEXT, -- lower
     congress INTEGER,
     session INTEGER,
     pages INTEGER,
+    is_errata BOOLEAN,
     issued_at DATE,
     branch TEXT,
     government_author1 TEXT,
@@ -209,14 +212,16 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_ils_system_id(
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_serialset(
     package_id TEXT PRIMARY KEY,
+    report_id TEXT,
     bag_id TEXT,
     doc_id TEXT,
     serialset_number TEXT,
     agency TEXT,
-    volume TEXT
+    volume TEXT,
     oclc_number TEXT,
     lccn_number TEXT,
     issn_number TEXT,
+    last_modified TIMESTAMP WITH TIME ZONE
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_serialset_topics(
@@ -226,25 +231,29 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_serialset_topics(
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_granules(
-    granule_id TEXT,
-    package_id TEXT,
-    PRIMARY KEY (granule_id, package_id)
+    granule_report_id TEXT,
+    report_id TEXT,
+    PRIMARY KEY (granule_report_id, report_id)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_committees(
-    granule_id TEXT,
     package_id TEXT,
+    granule_id TEXT,
+    report_id TEXT,
     committee_code TEXT,
     committee_name TEXT,
-    UNIQUE (package_id, granule_id, committee_code, committee_name, chamber)
+    UNIQUE (package_id, granule_id, report_id, committee_code, committee_name)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_members(
-    granule_id TEXT,
     package_id TEXT,
+    granule_id TEXT,
+    report_id TEXT,
     bioguide_id TEXT,
-    UNIQUE (package_id, granule_id, bioguide_id)
-
+    membername TEXT,
+    authorityid TEXT,
+    gpoid TEXT,
+    UNIQUE (package_id, granule_id, bioguide_id, membername)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_reference_bills(
@@ -262,7 +271,7 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_reference_laws(
     law_number INTEGER,
     order_number INTEGER,
     congress INTEGER,
-    UNIQUE (package_id, granule_id, law_id)
+    UNIQUE (package_id, law_id)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_reference_codes(

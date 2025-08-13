@@ -35,7 +35,7 @@ class HearingPackagesCleaner:
     Hearing Packages cleaner logic extracted from HearingPackagesCleaner class.
     Contains all the custom cleaning methods for hearing packages data.
     """
-    
+
     #TODO: for now, skip GOVPUB, but then go back manually for jacketnumbers?
     #TODO: agencies are valid
     #TODO: clean committee codes, and fill in empty committees (using fuzzy name matching with other values in the column)
@@ -157,60 +157,109 @@ class HearingPackagesCleaner:
                 logger.error(f"Error streaming bills_texts with formats: {e}")
                 raise
 
-    async def _clean_bills_singular(
+    async def _clean_hearingpackages_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """
         Custom cleaning logic for individual bills records.
+        STAGING COLUMNS:
+        pages                                text,
+        title                                text,
+        branch                               text,
+        chamber                              text,
+        session                              text,
+        category                             text,
+        congress                             text,
+        docclass                             text,
+        download_ziplink                     text,
+        download_modslink                    text,
+        download_premislink                  text,
+        packageid                            text,
+        publisher                            text,
+        dateissued                           text,
+        detailslink                          text,
+        relatedlink                          text,
+        documenttype                         text,
+        granuleslink                         text,
+        lastmodified                         text,
+        collectioncode                       text,
+        collectionname                       text,
+        otheridentifier_migrated_doc_id      text,
+        sudocclassnumber                     text,
+        governmentauthor1                    text,
+        governmentauthor2                    text,
+        package_id                           text,
+        processed_at                         text,
+        source_doc_id                        text,
+        otheridentifier_ils_system_id        text,
+        documentnumber                       text,
+        download_pdflink                     text,
+        subtitle                             text,
+        otheridentifier_parent_ils_system_id text,
+        fields_name                          text,
+        fields_value                         text,
+        subjects_topics                      text,
+        committees                           text,
+        otheridentifier_oclc                 text,
+        otheridentifier_purl                 text,
+        otheridentifier_sudoc_item_number    text,
+        seriestitle                          text,
+        otheridentifier_isbn                 text,
+        fields                               text,
+        download_thumbnailjpeg               text,
+        federalpublicationname               text,
+        download_txtlink                     text,
+        _references                          text
+        FINAL COLUMNS:
+        package_id TEXT PRIMARY KEY,
+        hearing_id TEXT,
+        title TEXT,
+        chamber TEXT, -- lower
+        congress INTEGER,
+        session INTEGER,
+        pages INTEGER,
+        is_appropriation BOOLEAN,
+        issued_at DATE,
+        branch TEXT,
+        government_author1 TEXT,
+        government_author2 TEXT,
+        publisher TEXT,
+        collection_code TEXT,
+        migrated_doc_id TEXT,
+        su_doc_class_number TEXT,
+        last_modified TIMESTAMP WITH TIME ZONE
         """
         cleaned = record_data.copy()
+        # only get hearings that are not GOVPUB
+        cleaned = {k: v for k, v in cleaned.items() if v["collectioncode"] != "GOVPUB"}
 
         # Apply bills-specific cleaning logic
         filtered_cleaned = {
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "bill_type": str(cleaned.get("type", None).lower()),
-            "bill_number": float(cleaned.get("number", None)),
+            "hearing_id": str(cleaned.get("id", "ID_ERROR")),
+            "hearing_type": str(cleaned.get("type", None).lower()),
+            "hearing_number": float(cleaned.get("number", None)),
             "congress": self.safe_int(cleaned.get("congress", None)),
             "title": str(cleaned.get("title", None)),
-            "origin_chamber": str(
-                self.standardize_chamber(cleaned.get("originchamber", None))
+            "chamber": str(
+                self.standardize_chamber(cleaned.get("chamber", None))
             ),
-            "policy_area": str(cleaned.get("policyarea_name", None)),
-            "is_law": None,  # added via postprocessing
-            "introduced_at": self.standardize_date(cleaned.get("introduceddate", None)),
-            "constitutional_authority_statement": self.clean_long_text(
-                cleaned.get("constitutionalauthoritystatementtext", None)
-            ),
-            "actions_count": self.safe_int(cleaned.get("actions_count", 0), 0),
-            "amendments_count": self.safe_int(cleaned.get("amendments_count", 0), 0),
-            "committees_count": self.safe_int(cleaned.get("committees_count", 0), 0),
-            "cosponsors_count": self.safe_int(cleaned.get("cosponsors_count", 0), 0),
-            "cosponsors_withdrawn_count": (
-                self.safe_int(
-                    cleaned.get("cosponsors_countincludingwithdrawncosponsors", 0), 0
-                )
-                - self.safe_int(cleaned.get("cosponsors_count", 0), 0)
-            ),
-            "relatedbills_count": self.safe_int(
-                cleaned.get("relatedbills_count", 0), 0
-            ),
-            "subjects_count": self.safe_int(cleaned.get("subjects_count", 0), 0),
-            "summaries_count": self.safe_int(cleaned.get("summaries_count", 0), 0),
-            "texts_count": self.safe_int(cleaned.get("textversions_count", 0), 0),
-            "titles_count": self.safe_int(cleaned.get("titles_count", 0), 0),
-            "updated_at": self.standardize_date(cleaned.get("updatedate", None)),
+            "session": self.safe_int(cleaned.get("session", None)),
+            "pages": self.safe_int(cleaned.get("pages", None)),
+            "is_appropriation": bool(cleaned.get("isappropriation", None)),
+            "issued_at": self.standardize_date(cleaned.get("issuedate", None)),
+            "branch": str(cleaned.get("branch", None)),
+            "government_author1": str(cleaned.get("governmentauthor1", None)),
+            "government_author2": str(cleaned.get("governmentauthor2", None)),
+            "publisher": str(cleaned.get("publisher", None)),
+            "collection_code": str(cleaned.get("collectioncode", None)),
+            "migrated_doc_id": str(cleaned.get("otheridentifier_migrated_doc_id", None)),
+            "su_doc_class_number": str(cleaned.get("sudocclassnumber", None)),
+            "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
         }
-
-        # Validate bill_id format
-        if not re.match(
-            r"^(hr|hres|sres|s|hjres|hconres|sjres|sconres)\d{1,4}(\.5)?-\d{1,3}$",
-            filtered_cleaned["bill_id"],
-        ):
-            raise ValueError(f"Invalid bill_id format: {filtered_cleaned['bill_id']}")
 
         return filtered_cleaned
 
-    async def _clean_bills_actions_singular(
+    async def _clean_hearingpackages_actions_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Custom cleaning logic for bills actions records."""
@@ -234,7 +283,7 @@ class HearingPackagesCleaner:
         return filtered_cleaned
 
     # Add other cleaning methods for bills sub-tables
-    async def _clean_bills_cosponsors_singular(
+    async def _clean_hearingpackages_cosponsors_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Custom cleaning logic for bills cosponsors records."""
@@ -259,7 +308,7 @@ class HearingPackagesCleaner:
         return filtered_cleaned
 
     # Add post-processing methods
-    async def _post_process_bills(self) -> dict[str, Any]:
+    async def _post_process_hearingpackages(self) -> dict[str, Any]:
         """Post-processing operations specific to bills data."""
         if not self.db_pool:
             raise ValueError("Database pool not configured")
