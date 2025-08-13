@@ -417,9 +417,9 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                     query = """
                         WITH ranked_bills AS (
                             SELECT DISTINCT m.bill_id,
-                                   ROW_NUMBER() OVER (ORDER BY m.bill_id) as rn
+                                    ROW_NUMBER() OVER (ORDER BY m.bill_id) as rn
                             FROM lobbied_bill_matching.reference_matches m
-                            JOIN lobbied_bill_matching.extracted_references e 
+                            JOIN lobbied_bill_matching.extracted_references e
                                 ON m.reference_id = e.reference_id
                             WHERE e.run_id = $1
                             AND m.run_id = $1
@@ -450,11 +450,11 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                                     SELECT 
                                         m.match_id,
                                         ROW_NUMBER() OVER (
-                                            PARTITION BY m.bill_id, e.section_id 
+                                            PARTITION BY m.bill_id, e.section_id
                                             ORDER BY m.confidence_score DESC, m.match_id
                                         ) as rn
                                     FROM lobbied_bill_matching.reference_matches m
-                                    JOIN lobbied_bill_matching.extracted_references e 
+                                    JOIN lobbied_bill_matching.extracted_references e
                                         ON m.reference_id = e.reference_id
                                     WHERE e.run_id = $1
                                     AND m.run_id = $1
@@ -463,8 +463,8 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                                 UPDATE lobbied_bill_matching.reference_matches
                                 SET match_type = 'DUPLICATE'
                                 WHERE match_id IN (
-                                    SELECT match_id 
-                                    FROM ranked_matches 
+                                    SELECT match_id
+                                    FROM ranked_matches
                                     WHERE rn > 1
                                 )
                             """,

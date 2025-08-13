@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # Handle imports for both direct execution and module execution
 try:
     from streamlined.lobbyist_matching.batch_processor import BatchProcessor
-    from streamlined.lobbyist_matching.db_utils import DatabaseInterface, FilingSection
+    from streamlined.lobbyist_matching.db_utils import DatabaseInterface
     from streamlined.lobbyist_matching.main import ensure_schema_exists
     from streamlined.lobbyist_matching.matcher import MatchingManager
     from streamlined.lobbyist_matching.post_processor import post_process_all
@@ -28,7 +28,7 @@ except ImportError:
     # When run directly, add the parent directory to path
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from streamlined.lobbyist_matching.batch_processor import BatchProcessor
-    from streamlined.lobbyist_matching.db_utils import DatabaseInterface, FilingSection
+    from streamlined.lobbyist_matching.db_utils import DatabaseInterface
     from streamlined.lobbyist_matching.main import ensure_schema_exists
     from streamlined.lobbyist_matching.matcher import MatchingManager
     from streamlined.lobbyist_matching.post_processor import post_process_all
@@ -287,6 +287,56 @@ async def main():
             timeout_tracker=timeout_tracker,
         )
         await processor.process_all_sections(run_id, sections)
+
+        # Automatically rerun timed-out sections with chunking before matching
+        async with db.pool.acquire() as conn:
+            timeout_recs = await conn.fetch(
+                """
+                WITH timeouts AS (
+                    SELECT DISTINCT filing_uuid, section_id
+                    FROM lobbied_bill_matching.timeout_sections
+                    WHERE run_id = $1
+                )
+                SELECT fs.filing_uuid, fs.section_id, fst.issue_text AS text, f.filing_year
+                FROM timeouts t
+                JOIN relational___lda.filing_sections fs
+                  ON fs.filing_uuid = t.filing_uuid AND fs.section_id = t.section_id
+                JOIN relational___lda.filing_sections_text fst
+                  ON fs.section_id = fst.section_id
+                JOIN relational___lda.filings f
+                  ON fs.filing_uuid = f.filing_uuid
+                ORDER BY fs.section_id
+                """,
+                run_id,
+            )
+
+        chunked_sections: list[dict] = []
+        for rec in timeout_recs:
+            if not rec["text"]:
+                continue
+            text = rec["text"]
+            length = max(1, len(text))
+            approx_chunk_len = max(1000, length // max(1, args.timeout_chunk_size))
+            start = 0
+            while start < length:
+                end = min(length, start + approx_chunk_len)
+                chunk_text = text[start:end]
+                chunked_sections.append(
+                    {
+                        "filing_uuid": str(rec["filing_uuid"]),
+                        "section_id": f"{rec['section_id']}-chunk-{start}-{end}",
+                        "issue_text": chunk_text,
+                        "filing_year": rec["filing_year"],
+                    }
+                )
+                start = end
+
+        if chunked_sections:
+            logger.info(
+                f"Reprocessing {len(chunked_sections)} chunked sections from timed-out sections for run ID: {run_id}"
+            )
+            await timeout_tracker.initialize_tracking(run_id)
+            await processor.process_all_sections(run_id, chunked_sections)
 
         # Matching and post-processing
         matching_manager = MatchingManager()
