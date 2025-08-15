@@ -91,6 +91,16 @@ async def main():
         default=5,
         help="Number of text chunks per section when rerunning timeouts",
     )
+    parser.add_argument(
+        "--reprocess-timeouts-only",
+        type=int,
+        help="Run ID whose timed-out sections should be reprocessed (skips initial processing)",
+    )
+    parser.add_argument(
+        "--run-matching-after-timeouts",
+        action="store_true",
+        help="Run matching and post-processing after timeout reprocessing (only used with --reprocess-timeouts-only)",
+    )
 
     args = parser.parse_args()
 
@@ -121,6 +131,102 @@ async def main():
     }
 
     try:
+        if args.reprocess_timeouts_only is not None:
+            # Reprocess timed-out sections only (skips initial processing)
+            run_id = args.reprocess_timeouts_only
+            chunk_size = args.timeout_chunk_size
+
+            logger.info(f"Reprocessing timed-out sections only for run ID: {run_id}")
+            db = await DatabaseInterface.create_pool(**db_config)
+
+            # Fetch timed-out sections for the given run
+            async with db.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT DISTINCT filing_uuid, section_id
+                    FROM lobbied_bill_matching.timeout_sections
+                    WHERE run_id = $1
+                    ORDER BY section_id
+                    """,
+                    run_id,
+                )
+
+            if not rows:
+                logger.info("No timed-out sections found to reprocess.")
+                return
+
+            logger.info(f"Found {len(rows)} timed-out sections to reprocess")
+
+            sections: list[dict] = []
+            for row in rows:
+                # Fetch the text for each section from the correct table
+                async with db.pool.acquire() as conn:
+                    rec = await conn.fetchrow(
+                        """
+                        SELECT cts.filing_uuid, cts.section_id, cts.issue_text AS text, f.filing_year
+                        FROM raw___lda_pre2008.cleaned_text_sections cts
+                        JOIN relational___lda.filings f ON cts.filing_uuid = f.filing_uuid
+                        WHERE cts.filing_uuid = $1 AND cts.section_id = $2
+                        AND cts.issue_text IS NOT NULL AND length(cts.issue_text) > 3
+                        """,
+                        row["filing_uuid"],
+                        row["section_id"],
+                    )
+                if rec and rec["text"]:
+                    text = rec["text"]
+                    length = max(1, len(text))
+                    approx_chunk_len = max(1000, length // max(1, chunk_size))
+                    start = 0
+                    while start < length:
+                        end = min(length, start + approx_chunk_len)
+                        chunk_text = text[start:end]
+                        sections.append(
+                            {
+                                "filing_uuid": str(rec["filing_uuid"]),
+                                "section_id": f"{rec['section_id']}-chunk-{start}-{end}",
+                                "issue_text": chunk_text,
+                                "filing_year": rec["filing_year"],
+                            }
+                        )
+                        start = end
+
+            if not sections:
+                logger.info("No valid text found in timed-out sections to reprocess.")
+                return
+
+            logger.info(f"Created {len(sections)} chunked sections for reprocessing")
+
+            timeout_tracker = TimeoutTracker(db.pool)
+            await timeout_tracker.initialize_tracking(run_id)
+            processor = BatchProcessor(
+                db=db,
+                batch_size=50,
+                max_concurrent_batches=2,
+                max_workers_per_batch=max(2, mp.cpu_count() // 4),
+                timeout_tracker=timeout_tracker,
+            )
+            await processor.process_all_sections(run_id, sections)
+            logger.info(
+                f"Reprocessed {len(sections)} chunks from timed-out sections for run ID: {run_id}"
+            )
+
+            # Optionally run matching and post-processing
+            if args.run_matching_after_timeouts:
+                logger.info(
+                    "Running matching and post-processing after timeout reprocessing..."
+                )
+
+                # Matching and post-processing
+                matching_manager = MatchingManager()
+                await matching_manager.initialize(db.pool)
+                await matching_manager.match_references(db.pool, run_id)
+                await post_process_all(db.pool, run_id)
+
+                logger.info("Matching and post-processing completed!")
+
+            await db.close()
+            return
+
         if args.rerun_timeouts is not None:
             # Rerun timed-out sections in chunks
             run_id = args.rerun_timeouts
@@ -289,54 +395,78 @@ async def main():
         await processor.process_all_sections(run_id, sections)
 
         # Automatically rerun timed-out sections with chunking before matching
+        logger.info("Checking for timed-out sections to reprocess...")
         async with db.pool.acquire() as conn:
-            timeout_recs = await conn.fetch(
+            # First check how many timeouts we have
+            timeout_count = await conn.fetchval(
                 """
-                WITH timeouts AS (
-                    SELECT DISTINCT filing_uuid, section_id
-                    FROM lobbied_bill_matching.timeout_sections
-                    WHERE run_id = $1
-                )
-                SELECT fs.filing_uuid, fs.section_id, fst.issue_text AS text, f.filing_year
-                FROM timeouts t
-                JOIN relational___lda.filing_sections fs
-                  ON fs.filing_uuid = t.filing_uuid AND fs.section_id = t.section_id
-                JOIN relational___lda.filing_sections_text fst
-                  ON fs.section_id = fst.section_id
-                JOIN relational___lda.filings f
-                  ON fs.filing_uuid = f.filing_uuid
-                ORDER BY fs.section_id
+                SELECT COUNT(DISTINCT filing_uuid, section_id)
+                FROM lobbied_bill_matching.timeout_sections
+                WHERE run_id = $1
                 """,
                 run_id,
             )
 
-        chunked_sections: list[dict] = []
-        for rec in timeout_recs:
-            if not rec["text"]:
-                continue
-            text = rec["text"]
-            length = max(1, len(text))
-            approx_chunk_len = max(1000, length // max(1, args.timeout_chunk_size))
-            start = 0
-            while start < length:
-                end = min(length, start + approx_chunk_len)
-                chunk_text = text[start:end]
-                chunked_sections.append(
-                    {
-                        "filing_uuid": str(rec["filing_uuid"]),
-                        "section_id": f"{rec['section_id']}-chunk-{start}-{end}",
-                        "issue_text": chunk_text,
-                        "filing_year": rec["filing_year"],
-                    }
+            if timeout_count == 0:
+                logger.info("No timed-out sections found. Skipping reprocessing.")
+            else:
+                logger.info(
+                    f"Found {timeout_count} timed-out sections. Starting reprocessing..."
                 )
-                start = end
 
-        if chunked_sections:
-            logger.info(
-                f"Reprocessing {len(chunked_sections)} chunked sections from timed-out sections for run ID: {run_id}"
-            )
-            await timeout_tracker.initialize_tracking(run_id)
-            await processor.process_all_sections(run_id, chunked_sections)
+                timeout_recs = await conn.fetch(
+                    """
+                    WITH timeouts AS (
+                        SELECT DISTINCT filing_uuid, section_id
+                        FROM lobbied_bill_matching.timeout_sections
+                        WHERE run_id = $1
+                    )
+                    SELECT cts.filing_uuid, cts.section_id, cts.issue_text AS text, f.filing_year
+                    FROM timeouts t
+                    JOIN raw___lda_pre2008.cleaned_text_sections cts
+                      ON cts.filing_uuid = t.filing_uuid AND cts.section_id = t.section_id
+                    JOIN relational___lda.filings f
+                      ON cts.filing_uuid = f.filing_uuid
+                    WHERE cts.issue_text IS NOT NULL AND length(cts.issue_text) > 3
+                    ORDER BY cts.section_id
+                    """,
+                    run_id,
+                )
+
+        chunked_sections: list[dict] = []
+        if timeout_count > 0:
+            for rec in timeout_recs:
+                if not rec["text"]:
+                    continue
+                text = rec["text"]
+                length = max(1, len(text))
+                approx_chunk_len = max(1000, length // max(1, args.timeout_chunk_size))
+                start = 0
+                while start < length:
+                    end = min(length, start + approx_chunk_len)
+                    chunk_text = text[start:end]
+                    chunked_sections.append(
+                        {
+                            "filing_uuid": str(rec["filing_uuid"]),
+                            "section_id": f"{rec['section_id']}-chunk-{start}-{end}",
+                            "issue_text": chunk_text,
+                            "filing_year": rec["filing_year"],
+                        }
+                    )
+                    start = end
+
+            if chunked_sections:
+                logger.info(
+                    f"Reprocessing {len(chunked_sections)} chunked sections from timed-out sections for run ID: {run_id}"
+                )
+                await timeout_tracker.initialize_tracking(run_id)
+                await processor.process_all_sections(run_id, chunked_sections)
+            else:
+                logger.info(
+                    "No valid text found in timed-out sections for reprocessing."
+                )
+        else:
+            logger.info("No timed-out sections to reprocess.")
 
         # Matching and post-processing
         matching_manager = MatchingManager()
