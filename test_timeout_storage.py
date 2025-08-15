@@ -11,6 +11,7 @@ This script tests the timeout storage functionality by:
 import asyncio
 import os
 import sys
+import time
 from dotenv import load_dotenv
 
 # Add the src directory to the path
@@ -23,6 +24,17 @@ from streamlined.lobbyist_matching.section_processor import (
 from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
 from streamlined.lobbyist_matching.db_utils import FilingSection
 from streamlined.lobbyist_matching.schema_setup import initialize_run
+
+
+def create_timeout_text():
+    """Create text that will definitely cause a regex timeout."""
+    # Create a string that will cause catastrophic backtracking
+    # This pattern will cause exponential time complexity
+    base = "a" * 1000
+    # Add a pattern that will cause regex engine to struggle
+    problematic = base + "b" * 1000 + "c" * 1000
+    # Repeat to make it even worse
+    return problematic * 10
 
 
 async def test_timeout_storage():
@@ -58,27 +70,29 @@ async def test_timeout_storage():
         timeout_tracker = TimeoutTracker(pool)
         await timeout_tracker.initialize_tracking(run_id)
 
-        # Create a test section with very long text that might timeout
+        # Create a test section with text that will cause regex timeout
         test_section = FilingSection(
             filing_uuid="test-uuid-123",
             section_id="test-section-456",
-            text="A" * 1000000,  # Very long text that might cause timeout
+            text=create_timeout_text(),
             filing_year=2020,
         )
 
         print("Processing test section with timeout tracking...")
+        print(f"Text length: {len(test_section.text)} characters")
 
         # Process the section with a very short timeout to force a timeout
+        start_time = time.time()
         results, unmatched = process_single_section_with_timeout(
             test_section,
-            timeout=1,  # Very short timeout to force timeout
+            timeout=2,  # 2 second timeout
             timeout_tracker=timeout_tracker,
             run_id=run_id,
         )
+        processing_time = time.time() - start_time
 
-        print(
-            f"Processing complete. Results: {len(results)}, Unmatched: {len(unmatched)}"
-        )
+        print(f"Processing complete in {processing_time:.2f}s")
+        print(f"Results: {len(results)}, Unmatched: {len(unmatched)}")
 
         # Store any collected timeouts
         await timeout_tracker.store_all_timeouts(run_id)
@@ -118,15 +132,18 @@ async def test_timeout_storage():
                 print("   - The section processed successfully without timing out")
                 print("   - The timeout storage mechanism is not working")
                 print("   - The timeout duration was too long")
+                print(f"   - Processing took {processing_time:.2f}s (timeout was 2s)")
 
-        # Clean up test run
-        await conn.execute(
-            """
-            DELETE FROM lobbied_bill_matching.timeout_sections WHERE run_id = $1;
-            DELETE FROM lobbied_bill_matching.processing_runs WHERE run_id = $1;
-            """,
-            run_id,
-        )
+        # Clean up test run - fix the connection issue
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM lobbied_bill_matching.timeout_sections WHERE run_id = $1",
+                run_id,
+            )
+            await conn.execute(
+                "DELETE FROM lobbied_bill_matching.processing_runs WHERE run_id = $1",
+                run_id,
+            )
 
         print("Test run cleaned up.")
 
