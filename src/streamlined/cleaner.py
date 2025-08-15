@@ -391,7 +391,7 @@ class StreamlinedCleaner:
             stats["success"] = True
 
         except Exception as e:
-            logger.error(f"Error processing table {table}: {e}")
+            logger.error(f"Error processing table {table}: {e}", exc_info=True)
             stats["error"] = str(e)
 
             # Log error in checkpoint system

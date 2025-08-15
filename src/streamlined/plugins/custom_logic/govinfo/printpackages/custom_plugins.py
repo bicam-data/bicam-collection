@@ -73,6 +73,28 @@ class PrintPackagesCleaner(BaseCleanerLogic):
     # Shared helpers
     # =========================
 
+    def _detect_is_errata(self, cleaned: dict[str, Any]) -> bool:
+        """Best-effort detection of errata records from available fields.
+
+        Heuristics:
+        - Package-level: package id contains "err"
+        - Granule-level: heading equals "Errata"
+        """
+        try:
+            package_id_val = str(
+                cleaned.get("packageid") or cleaned.get("package_id") or ""
+            )
+            if "err" in package_id_val.lower():
+                return True
+
+            heading_val = cleaned.get("heading")
+            if heading_val is not None:
+                if str(heading_val).strip().lower() == "errata":
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _build_print_identity(
         self, cleaned: dict[str, Any]
     ) -> tuple[str, str | None, str | None, int, str, str, str]:
@@ -140,7 +162,10 @@ class PrintPackagesCleaner(BaseCleanerLogic):
             part_number = self.parse_part_from_fields(cleaned) or part_number
             parent_print_id = None
 
-        print_id = f"{print_type}{print_number}-{part_number}-{congress}"
+        # Append errata suffix to part for adjacency (e.g., 2 < 2e < 3)
+        is_errata = self._detect_is_errata(cleaned)
+        part_token = f"{part_number}{'e' if is_errata else ''}"
+        print_id = f"{print_type}{print_number}-{part_token}-{congress}"
         granule_id = str(granuleid) if granuleid else None
 
         return (
@@ -264,7 +289,8 @@ class PrintPackagesCleaner(BaseCleanerLogic):
                         p.documenttype,
                         p.documentnumber,
                         p.congress,
-                        p.documentpart AS partnumber
+                        p.documentpart AS partnumber,
+                        NULL::text AS heading
                     FROM {self.staging_schema}.printpackages_committees AS pc
                     JOIN {self.staging_schema}.printpackages AS p ON pc.packageid = p.packageid
                     GROUP BY pc.packageid, pc.committee_code, pc.committee_name, p.documenttype, p.documentnumber, p.congress, p.documentpart
@@ -279,11 +305,12 @@ class PrintPackagesCleaner(BaseCleanerLogic):
                         p.documenttype,
                         p.documentnumber,
                         p.congress,
-                        pg.partnumber
+                        pg.partnumber,
+                        pg.heading
                     FROM {self.staging_schema}.printpackages_granules_committees AS pgc
                     JOIN {self.staging_schema}.printpackages_granules AS pg ON pgc.granule_id = pg.id
                     JOIN {self.staging_schema}.printpackages AS p ON pg.packageid = p.packageid
-                    GROUP BY pgc.packageid, pgc.granuleid, pgc.committee_code, pgc.committee_name, p.documenttype, p.documentnumber, p.congress, pg.partnumber
+                    GROUP BY pgc.packageid, pgc.granuleid, pgc.committee_code, pgc.committee_name, p.documenttype, p.documentnumber, p.congress, pg.partnumber, pg.heading
 
                     ORDER BY package_id, granuleid, committee_code, committee_name
                     LIMIT {chunk_size} OFFSET {offset}
@@ -524,7 +551,8 @@ class PrintPackagesCleaner(BaseCleanerLogic):
             while True:
                 async with self.db_pool.acquire() as conn, conn.transaction():
                     query = f"""
-                            SELECT pgrc.*, pg.granuleid, pg.partnumber, p.packageid, p.documenttype, p.documentnumber, p.congress, p.documentpart FROM {self.staging_schema}.printpackages_granules_references_contents AS pgrc
+                            SELECT pgrc.*, pg.granuleid, pg.partnumber, pg.heading, p.packageid, p.documenttype, p.documentnumber, p.congress, p.documentpart
+                            FROM {self.staging_schema}.printpackages_granules_references_contents AS pgrc
                             JOIN {self.staging_schema}.printpackages_granules_references AS pgr ON pgr.id = pgrc.references_id
                             JOIN {self.staging_schema}.printpackages_granules AS pg ON pg.id = pgr.granule_id
                             JOIN {self.staging_schema}.printpackages AS p ON pg.packageid = p.packageid

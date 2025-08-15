@@ -82,14 +82,14 @@
     scaling_factor: 50
 
 - name: bills
-  description: Congressional Reports bills data
+  description: Congressional Reports reference bills data
 
   api:
     page_size: 1000
     retry_attempts: 3
 
   schema:
-    table_name: bills
+    table_name: reference_bills
     is_main: false
     create_raw: false
     id_fields: [package_id, bill_id]

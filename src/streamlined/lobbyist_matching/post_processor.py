@@ -314,31 +314,35 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
                         )
                         break
 
-            # Apply updates
+            # Apply updates in bulk
             if updates:
-                for update in updates:
-                    await conn.execute(
-                        """
-                        UPDATE lobbied_bill_matching.reference_matches
-                        SET 
-                            match_type = $1,
-                            matched_congress = $2,
-                            matched_bill_type = $3,
-                            matched_bill_number = $4,
-                            bill_id = $5,
-                            matched_title = $6,
-                            confidence_score = $7
-                        WHERE match_id = $8
-                    """,
-                        update["match_type"],
-                        update["matched_congress"],
-                        update["matched_bill_type"],
-                        update["matched_bill_number"],
-                        update["bill_id"],
-                        update["matched_title"],
-                        update["confidence_score"],
-                        update["match_id"],
-                    )
+                await conn.executemany(
+                    """
+                    UPDATE lobbied_bill_matching.reference_matches
+                    SET 
+                        match_type = $1,
+                        matched_congress = $2,
+                        matched_bill_type = $3,
+                        matched_bill_number = $4,
+                        bill_id = $5,
+                        matched_title = $6,
+                        confidence_score = $7
+                    WHERE match_id = $8
+                """,
+                    [
+                        (
+                            update["match_type"],
+                            update["matched_congress"],
+                            update["matched_bill_type"],
+                            update["matched_bill_number"],
+                            update["bill_id"],
+                            update["matched_title"],
+                            update["confidence_score"],
+                            update["match_id"],
+                        )
+                        for update in updates
+                    ],
+                )
 
             logging.info(f"Updated {len(updates)} wrong_title matches")
 
@@ -354,8 +358,7 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
     Deduplicate matches with same bill_id within sections for a specific run.
 
     For each section, keeps only the highest confidence match for each unique bill_id,
-    marking others as duplicates. Uses a batched approach with dynamic batch sizing
-    to handle large datasets efficiently.
+    marking others as duplicates. Uses a single bulk UPDATE query for efficiency.
 
     Args:
         pool: Database connection pool
@@ -363,11 +366,15 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
     """
     async with pool.acquire() as conn:
         try:
-            # Set very long timeouts for the connection
-            await conn.execute("SET statement_timeout = '12h'")  # 12 hours
-            await conn.execute("SET idle_in_transaction_session_timeout = '12h'")
+            # Set reasonable timeouts for the connection
+            await conn.execute(
+                "SET statement_timeout = '1h'"
+            )  # 1 hour should be enough
+            await conn.execute("SET idle_in_transaction_session_timeout = '1h'")
 
-            logging.info("Checking and creating necessary indexes...")
+            logging.info("Creating necessary indexes for deduplication...")
+
+            # Create critical indexes if they don't exist
             indexes = [
                 (
                     "idx_reference_matches_bill_id_run",
@@ -380,6 +387,15 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                 (
                     "idx_extracted_refs_section_id",
                     "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_extracted_refs_section_id ON lobbied_bill_matching.extracted_references(section_id)",
+                ),
+                # New critical indexes for the deduplication query
+                (
+                    "idx_reference_matches_run_bill_section",
+                    "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reference_matches_run_bill_section ON lobbied_bill_matching.reference_matches(run_id, bill_id, section_id) WHERE bill_id IS NOT NULL",
+                ),
+                (
+                    "idx_extracted_refs_run_reference",
+                    "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_extracted_refs_run_reference ON lobbied_bill_matching.extracted_references(run_id, reference_id)",
                 ),
             ]
 
@@ -404,116 +420,43 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                     logging.warning(f"Error creating index {idx_name}: {str(e)}")
                     continue  # Skip failed index but continue processing
 
-            logging.info("Running deduplication...")
+            logging.info("Running bulk deduplication...")
 
-            # Instead of counting first, use a cursor-based approach with window functions
-            batch_size = 50  # Start with small batch size
-            total_updated = 0
-            last_bill_id = None
-
-            while True:
-                try:
-                    # Get next batch of distinct bill_ids
-                    query = """
-                        WITH ranked_bills AS (
-                            SELECT DISTINCT m.bill_id,
-                                    ROW_NUMBER() OVER (ORDER BY m.bill_id) as rn
-                            FROM lobbied_bill_matching.reference_matches m
-                            JOIN lobbied_bill_matching.extracted_references e
-                                ON m.reference_id = e.reference_id
-                            WHERE e.run_id = $1
-                            AND m.run_id = $1
-                            AND m.bill_id IS NOT NULL
-                            AND ($2::text IS NULL OR m.bill_id > $2)
-                            ORDER BY bill_id
-                            LIMIT $3
-                        )
-                        SELECT bill_id FROM ranked_bills ORDER BY rn
-                    """
-
-                    bills_batch = await conn.fetch(
-                        query, run_id, last_bill_id, batch_size
-                    )
-
-                    if not bills_batch:
-                        break
-
-                    last_bill_id = bills_batch[-1]["bill_id"]
-
-                    # Process each bill_id
-                    for bill_record in bills_batch:
-                        try:
-                            # Update duplicates for this specific bill_id
-                            result = await conn.execute(
-                                """
-                                WITH ranked_matches AS (
-                                    SELECT 
-                                        m.match_id,
-                                        ROW_NUMBER() OVER (
-                                            PARTITION BY m.bill_id, e.section_id
-                                            ORDER BY m.confidence_score DESC, m.match_id
-                                        ) as rn
-                                    FROM lobbied_bill_matching.reference_matches m
-                                    JOIN lobbied_bill_matching.extracted_references e
-                                        ON m.reference_id = e.reference_id
-                                    WHERE e.run_id = $1
-                                    AND m.run_id = $1
-                                    AND m.bill_id = $2
-                                )
-                                UPDATE lobbied_bill_matching.reference_matches
-                                SET match_type = 'DUPLICATE'
-                                WHERE match_id IN (
-                                    SELECT match_id
-                                    FROM ranked_matches
-                                    WHERE rn > 1
-                                )
-                            """,
-                                run_id,
-                                bill_record["bill_id"],
-                            )
-
-                            if result:
-                                rows = int(result.split()[-1])
-                                total_updated += rows
-
-                        except Exception as e:
-                            logging.warning(
-                                f"Error processing bill_id {bill_record['bill_id']}: {str(e)}"
-                            )
-                            continue
-
-                        await asyncio.sleep(0.01)  # Small delay between bills
-
-                    logging.info(
-                        f"Processed batch of {len(bills_batch)} bills, total updates: {total_updated}"
-                    )
-
-                    # Dynamically adjust batch size based on success
-                    if batch_size < 1000:  # Cap maximum batch size
-                        batch_size = min(batch_size * 2, 1000)
-
-                except TimeoutError:
-                    logging.warning(
-                        f"Timeout at bill_id {last_bill_id}, reducing batch size"
-                    )
-                    batch_size = max(
-                        10, batch_size // 2
-                    )  # Reduce batch size but not below 10
-                    await asyncio.sleep(1)  # Wait before retrying
-                    continue
-
-                except Exception as e:
-                    if "deadlock detected" in str(e).lower():
-                        logging.warning(
-                            f"Deadlock detected at bill_id {last_bill_id}, retrying..."
-                        )
-                        await asyncio.sleep(1)
-                        continue
-                    raise
-
-            logging.info(
-                f"Deduplication complete. Marked {total_updated} matches as duplicates"
+            # Single bulk UPDATE query that handles all bill_ids at once
+            result = await conn.execute(
+                """
+                WITH ranked_matches AS (
+                    SELECT 
+                        m.match_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY m.bill_id, e.section_id
+                            ORDER BY m.confidence_score DESC, m.match_id
+                        ) as rn
+                    FROM lobbied_bill_matching.reference_matches m
+                    JOIN lobbied_bill_matching.extracted_references e
+                        ON m.reference_id = e.reference_id
+                    WHERE e.run_id = $1
+                    AND m.run_id = $1
+                    AND m.bill_id IS NOT NULL
+                )
+                UPDATE lobbied_bill_matching.reference_matches
+                SET match_type = 'DUPLICATE'
+                WHERE match_id IN (
+                    SELECT match_id
+                    FROM ranked_matches
+                    WHERE rn > 1
+                )
+                """,
+                run_id,
             )
+
+            if result:
+                rows = int(result.split()[-1])
+                logging.info(
+                    f"Deduplication complete. Marked {rows} matches as duplicates"
+                )
+            else:
+                logging.info("Deduplication complete. No duplicates found")
 
         except Exception as e:
             logging.error(f"Error during deduplication: {str(e)}")
@@ -605,7 +548,7 @@ async def post_process_low_confidence(pool: asyncpg.Pool, run_id: int) -> None:
                         }
                     )
 
-            # Apply updates
+            # Apply updates in bulk
             if updates:
                 await conn.executemany(
                     """

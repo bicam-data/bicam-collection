@@ -70,7 +70,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 "congressionalreports_committees",
                 "congressionalreports_granules_committees",
             ],
-            "congressionalreports_bills": [
+            "congressionalreports_reference_bills": [
                 "congressionalreports_granules_references",
                 "congressionalreports_granules_references_contents",
             ],
@@ -78,7 +78,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 "congressionalreports_granules_members",
                 "congressionalreports_granules_members_name",
             ],
-            "congressionalreports_serialset": ["congressionalreports"],
+            # "congressionalreports_serialset": ["congressionalreports"],
             "congressionalreports": [
                 "congressionalreports",
                 "congressionalreports_granules",
@@ -88,6 +88,28 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
     # =========================
     # Shared helpers
     # =========================
+
+    def _detect_is_errata(self, cleaned: dict[str, Any]) -> bool:
+        """Best-effort detection of errata records from available fields.
+
+        Heuristics:
+        - Package-level: package id contains "err"
+        - Granule-level: heading equals "Errata"
+        """
+        try:
+            package_id_val = str(
+                cleaned.get("packageid") or cleaned.get("package_id") or ""
+            )
+            if "err" in package_id_val.lower():
+                return True
+
+            heading_val = cleaned.get("heading")
+            if heading_val is not None and str(heading_val).strip().lower() == "errata":
+                return True
+        except Exception:
+            # Non-fatal; treat as non-errata if parsing fails
+            pass
+        return False
 
     def _build_report_identity(
         self, cleaned: dict[str, Any]
@@ -120,7 +142,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         if not all([report_type, report_number, congress]):
             # Rare fallback: J6 package-only
-            if granuleid is None and "J6" in (packageid or ""):
+            if "J6" in (packageid or ""):
                 report_type = "hrpt"
                 report_number = "663"
                 congress = "117"
@@ -185,7 +207,19 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             part_number = self.parse_part_from_fields(cleaned) or 1
             parent_report_id = None
 
-        report_id = f"{report_type}{report_number}-{part_number}-{congress}"
+        # Append errata suffix to the part token when applicable so errata sorts
+        # immediately after the main part (e.g., "2" < "2e" < "3").
+        is_errata = self._detect_is_errata(cleaned)
+
+        # Use placeholder 'x' when package shows trailing numeric tokens but no explicit part in fields
+        part_token_base: str
+        if self._should_use_placeholder_part(cleaned, packageid):
+            part_token_base = "x"
+        else:
+            part_token_base = str(part_number)
+
+        part_token = f"{part_token_base}{'e' if is_errata else ''}"
+        report_id = f"{report_type}{report_number}-{part_token}-{congress}"
         granule_id = str(granuleid) if granuleid else None
         return (
             report_id,
@@ -196,6 +230,27 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             report_number,
             congress,
         )
+
+    def _should_use_placeholder_part(
+        self, cleaned: dict[str, Any], packageid: str | None
+    ) -> bool:
+        """Generalized check for when to emit placeholder part 'x'.
+
+        True when there are no explicit part indicators (heading, partnumber/documentpart, volumenumber)
+        and the package id ends with numeric token(s) like "...-4" or "...-4-3".
+        """
+        try:
+            pkg = str(
+                packageid or cleaned.get("packageid") or cleaned.get("package_id") or ""
+            )
+            heading = cleaned.get("heading")
+            partnumber = cleaned.get("partnumber") or cleaned.get("documentpart")
+            volumenumber = cleaned.get("volumenumber")
+            if heading or partnumber or volumenumber:
+                return False
+            return bool(re.search(r"\d+(?:-\d+)?$", pkg))
+        except Exception:
+            return False
 
     def roman_to_int(self, roman: str) -> int | None:
         mapping = {
@@ -277,14 +332,16 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
                 # Get total count for logging
                 package_count_query = f"""
-                SELECT COUNT(DISTINCT c.package_id, c.authorityid)
-                FROM {self.staging_schema}.congressionalreports_committees c
+                SELECT DISTINCT ON (c.package_id, c.authorityid) COUNT(*)
+                FROM {self.staging_schema}.congressionalreports_committees AS c
+                GROUP BY c.package_id, c.authorityid
                 """
                 package_count = await conn.fetchval(package_count_query)
 
                 granule_count_query = f"""
-                SELECT COUNT(DISTINCT c.granule_id, c.authorityid)
+                SELECT DISTINCT ON (gc.granule_id, gc.authorityid) COUNT(*)
                 FROM {self.staging_schema}.congressionalreports_granules_committees gc
+                GROUP BY gc.granule_id, gc.authorityid
                 """
                 granule_count = await conn.fetchval(granule_count_query)
 
@@ -311,7 +368,8 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                         cr.documenttype,
                         cr.documentnumber,
                         cr.congress,
-                        cr.documentpart AS partnumber
+                        cr.documentpart AS partnumber,
+                        NULL::text AS heading
                     FROM {self.staging_schema}.congressionalreports_committees AS crc
                     JOIN {self.staging_schema}.congressionalreports AS cr ON crc.package_id = cr.packageid
                     GROUP BY crc.package_id, crc.authorityid, crc.committeename, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart
@@ -326,13 +384,14 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                         cr.documenttype,
                         cr.documentnumber,
                         cr.congress,
-                        crg.partnumber
+                        crg.partnumber,
+                        crg.heading
                     FROM {self.staging_schema}.congressionalreports_granules_committees AS crgc
                     JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crgc.granule_id = crg.id
                     JOIN {self.staging_schema}.congressionalreports AS cr ON crg.packageid = cr.packageid
-                    GROUP BY crg.granuleid, crgc.authorityid, crgc.committeename, cr.documenttype, cr.documentnumber, cr.congress, crg.partnumber
+                    GROUP BY crg.granuleid, crgc.authorityid, crgc.committeename, cr.documenttype, cr.documentnumber, cr.congress, crg.partnumber, crg.heading
 
-                    ORDER BY package_id, granuleid, authorityid, committeename
+                    ORDER BY granuleid, authorityid, committeename
                     LIMIT {chunk_size} OFFSET {offset}
                     """
 
@@ -436,12 +495,13 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                         cr.documenttype,
                         cr.documentnumber,
                         cr.congress,
-                        cr.documentpart
+                        cr.documentpart,
+                        crg.heading
                     FROM {self.staging_schema}.congressionalreports_granules_members AS crgm
                     JOIN {self.staging_schema}.congressionalreports_granules_members_name AS crgmn ON crgm.id = crgmn.members_id
                     JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crgm.granule_id = crg.id
                     JOIN {self.staging_schema}.congressionalreports AS cr ON crg.packageid = cr.packageid
-                    GROUP BY crg.packageid, crg.granuleid, crgm.bioguideid, crgm.membername, crgm.authorityid, crgm.gpoid, crgmn.authority_fnf, crgmn.authority_other, crg.partnumber, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart
+                    GROUP BY crg.packageid, crg.granuleid, crgm.bioguideid, crgm.membername, crgm.authorityid, crgm.gpoid, crgmn.authority_fnf, crgmn.authority_other, crg.partnumber, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart, crg.heading
                     """
 
                     rows = await conn.fetch(query)
@@ -583,7 +643,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             c.download_jpeglink AS download_jpeglink,
                             c.federalpublicationname AS federalpublicationname,
                             c.download_thumbnailjpeg AS download_thumbnailjpeg,
-                            c.references AS references,
+                            c._references AS _references,
                             c.president_id AS president_id,
                             c.president_names AS president_names,
                             c.president_party AS president_party,
@@ -647,7 +707,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             c.download_jpeglink AS download_jpeglink,
                             c.federalpublicationname AS federalpublicationname,
                             c.download_thumbnailjpeg AS download_thumbnailjpeg,
-                            c.references AS references,
+                            c._references AS _references,
                             c.president_id AS president_id,
                             c.president_names AS president_names,
                             c.president_party AS president_party,
@@ -692,7 +752,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 logger.error(f"Error streaming congressionalreports: {e}")
                 raise
 
-    async def _stream_congressionalreports_bills_joined_chunks(
+    async def _stream_congressionalreports_reference_bills_joined_chunks(
         self, chunk_size: int
     ) -> AsyncGenerator[list[dict[str, Any]], None]:
         """
@@ -702,7 +762,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             raise ValueError("Database pool not configured")
 
         logger.info(
-            f"Streaming congressionalreports_bills records in chunks of {chunk_size}"
+            f"Streaming congressionalreports_reference_bills records in chunks of {chunk_size}"
         )
 
         # Check if tables exist
@@ -727,7 +787,8 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             while True:
                 async with self.db_pool.acquire() as conn, conn.transaction():
                     query = f"""
-                            SELECT crgrc.*, crg.granuleid, crg.partnumber, cr.packageid,cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart FROM {self.staging_schema}.congressionalreports_granules_references_contents AS crgrc
+                            SELECT crgrc.*, crg.granuleid, crg.partnumber, crg.heading, cr.packageid, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart
+                            FROM {self.staging_schema}.congressionalreports_granules_references_contents AS crgrc
                             JOIN {self.staging_schema}.congressionalreports_granules_references AS crgr ON crgr.id = crgrc.references_id
                             JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crg.id = crgr.granule_id
                             JOIN {self.staging_schema}.congressionalreports AS cr ON crg.packageid = cr.packageid
@@ -746,7 +807,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             chunk.append(row_dict)
                         except Exception as e:
                             logger.error(
-                                f"Error converting congressionalreports_bills row to dict: {e}, row type: {type(row)}, row: {row}"
+                                f"Error converting congressionalreports_reference_bills row to dict: {e}, row type: {type(row)}, row: {row}"
                             )
                             continue
 
@@ -757,11 +818,11 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
                     if offset % (chunk_size * 10) == 0:
                         logger.debug(
-                            f"Streamed {offset} congressionalreports_bills records"
+                            f"Streamed {offset} congressionalreports_reference_bills records"
                         )
 
         except Exception as e:
-            logger.error(f"Error streaming congressionalreports_bills: {e}")
+            logger.error(f"Error streaming congressionalreports_reference_bills: {e}")
             raise
 
     async def _clean_congressionalreports_singular(
@@ -819,7 +880,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         - download_jpeglink                  text,
         - federalpublicationname             text,
         - download_thumbnailjpeg             text,
-        - references                        text,
+        - _references                        text,
         - president_id                       text,
         - president_names                    text,
         - president_party                    text,
@@ -852,25 +913,15 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         (
             report_id,
             parent_report_id,
-            granule_id,
-            part_number,
-            report_type,
-            report_number,
-            congress,
+            _,
+            _,
+            _,
+            _,
+            _,
         ) = self._build_report_identity(cleaned)
 
-        # Compute errata flag based on id heuristics
-        is_errata: bool | None = None
-        try:
-            if "err" in cleaned.get("packageid", "").lower():
-                is_errata = True
-            if granule_id is not None:
-                heading_val = str(cleaned.get("heading", "")).strip().lower()
-                if heading_val == "errata":
-                    is_errata = True
-        except Exception:
-            # Best-effort flag; ignore parsing issues
-            pass
+        # Compute errata flag using shared heuristics
+        errata_detected = self._detect_is_errata(cleaned)
 
         # Apply bills-specific cleaning logic
         filtered_cleaned = {
@@ -887,7 +938,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             "congress": self.safe_int(cleaned.get("congress", None)),
             "session": self.safe_int(cleaned.get("session", None)),
             "pages": self.safe_int(cleaned.get("pages", None)),
-            "is_errata": is_errata,
+            "is_errata": errata_detected,
             "issued_at": self.standardize_date(cleaned.get("dateissued", None)),
             "branch": cleaned.get("branch", None),
             "government_author1": cleaned.get("governmentauthor1", None),
@@ -907,38 +958,39 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         return filtered_cleaned
 
-    async def _clean_congressionalreports_serialset_singular(
-        self, record_data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Custom cleaning logic for individual congressional reports records.
-        FINAL COLUMNS:
-        - package_id TEXT PRIMARY KEY,
-        - bag_id TEXT,
-        - doc_id TEXT,
-        - serialset_number TEXT,
-        - agency TEXT,
-        - volume TEXT,
-        - oclc_number TEXT,
-        - lccn_number TEXT,
-        - issn_number TEXT,
-        """
-        cleaned = record_data.copy()
-        report_id, _, _, _, _, _, _ = self._build_report_identity(cleaned)
+    # async def _clean_congressionalreports_serialset_singular(
+    #     self, record_data: dict[str, Any]
+    # ) -> dict[str, Any]:
+    #     """
+    #     Custom cleaning logic for individual congressional reports records.
+    #     FINAL COLUMNS:
+    #     - package_id TEXT PRIMARY KEY,
+    #     - bag_id TEXT,
+    #     - doc_id TEXT,
+    #     - serialset_number TEXT,
+    #     - agency TEXT,
+    #     - volume TEXT,
+    #     - oclc_number TEXT,
+    #     - lccn_number TEXT,
+    #     - issn_number TEXT,
+    #     """
 
-        return {
-            "package_id": cleaned.get("package_id", "ID_ERROR"),
-            "report_id": report_id,
-            "bag_id": cleaned.get("serialset_bagid", None),
-            "doc_id": cleaned.get("serialset_docid", None),
-            "serialset_number": cleaned.get("serialset_serialsetnumber", None),
-            "agency": cleaned.get("agency", None),
-            "volume": cleaned.get("volume", None),
-            "oclc_number": cleaned.get("otheridentifier_oclc", None),
-            "lccn_number": cleaned.get("otheridentifier_lccn", None),
-            "issn_number": cleaned.get("otheridentifier_issn", None),
-            "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
-        }
+    #     cleaned = record_data.copy()
+    #     report_id, _, _, _, _, _, _ = self._build_report_identity(cleaned)
+
+    #     return {
+    #         "package_id": cleaned.get("package_id", "ID_ERROR"),
+    #         "report_id": report_id,
+    #         "bag_id": cleaned.get("serialset_bagid", None),
+    #         "doc_id": cleaned.get("serialset_docid", None),
+    #         "serialset_number": cleaned.get("serialset_serialsetnumber", None),
+    #         "agency": cleaned.get("agency", None),
+    #         "volume": cleaned.get("volume", None),
+    #         "oclc_number": cleaned.get("otheridentifier_oclc", None),
+    #         "lccn_number": cleaned.get("otheridentifier_lccn", None),
+    #         "issn_number": cleaned.get("otheridentifier_issn", None),
+    #         "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
+    #     }
 
     async def _clean_congressionalreports_committees_singular(
         self, record_data: dict[str, Any]
@@ -1015,7 +1067,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         return filtered_cleaned
 
-    async def _clean_congressionalreports_bills_singular(
+    async def _clean_congressionalreports_reference_bills_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """
@@ -1070,6 +1122,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         if not self.db_pool:
             raise ValueError("Database pool not configured")
 
+        logger.info("Starting post-processing operations")
         results = {
             "status": "success",
             "operations": [],
@@ -1077,6 +1130,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         }
 
         # ? Operation 1: ils system id
+        logger.info("Starting ils system id post-processing")
         try:
             async with self.db_pool.acquire() as conn, conn.transaction():
                 # Fetch all records from staging
@@ -1086,42 +1140,46 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 """
                 rows = await conn.fetch(fetch_sql)
 
-                # json load the otheridentifier_ils_system_id value as a list, then insert into the ils_system_id table
+                # Prepare batch params
+                insert_sql = f"""
+                    INSERT INTO {self.production_schema}.congressionalreports_ils_system_id (package_id, ils_system_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT DO NOTHING
+                """
+                batch_params = []
                 for row in rows:
                     ils_system_id_raw = row["otheridentifier_ils_system_id"]
-                    if ils_system_id_raw:
-                        try:
-                            if isinstance(ils_system_id_raw, str):
-                                ils_system_id = json.loads(ils_system_id_raw)
-                            elif isinstance(ils_system_id_raw, list):
-                                ils_system_id = ils_system_id_raw
-                            else:
-                                ils_system_id = [str(ils_system_id_raw)]
-                        except json.JSONDecodeError:
-                            ils_system_id = [str(ils_system_id_raw)]
+                    if not ils_system_id_raw:
+                        continue
+                    try:
+                        if isinstance(ils_system_id_raw, str):
+                            ils_ids = json.loads(ils_system_id_raw)
+                        elif isinstance(ils_system_id_raw, list):
+                            ils_ids = ils_system_id_raw
+                        else:
+                            ils_ids = [str(ils_system_id_raw)]
+                    except json.JSONDecodeError:
+                        ils_ids = [str(ils_system_id_raw)]
+                    for ils_id in ils_ids:
+                        if ils_id:
+                            batch_params.append((row["package_id"], str(ils_id)))
 
-                        insert_sql = f"""
-                                INSERT INTO {self.production_schema}.congressionalreports_ils_system_id (package_id, ils_system_id)
-                                VALUES ($1, $2)
-                            """
-                        for ils_id in ils_system_id:
-                            if ils_id:  # Skip empty values
-                                await conn.execute(
-                                    insert_sql, row["package_id"], ils_id
-                                )
-                                results["rows_affected"] += 1
-                    results["operations"].append(
-                        {
-                            "name": "populate_ils_system_id_field",
-                            "status": "success",
-                            "rows_affected": len(ils_system_id),
-                        }
-                    )
-                    results["rows_affected"] += len(ils_system_id)
+                total_inserted = 0
+                if batch_params:
+                    chunk_size = 1000
+                    for i in range(0, len(batch_params), chunk_size):
+                        chunk = batch_params[i : i + chunk_size]
+                        await conn.executemany(insert_sql, chunk)
+                        total_inserted += len(chunk)
 
-                logger.info(
-                    f"Updated ils_system_id for {results['rows_affected']} congressional reports"
+                results["operations"].append(
+                    {
+                        "name": "populate_ils_system_id_field",
+                        "status": "success",
+                        "rows_affected": total_inserted,
+                    }
                 )
+                results["rows_affected"] += total_inserted
 
         except Exception as e:
             logger.error(f"Error populating ils_system_id field: {e}", exc_info=True)
@@ -1135,6 +1193,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             results["status"] = "partial_failure"
 
         # ? Operation 2: serialset data
+        logger.info("Starting serialset post-processing")
         try:
             async with self.db_pool.acquire() as conn, conn.transaction():
                 # Fetch all records from staging
@@ -1146,34 +1205,34 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
                 serialset_records = []
                 for row in rows:
-                    cleaned_row = (
-                        await self._clean_congressionalreports_serialset_singular(
-                            dict(row)
-                        )
-                    )
+                    report_id, _, _, _, _, _, _ = self._build_report_identity(row)
                     serialset_records.append(
                         (
-                            cleaned_row["package_id"],
-                            cleaned_row["report_id"],
-                            cleaned_row["bag_id"],
-                            cleaned_row["doc_id"],
-                            cleaned_row["serialset_number"],
-                            cleaned_row["agency"],
-                            cleaned_row["volume"],
-                            cleaned_row["oclc_number"],
-                            cleaned_row["lccn_number"],
-                            cleaned_row["issn_number"],
-                            cleaned_row["last_modified"],
+                            row["package_id"],
+                            report_id,
+                            row["serialset_bagid"],
+                            row["serialset_docid"],
+                            row["serialset_serialsetnumber"],
+                            row["agency"],
+                            row["volume"],
+                            row["oclc_number"],
+                            row["lccn_number"],
+                            row["issn_number"],
+                            row["last_modified"],
                         )
                     )
                 if serialset_records:
                     insert_sql = f"""
                         INSERT INTO {self.production_schema}.congressionalreports_serialset (package_id, report_id, bag_id, doc_id, serialset_number, agency, volume, oclc_number, lccn_number, issn_number, last_modified)
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                        ON CONFLICT (package_id) DO NOTHING
                     """
-                    for record in serialset_records:
-                        await conn.execute(insert_sql, *record)
-                    serialset_rows_affected = len(serialset_records)
+                    chunk_size = 1000
+                    serialset_rows_affected = 0
+                    for i in range(0, len(serialset_records), chunk_size):
+                        chunk = serialset_records[i : i + chunk_size]
+                        await conn.executemany(insert_sql, chunk)
+                        serialset_rows_affected += len(chunk)
                     results["operations"].append(
                         {
                             "name": "populate_serialset_field",
@@ -1193,222 +1252,331 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             )
             results["status"] = "partial_failure"
         # ? Operation 3: references
+        logger.info("Starting reference post-processing")
         try:
             async with self.db_pool.acquire() as conn, conn.transaction():
-                # Fetch all records from staging
-                fetch_sql = f"""
-                SELECT package_id, collectioncode, contents FROM {self.staging_schema}.congressionalreports_granules_references_contents AS cgrc
-                JOIN {self.staging_schema}.congressionalreports_granules_references AS cgr ON cgrc.references_id = cgr.id
-                JOIN {self.staging_schema}.congressionalreports_granules AS cg ON cgr.granule_id = cg.id
-                JOIN {self.staging_schema}.congressionalreports AS c ON cg.packageid = c.packageid
-                """
-                rows = await conn.fetch(fetch_sql)
+                # Chunked processing to avoid huge memory and long transactions
+                offset = 0
+                limit = 5000
+                total_counts = {
+                    "laws": 0,
+                    "statutes": 0,
+                    "codes": 0,
+                    "statute_pages": 0,
+                    "code_sections": 0,
+                }
 
-                reference_law_records = []
-                reference_statute_records = []
-                reference_code_records = []
-                reference_statute_page_records = []
-                reference_code_section_records = []
+                while True:
+                    fetch_sql = f"""
+                    SELECT c.packageid AS package_id, cg.collectioncode, cgrc.contents
+                    FROM {self.staging_schema}.congressionalreports_granules_references_contents AS cgrc
+                    JOIN {self.staging_schema}.congressionalreports_granules_references AS cgr ON cgrc.references_id = cgr.id
+                    JOIN {self.staging_schema}.congressionalreports_granules AS cg ON cgr.granule_id = cg.id
+                    JOIN {self.staging_schema}.congressionalreports AS c ON cg.packageid = c.packageid
+                    ORDER BY c.packageid
+                    LIMIT {limit} OFFSET {offset}
+                    """
+                    rows = await conn.fetch(fetch_sql)
+                    if not rows:
+                        break
 
-                for row in rows:
-                    # Parse contents if it's a JSON string
-                    contents = row.get("contents", [])
-                    if isinstance(contents, str):
-                        try:
-                            contents = json.loads(contents)
-                        except json.JSONDecodeError:
-                            logger.warning(f"Failed to parse JSON contents: {contents}")
+                    law_params = []
+                    statute_params = []
+                    code_params = []
+                    statute_page_params = []
+                    code_section_params = []
+
+                    for row in rows:
+                        contents = row["contents"]
+                        if isinstance(contents, str):
+                            try:
+                                contents = json.loads(contents)
+                            except json.JSONDecodeError:
+                                continue
+                        if not contents:
                             continue
 
-                    if row["collectioncode"] == "PLAW" and contents:
-                        for content in contents:
-                            reference_law_records.append(
-                                {
-                                    "package_id": row["package_id"],
-                                    "law_id": f"PL{content.get('congress')}-{content.get('number')}",
-                                    "law_type": content.get("label", "")
-                                    .split(" ")[0]
-                                    .lower()
-                                    if content.get("label", "")
-                                    else None,
-                                    "law_number": f"{content.get('congress')}-{content.get('number')}",
-                                    "order_number": self.safe_int(
-                                        content.get("number")
-                                    ),
-                                    "congress": self.safe_int(content.get("congress")),
-                                }
-                            )
-                    elif row["collectioncode"] == "STATUTE" and contents:
-                        for content in contents:
-                            report_statute_id = hashlib.sha256(
-                                f"{row['package_id']}-{content.get('label', '')}-{content.get('pages', '')}-{content.get('title', '')}".encode()
-                            ).hexdigest()[:16]
-                            reference_statute_records.append(
-                                {
-                                    "bill_statute_id": report_statute_id,
-                                    "package_id": row["package_id"],
-                                    "reference_statute": f"{content.get('label', '').lower()}{content.get('title', '')}",
-                                }
-                            )
-                            pages_data = content.get("pages", "[]")
-                            if isinstance(pages_data, str):
-                                try:
-                                    pages_list = json.loads(pages_data)
-                                except json.JSONDecodeError:
-                                    pages_list = [pages_data]
-                            else:
-                                pages_list = (
-                                    pages_data if isinstance(pages_data, list) else []
+                        if row["collectioncode"] == "PLAW":
+                            for content in contents:
+                                law_params.append(
+                                    (
+                                        row["package_id"],
+                                        f"PL{content.get('congress')}-{content.get('number')}",
+                                        content.get("label", "").split(" ")[0].lower()
+                                        if content.get("label", "")
+                                        else None,
+                                        f"{content.get('congress')}-{content.get('number')}",
+                                        self.safe_int(content.get("number")),
+                                        self.safe_int(content.get("congress")),
+                                    )
                                 )
-                            for page in pages_list:
-                                reference_statute_page_records.append(
-                                    {
-                                        "bill_statute_id": report_statute_id,
-                                        "page": page,
-                                    }
+                        elif row["collectioncode"] == "STATUTE":
+                            for content in contents:
+                                report_statute_id = hashlib.sha256(
+                                    f"{row['package_id']}-{content.get('label', '')}-{content.get('pages', '')}-{content.get('title', '')}".encode()
+                                ).hexdigest()[:16]
+                                statute_params.append(
+                                    (
+                                        report_statute_id,
+                                        row["package_id"],
+                                        f"{content.get('label', '').lower()}{content.get('title', '')}",
+                                    )
                                 )
-                    elif row["collectioncode"] == "USCODE" and contents:
-                        for content in contents:
-                            report_code_id = hashlib.sha256(
-                                f"{row['package_id']}-{content.get('sections', '')}-{content.get('title', '')}".encode()
-                            ).hexdigest()[:16]
-                            reference_code_records.append(
-                                {
-                                    "bill_code_id": report_code_id,
-                                    "package_id": row["package_id"],
-                                    "reference_code": f"{content.get('label', '').replace('.', '')}-{content.get('title', '')}",
-                                }
-                            )
-                            sections_data = content.get("sections", "[]")
-                            if isinstance(sections_data, str):
-                                try:
-                                    sections_list = json.loads(sections_data)
-                                except json.JSONDecodeError:
-                                    sections_list = [sections_data]
-                            else:
-                                sections_list = (
-                                    sections_data
-                                    if isinstance(sections_data, list)
-                                    else []
+                                pages_data = content.get("pages", "[]")
+                                if isinstance(pages_data, str):
+                                    try:
+                                        pages_list = json.loads(pages_data)
+                                    except json.JSONDecodeError:
+                                        pages_list = [pages_data]
+                                else:
+                                    pages_list = (
+                                        pages_data
+                                        if isinstance(pages_data, list)
+                                        else []
+                                    )
+                                for page in pages_list:
+                                    statute_page_params.append(
+                                        (report_statute_id, page)
+                                    )
+                        elif row["collectioncode"] == "USCODE":
+                            for content in contents:
+                                report_code_id = hashlib.sha256(
+                                    f"{row['package_id']}-{content.get('sections', '')}-{content.get('title', '')}".encode()
+                                ).hexdigest()[:16]
+                                code_params.append(
+                                    (
+                                        report_code_id,
+                                        row["package_id"],
+                                        f"{content.get('label', '').replace('.', '')}-{content.get('title', '')}",
+                                    )
                                 )
-                            for section in sections_list:
-                                reference_code_section_records.append(
-                                    {
-                                        "bill_code_id": report_code_id,
-                                        "section": section,
-                                    }
-                                )
-                if reference_law_records:
-                    insert_sql = f"""
-                        INSERT INTO {self.production_schema}.congressionalreports_reference_laws (package_id, law_id, law_type, law_number, order_number, congress)
-                        VALUES ($1, $2, $3, $4, $5, $6)
-                    """
-                    for record in reference_law_records:
-                        await conn.execute(
-                            insert_sql,
-                            record["package_id"],
-                            record["law_id"],
-                            record["law_type"],
-                            record["law_number"],
-                            record["order_number"],
-                            record["congress"],
-                        )
-                    reference_law_rows_affected = len(reference_law_records)
-                    results["operations"].append(
-                        {
-                            "name": "populate_reference_laws_field",
-                            "status": "success",
-                            "rows_affected": reference_law_rows_affected,
-                        }
-                    )
-                    results["rows_affected"] += reference_law_rows_affected
-                if reference_statute_records:
-                    insert_sql = f"""
-                        INSERT INTO {self.production_schema}.congressionalreports_reference_statutes (report_statute_id, package_id, reference_statute)
-                        VALUES ($1, $2, $3)
-                    """
-                    for record in reference_statute_records:
-                        await conn.execute(
-                            insert_sql,
-                            record["bill_statute_id"],
-                            record["package_id"],
-                            record["reference_statute"],
-                        )
-                    reference_statute_rows_affected = len(reference_statute_records)
-                    results["operations"].append(
-                        {
-                            "name": "populate_reference_statutes_field",
-                            "status": "success",
-                            "rows_affected": reference_statute_rows_affected,
-                        }
-                    )
-                    results["rows_affected"] += reference_statute_rows_affected
-                if reference_code_records:
-                    insert_sql = f"""
-                        INSERT INTO {self.production_schema}.congressionalreports_reference_codes (report_code_id, package_id, reference_code)
-                        VALUES ($1, $2, $3)
-                    """
-                    for record in reference_code_records:
-                        await conn.execute(
-                            insert_sql,
-                            record["bill_code_id"],
-                            record["package_id"],
-                            record["reference_code"],
-                        )
-                    reference_code_rows_affected = len(reference_code_records)
-                    results["operations"].append(
-                        {
-                            "name": "populate_reference_codes_field",
-                            "status": "success",
-                            "rows_affected": reference_code_rows_affected,
-                        }
-                    )
-                    results["rows_affected"] += reference_code_rows_affected
-                if reference_statute_page_records:
-                    insert_sql = f"""
-                        INSERT INTO {self.production_schema}.congressionalreports_reference_statutes_pages (report_statute_id, page)
-                        VALUES ($1, $2)
-                    """
-                    for record in reference_statute_page_records:
-                        await conn.execute(
-                            insert_sql, record["bill_statute_id"], record["page"]
-                        )
-                    reference_statute_page_rows_affected = len(
-                        reference_statute_page_records
-                    )
-                    results["operations"].append(
-                        {
-                            "name": "populate_reference_statutes_pages_field",
-                            "status": "success",
-                            "rows_affected": reference_statute_page_rows_affected,
-                        }
-                    )
-                    results["rows_affected"] += reference_statute_page_rows_affected
-                if reference_code_section_records:
-                    insert_sql = f"""
-                        INSERT INTO {self.production_schema}.congressionalreports_reference_codes_sections (report_code_id, code_section)
-                        VALUES ($1, $2)
-                    """
-                    for record in reference_code_section_records:
-                        await conn.execute(
-                            insert_sql, record["bill_code_id"], record["section"]
-                        )
-                    reference_code_section_rows_affected = len(
-                        reference_code_section_records
-                    )
-                    results["operations"].append(
-                        {
-                            "name": "populate_reference_codes_sections_field",
-                            "status": "success",
-                            "rows_affected": reference_code_section_rows_affected,
-                        }
-                    )
-                    results["rows_affected"] += reference_code_section_rows_affected
+                                sections_data = content.get("sections", "[]")
+                                if isinstance(sections_data, str):
+                                    try:
+                                        sections_list = json.loads(sections_data)
+                                    except json.JSONDecodeError:
+                                        sections_list = [sections_data]
+                                else:
+                                    sections_list = (
+                                        sections_data
+                                        if isinstance(sections_data, list)
+                                        else []
+                                    )
+                                for section in sections_list:
+                                    code_section_params.append(
+                                        (report_code_id, section)
+                                    )
+
+                    # Batch insert
+                    if law_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_laws (package_id, law_id, law_type, law_number, order_number, congress)
+                            VALUES ($1, $2, $3, $4, $5, $6)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, law_params)
+                        total_counts["laws"] += len(law_params)
+                    if statute_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_statutes (report_statute_id, package_id, reference_statute)
+                            VALUES ($1, $2, $3)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, statute_params)
+                        total_counts["statutes"] += len(statute_params)
+                    if code_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_codes (report_code_id, package_id, reference_code)
+                            VALUES ($1, $2, $3)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, code_params)
+                        total_counts["codes"] += len(code_params)
+                    if statute_page_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_statutes_pages (report_statute_id, page)
+                            VALUES ($1, $2)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, statute_page_params)
+                        total_counts["statute_pages"] += len(statute_page_params)
+                    if code_section_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_codes_sections (report_code_id, code_section)
+                            VALUES ($1, $2)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, code_section_params)
+                        total_counts["code_sections"] += len(code_section_params)
+
+                    offset += limit
+
+                results["operations"].append(
+                    {
+                        "name": "populate_references_field",
+                        "status": "success",
+                        "rows_affected": sum(total_counts.values()),
+                        "details": total_counts,
+                    }
+                )
+                results["rows_affected"] += sum(total_counts.values())
         except Exception as e:
             logger.error(f"Error populating references field: {e}", exc_info=True)
             results["operations"].append(
                 {
                     "name": "populate_references_field",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+
+        # ? Operation 4: Resolve placeholder 'x' part numbers across all reports
+        logger.info("Starting placeholder part resolution post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all production rows with placeholder 'x' (including errata 'xe')
+                prod_rows = await conn.fetch(
+                    f"""
+                    SELECT package_id, report_id, is_errata
+                    FROM {self.production_schema}.congressionalreports
+                    WHERE report_id LIKE '%-x-%' OR report_id LIKE '%-xe-%'
+                    """
+                )
+
+                if not prod_rows:
+                    results["operations"].append(
+                        {
+                            "name": "resolve_placeholder_parts",
+                            "status": "skipped",
+                            "reason": "no placeholder reports found",
+                        }
+                    )
+                else:
+                    logger.info(f"Found {len(prod_rows)} records to process")
+                    # Group by (type, number, congress)
+                    groups = {}
+                    for row in prod_rows:
+                        m = re.match(
+                            r"^([a-z]+)(\d+)-([^-]+)-(\d+)$",
+                            str(row["report_id"]),
+                            re.IGNORECASE,
+                        )
+                        if not m:
+                            continue
+                        key = (m.group(1).lower(), m.group(2), m.group(4))
+                        groups.setdefault(key, []).append(dict(row))
+
+                    def parse_order(pkg_id: str) -> tuple[int, int]:
+                        try:
+                            m = re.search(r"(\d+)(?:-(\d+))?$", pkg_id)
+                            if m:
+                                a = int(m.group(1))
+                                b = int(m.group(2)) if m.group(2) else 0
+                                return a, b
+                        except Exception:
+                            pass
+                        return (1 << 30, 1 << 30)
+
+                    updated_count = 0
+
+                    for _key, rows in groups.items():
+                        # Order within group by trailing numeric tokens of package_id
+                        rows_with_order = []
+                        for r in rows:
+                            pkg = r.get("package_id") or ""
+                            rows_with_order.append((parse_order(str(pkg)), r))
+                        rows_with_order.sort(key=lambda x: x[0])
+
+                        # Assign parts sequentially starting at 1
+                        for idx, (_ord, r) in enumerate(rows_with_order, start=1):
+                            package_id = r["package_id"]
+                            old_report_id = r["report_id"]
+                            is_errata_flag = (
+                                bool(r["is_errata"])
+                                if r["is_errata"] is not None
+                                else False
+                            )
+
+                            m = re.match(
+                                r"^([a-z]+)(\d+)-([^-]+)-(\d+)$",
+                                str(old_report_id),
+                                re.IGNORECASE,
+                            )
+                            if not m:
+                                continue
+                            rtype, rnum, part_comp, cong = (
+                                m.group(1).lower(),
+                                m.group(2),
+                                m.group(3),
+                                m.group(4),
+                            )
+
+                            has_errata_suffix = (
+                                part_comp.endswith("e") or is_errata_flag
+                            )
+                            new_part_token = f"{idx}{'e' if has_errata_suffix else ''}"
+                            new_report_id = f"{rtype}{rnum}-{new_part_token}-{cong}"
+
+                            if new_report_id == old_report_id:
+                                continue
+
+                            # Update main table
+                            await conn.execute(
+                                f"""
+                                UPDATE {self.production_schema}.congressionalreports
+                                SET report_id = $1
+                                WHERE package_id = $2
+                                """,
+                                new_report_id,
+                                package_id,
+                            )
+
+                            # Update dependent tables keyed by package_id
+                            await conn.execute(
+                                f"""
+                                UPDATE {self.production_schema}.congressionalreports_committees
+                                SET report_id = $1
+                                WHERE package_id = $2
+                                """,
+                                new_report_id,
+                                package_id,
+                            )
+                            await conn.execute(
+                                f"""
+                                UPDATE {self.production_schema}.congressionalreports_members
+                                SET report_id = $1
+                                WHERE package_id = $2
+                                """,
+                                new_report_id,
+                                package_id,
+                            )
+                            await conn.execute(
+                                f"""
+                                UPDATE {self.production_schema}.congressionalreports_serialset
+                                SET report_id = $1
+                                WHERE package_id = $2
+                                """,
+                                new_report_id,
+                                package_id,
+                            )
+
+                            updated_count += 1
+
+                    results["operations"].append(
+                        {
+                            "name": "resolve_placeholder_parts",
+                            "status": "success",
+                            "rows_affected": updated_count,
+                        }
+                    )
+                    results["rows_affected"] += updated_count
+
+        except Exception as e:
+            logger.error(f"Error resolving placeholder parts: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "resolve_placeholder_parts",
                     "status": "error",
                     "error": str(e),
                 }

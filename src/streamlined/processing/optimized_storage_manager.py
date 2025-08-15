@@ -1578,6 +1578,33 @@ class OptimizedCleanerStorage:
         Yields:
             Batches of records as list of dictionaries
         """
+        # Determine whether this table should be processed at all
+        table_specific_cleaner_exists = bool(
+            custom_logic and hasattr(custom_logic, f"_clean_{table_name}_singular")
+        )
+        table_specific_stream_exists = bool(
+            custom_logic
+            and hasattr(custom_logic, f"_stream_{table_name}_joined_chunks")
+        )
+        # Normalize multi-table config to dict form if provided as a list
+        mtd_normalized = multi_table_data_types
+        if isinstance(mtd_normalized, list):
+            mtd_normalized = {table_name: mtd_normalized}
+        is_multi_table_root = bool(mtd_normalized and table_name in mtd_normalized)
+
+        if not (
+            table_specific_cleaner_exists
+            or table_specific_stream_exists
+            or is_multi_table_root
+        ):
+            # Skip tables that have no specific cleaner and are not roots of a multi-table stream.
+            # Prevents processing of helper tables that are only meant to participate in joined streams
+            # (e.g., congressionalreports_granules) when listed independently by config.
+            logger.info(
+                f"Skipping table {table_name}: no table-specific cleaner or multi-table streaming defined"
+            )
+            return
+
         # First, check if custom logic has a specific streaming method for this table
         if custom_logic and hasattr(
             custom_logic, f"_stream_{table_name}_joined_chunks"
@@ -1593,13 +1620,13 @@ class OptimizedCleanerStorage:
             return
 
         # Check if this is a multi-table data type that needs special handling
-        if multi_table_data_types and table_name in multi_table_data_types:
+        if mtd_normalized and table_name in mtd_normalized:
             logger.info(f"Using multi-table streaming for {table_name}")
             async for chunk in self._stream_multi_table_data(
                 table_name,
                 batch_size,
                 checkpoint_offset,
-                multi_table_data_types[table_name],
+                mtd_normalized[table_name],
             ):
                 yield chunk
             return
@@ -1616,7 +1643,7 @@ class OptimizedCleanerStorage:
         table_name: str,
         batch_size: int,
         checkpoint_offset: int,
-        multi_table_data_types: dict[str, list[str]],
+        related_tables_config: list[str] | dict[str, list[str]],
     ) -> AsyncIterator[list[dict[str, Any]]]:
         """
         Stream data from multiple related tables with basic joins.
@@ -1628,7 +1655,10 @@ class OptimizedCleanerStorage:
         """
         async with self.storage.pg_pool.acquire() as conn:
             # Get the related tables for this data type
-            related_tables = multi_table_data_types.get(table_name, [])
+            if isinstance(related_tables_config, dict):
+                related_tables = related_tables_config.get(table_name, [])
+            else:
+                related_tables = related_tables_config or []
             if not related_tables:
                 logger.warning(f"No related tables found for {table_name}")
                 return
@@ -1680,7 +1710,8 @@ class OptimizedCleanerStorage:
 
                     except Exception as e:
                         logger.error(
-                            f"Error streaming {main_table} at offset {offset}: {e}"
+                            f"Error streaming {main_table} at offset {offset}: {e}",
+                            exc_info=True,
                         )
                         raise
 
@@ -1738,7 +1769,8 @@ class OptimizedCleanerStorage:
 
                     except Exception as e:
                         logger.error(
-                            f"Error streaming multi-table data for {table_name}: {e}"
+                            f"Error streaming multi-table data for {table_name}: {e}",
+                            exc_info=True,
                         )
                         raise
 
@@ -1807,7 +1839,7 @@ class OptimizedCleanerStorage:
 
             offset = checkpoint_offset
             records_yielded = 0
-
+            logger.info(f"Query: {query}")
             while True:
                 try:
                     rows = await conn.fetch(query, batch_size, offset)
@@ -1843,7 +1875,8 @@ class OptimizedCleanerStorage:
 
                 except Exception as e:
                     logger.error(
-                        f"Error streaming {table_name} at offset {offset}: {e}"
+                        f"Error streaming {table_name} at offset {offset}: {e}",
+                        exc_info=True,
                     )
                     raise
 

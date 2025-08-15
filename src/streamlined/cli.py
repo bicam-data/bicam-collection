@@ -75,6 +75,17 @@ Examples:
         "--no-resume", action="store_true", help="Don't resume from checkpoints"
     )
 
+    # Optional rebuild of production schema before running production phase
+    process_parser.add_argument(
+        "--rebuild-prod-schema",
+        action="store_true",
+        help=(
+            "Before running the production phase, rebuild the production schema "
+            "for the data source (govinfo -> build_prod_schema_govinfo.sql; "
+            "congressional -> build_bicam_congressional.sql)"
+        ),
+    )
+
     # Parallelization options
     process_parser.add_argument(
         "--enable-parallelization",
@@ -353,7 +364,46 @@ async def command_process(args) -> int:
                 f"Parallel related data threshold: {kwargs['parallel_related_data_threshold']} pages"
             )
 
+        # Optionally rebuild production schema before running production phase
+        async def _maybe_rebuild_prod_schema() -> None:
+            if not args.rebuild_prod_schema:
+                return
+            if "production" not in args.phases:
+                logger.info(
+                    "--rebuild-prod-schema specified but 'production' phase not requested; skipping rebuild"
+                )
+                return
+
+            from pathlib import Path
+
+            # Resolve SQL file path based on data source
+            base_libs_sql = Path(__file__).parent / "libs" / "sql"
+            project_root = Path(__file__).resolve().parents[2]
+
+            sql_path = None
+            if data_source == "govinfo":
+                # Prefer libs/sql version; fallback to project root if present
+                libs_candidate = base_libs_sql / "build_prod_schema_govinfo.sql"
+                root_candidate = project_root / "build_prod_schema_govinfo.sql"
+                sql_path = libs_candidate if libs_candidate.exists() else root_candidate
+            elif data_source == "congressional":
+                sql_path = base_libs_sql / "build_bicam_congressional.sql"
+
+            if not sql_path or not sql_path.exists():
+                logger.warning(
+                    f"Production schema SQL file not found for data source '{data_source}'"
+                )
+                return
+
+            logger.info(f"Rebuilding production schema using: {sql_path}")
+            db_pool = await coordinator.db_manager.get_pool()
+            async with db_pool.acquire() as conn:
+                sql_text = sql_path.read_text()
+                await conn.execute(sql_text)
+            logger.info("Production schema rebuild completed")
+
         # Execute pipeline
+        await _maybe_rebuild_prod_schema()
         results = await execute_streamlined_pipeline(
             coordinator=coordinator,
             data_type=args.data_type,
