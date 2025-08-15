@@ -15,7 +15,10 @@ from tqdm import tqdm
 
 
 def process_chunk(
-    chunk: list[FilingSection], queue: mp.Queue
+    chunk: list[FilingSection],
+    queue: mp.Queue,
+    timeout_tracker: Any = None,
+    run_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Process a chunk of sections with enhanced logging."""
     all_results = []
@@ -29,7 +32,9 @@ def process_chunk(
             logging.debug(
                 f"Processing section {section.section_id} ({idx}/{chunk_size})"
             )
-            results, unmatched = process_single_section_with_timeout(section)
+            results, unmatched = process_single_section_with_timeout(
+                section, timeout_tracker=timeout_tracker, run_id=run_id
+            )
 
             if results:
                 all_results.extend(results)
@@ -42,6 +47,7 @@ def process_chunk(
 
         except RegexTimeout as e:
             logging.warning(f"Timeout processing section {section.section_id}")
+            # Store timeout in queue for batch processing
             queue.put(
                 {
                     "filing_uuid": section.filing_uuid,
@@ -179,7 +185,11 @@ class BatchProcessor:
                             chunk_futures = []
                             for chunk_idx, chunk in enumerate(chunks):
                                 future = executor.submit(
-                                    process_chunk, chunk, batch_queue
+                                    process_chunk,
+                                    chunk,
+                                    batch_queue,
+                                    self.timeout_tracker,
+                                    run_id,
                                 )
                                 chunk_futures.append((chunk_idx, future))
 

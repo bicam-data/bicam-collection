@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from db_utils import FilingSection
-from timeout_handler import BatchTimeoutManager, timeout_handler
+from timeout_handler import BatchTimeoutManager, timeout_handler, RegexTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -1484,8 +1484,76 @@ def standardize_bill_type(
     return None
 
 
+async def store_timeout_directly(
+    pool: Any,
+    run_id: int,
+    section: FilingSection,
+    error: Exception,
+    processing_time: float = 60.0,
+) -> None:
+    """
+    Store timeout information directly to the database.
+
+    Args:
+        pool: Database connection pool
+        run_id: ID of the current processing run
+        section: FilingSection that timed out
+        error: The timeout exception
+        processing_time: Time spent processing before timeout
+    """
+    try:
+        from timeout_handler import TimeoutSection
+
+        timeout_info = TimeoutSection(
+            filing_uuid=section.filing_uuid,
+            section_id=section.section_id,
+            chunk_id=0,  # Single section processing
+            start_offset=0,
+            pattern_type="section_processing",
+            processing_time=processing_time,
+            error_message=str(error),
+            text_length=len(section.text),
+        )
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO lobbied_bill_matching.timeout_sections (
+                    run_id,
+                    filing_uuid,
+                    section_id,
+                    chunk_id,
+                    start_offset,
+                    pattern_type,
+                    text_length,
+                    processing_time,
+                    error_message
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+                run_id,
+                timeout_info.filing_uuid,
+                str(timeout_info.section_id),
+                timeout_info.chunk_id,
+                timeout_info.start_offset,
+                timeout_info.pattern_type,
+                timeout_info.text_length,
+                timeout_info.processing_time,
+                timeout_info.error_message,
+            )
+        logging.warning(
+            f"Timeout for section {section.section_id} stored directly to database"
+        )
+    except Exception as e:
+        logging.error(
+            f"Failed to store timeout directly for section {section.section_id}: {str(e)}"
+        )
+
+
 def process_single_section_with_timeout(
-    section: FilingSection, timeout: int = 60
+    section: FilingSection,
+    timeout: int = 60,
+    timeout_tracker: Any = None,
+    run_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Process a single section with timeout handling.
@@ -1493,6 +1561,8 @@ def process_single_section_with_timeout(
     Args:
         section: FilingSection object to process
         timeout: Timeout in seconds (default 60)
+        timeout_tracker: Optional TimeoutTracker instance for storing timeouts
+        run_id: Optional run_id for storing timeouts
 
     Returns:
         Same as process_single_section
@@ -1505,6 +1575,35 @@ def process_single_section_with_timeout(
 
     try:
         return process_single_section(section)
+    except RegexTimeout as e:
+        # Store timeout information if tracker is provided
+        if timeout_tracker and run_id is not None:
+            try:
+                from timeout_handler import TimeoutSection
+
+                timeout_info = TimeoutSection(
+                    filing_uuid=section.filing_uuid,
+                    section_id=section.section_id,
+                    chunk_id=0,  # Single section processing
+                    start_offset=0,
+                    pattern_type="section_processing",
+                    processing_time=timeout,
+                    error_message=str(e),
+                    text_length=len(section.text),
+                )
+                timeout_tracker.add_timeout(timeout_info)
+                logging.warning(
+                    f"Timeout processing section {section.section_id} - stored to database"
+                )
+            except Exception as store_error:
+                logging.error(
+                    f"Failed to store timeout for section {section.section_id}: {str(store_error)}"
+                )
+        else:
+            logging.warning(
+                f"Timeout processing section {section.section_id} - no tracker provided"
+            )
+        return [], []
     finally:
         signal.alarm(0)
 
