@@ -1334,7 +1334,10 @@ def detect_congress(
 
 
 def process_single_section(
-    section: FilingSection, timeout_manager: BatchTimeoutManager | None = None
+    section: FilingSection,
+    timeout_manager: BatchTimeoutManager | None = None,
+    timeout_tracker: Any = None,
+    run_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Process a single section with improved logging.
@@ -1417,6 +1420,29 @@ def process_single_section(
 
     except RegexTimeout as e:
         logging.warning(f"Timeout processing section {section.section_id}: {str(e)}")
+        # Store timeout information if tracker is provided
+        if timeout_tracker and run_id is not None:
+            try:
+                from timeout_handler import TimeoutSection
+
+                timeout_info = TimeoutSection(
+                    filing_uuid=section.filing_uuid,
+                    section_id=section.section_id,
+                    chunk_id=0,  # Single section processing
+                    start_offset=0,
+                    pattern_type="section_processing",
+                    processing_time=60.0,
+                    error_message=str(e),
+                    text_length=len(section.text),
+                )
+                timeout_tracker.add_timeout(timeout_info)
+                logging.warning(
+                    f"Timeout for section {section.section_id} stored to tracker"
+                )
+            except Exception as store_error:
+                logging.error(
+                    f"Failed to store timeout for section {section.section_id}: {str(store_error)}"
+                )
         raise  # Re-raise so it can be caught by the wrapper function
     except Exception as e:
         logging.error(
@@ -1581,35 +1607,14 @@ def process_single_section_with_timeout(
     signal.alarm(timeout)
 
     try:
-        return process_single_section(section)
+        return process_single_section(
+            section, timeout_tracker=timeout_tracker, run_id=run_id
+        )
     except RegexTimeout as e:
-        # Store timeout information if tracker is provided
-        if timeout_tracker and run_id is not None:
-            try:
-                from timeout_handler import TimeoutSection
-
-                timeout_info = TimeoutSection(
-                    filing_uuid=section.filing_uuid,
-                    section_id=section.section_id,
-                    chunk_id=0,  # Single section processing
-                    start_offset=0,
-                    pattern_type="section_processing",
-                    processing_time=timeout,
-                    error_message=str(e),
-                    text_length=len(section.text),
-                )
-                timeout_tracker.add_timeout(timeout_info)
-                logging.warning(
-                    f"Timeout processing section {section.section_id} - stored to database"
-                )
-            except Exception as store_error:
-                logging.error(
-                    f"Failed to store timeout for section {section.section_id}: {str(store_error)}"
-                )
-        else:
-            logging.warning(
-                f"Timeout processing section {section.section_id} - no tracker provided"
-            )
+        # Timeout is already handled by process_single_section
+        logging.warning(
+            f"Timeout processing section {section.section_id} - handled by inner function"
+        )
         return [], []
     finally:
         signal.alarm(0)
