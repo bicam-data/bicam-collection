@@ -1,8 +1,6 @@
 import asyncio
 import logging
 import multiprocessing as mp
-import queue
-import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -16,7 +14,6 @@ from tqdm import tqdm
 
 def process_chunk(
     chunk: list[FilingSection],
-    queue: mp.Queue,
     timeout_tracker: Any = None,
     run_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -47,19 +44,8 @@ def process_chunk(
 
         except RegexTimeout as e:
             logging.warning(f"Timeout processing section {section.section_id}")
-            # Store timeout in queue for batch processing
-            queue.put(
-                {
-                    "filing_uuid": section.filing_uuid,
-                    "section_id": section.section_id,
-                    "chunk_id": 0,
-                    "start_offset": 0,
-                    "pattern_type": "section",
-                    "text_length": len(section.text),
-                    "processing_time": 60.0,
-                    "error_message": str(e),
-                }
-            )
+            # Timeout is already handled by process_single_section_with_timeout
+            # which stores it directly to the timeout_tracker
         except Exception as e:
             logging.error(
                 f"Error processing section {section.section_id}: {str(e)}",
@@ -141,10 +127,6 @@ class BatchProcessor:
             for i in range(0, len(sections_list), self.batch_size)
         ]
 
-        # Set up multiprocessing resources
-        ctx = mp.get_context("spawn")
-        timeout_queue = ctx.Queue()
-
         # Process batches with controlled concurrency
         all_results = []
         batch_semaphore = asyncio.Semaphore(self.max_concurrent_batches)
@@ -162,63 +144,46 @@ class BatchProcessor:
                     results = []
                     unmatched_sections = []
 
-                    # Create a Manager for this batch
-                    with mp.Manager() as manager:
-                        # Create a queue using the manager
-                        batch_queue = manager.Queue()
+                    # Process in chunks
+                    with ProcessPoolExecutor(
+                        max_workers=self.max_workers_per_batch
+                    ) as executor:
+                        chunk_size = max(10, len(batch) // self.max_workers_per_batch)
+                        chunks = [
+                            batch[i : i + chunk_size]
+                            for i in range(0, len(batch), chunk_size)
+                        ]
+                        logging.debug(
+                            f"Batch {batch_idx}: Created {len(chunks)} chunks of size ~{chunk_size}"
+                        )
 
-                        # Process in chunks
-                        with ProcessPoolExecutor(
-                            max_workers=self.max_workers_per_batch
-                        ) as executor:
-                            chunk_size = max(
-                                10, len(batch) // self.max_workers_per_batch
+                        chunk_futures = []
+                        for chunk_idx, chunk in enumerate(chunks):
+                            future = executor.submit(
+                                process_chunk,
+                                chunk,
+                                self.timeout_tracker,
+                                run_id,
                             )
-                            chunks = [
-                                batch[i : i + chunk_size]
-                                for i in range(0, len(batch), chunk_size)
-                            ]
-                            logging.debug(
-                                f"Batch {batch_idx}: Created {len(chunks)} chunks of size ~{chunk_size}"
-                            )
+                            chunk_futures.append((chunk_idx, future))
 
-                            chunk_futures = []
-                            for chunk_idx, chunk in enumerate(chunks):
-                                future = executor.submit(
-                                    process_chunk,
-                                    chunk,
-                                    batch_queue,
-                                    self.timeout_tracker,
-                                    run_id,
+                        for chunk_idx, future in chunk_futures:
+                            try:
+                                chunk_results, chunk_unmatched = future.result(
+                                    timeout=300
                                 )
-                                chunk_futures.append((chunk_idx, future))
+                                results.extend(chunk_results)
+                                unmatched_sections.extend(chunk_unmatched)
+                                logging.debug(
+                                    f"Batch {batch_idx}, Chunk {chunk_idx}: {len(chunk_results)} matches"
+                                )
+                            except Exception as e:
+                                logging.error(
+                                    f"Error in batch {batch_idx}, chunk {chunk_idx}: {str(e)}"
+                                )
 
-                            for chunk_idx, future in chunk_futures:
-                                try:
-                                    chunk_results, chunk_unmatched = future.result(
-                                        timeout=300
-                                    )
-                                    results.extend(chunk_results)
-                                    unmatched_sections.extend(chunk_unmatched)
-                                    logging.debug(
-                                        f"Batch {batch_idx}, Chunk {chunk_idx}: {len(chunk_results)} matches"
-                                    )
-                                except Exception as e:
-                                    logging.error(
-                                        f"Error in batch {batch_idx}, chunk {chunk_idx}: {str(e)}"
-                                    )
-
-                            # Process any timeouts from the batch queue
-                            while True:
-                                try:
-                                    item = batch_queue.get_nowait()
-                                    if item and self.timeout_tracker:
-                                        timeout = TimeoutSection(**item)
-                                        self.timeout_tracker.add_timeout(timeout)
-                                except queue.Empty:
-                                    break
-                                except Exception as e:
-                                    logging.error(f"Error processing timeout: {str(e)}")
+                        # Timeouts are handled directly by process_single_section_with_timeout
+                        # and stored to the timeout_tracker automatically
 
                     # Store results
                     if results:
@@ -253,26 +218,6 @@ class BatchProcessor:
                     logging.error(f"Batch {batch_idx} failed: {str(e)}", exc_info=True)
                     return []
 
-        # Process timeouts
-        def handle_timeouts():
-            while True:
-                try:
-                    timeout_info = timeout_queue.get(timeout=1.0)
-                    if timeout_info is None:
-                        break
-                    if self.timeout_tracker:
-                        timeout = TimeoutSection(**timeout_info)
-                        self.timeout_tracker.add_timeout(timeout)
-                except queue.Empty:
-                    continue
-                except Exception as e:
-                    logging.error(f"Timeout handling error: {str(e)}")
-
-        # Start timeout handler thread
-        timeout_thread = threading.Thread(target=handle_timeouts)
-        timeout_thread.daemon = True
-        timeout_thread.start()
-
         try:
             # Process all batches
             batch_tasks = [
@@ -292,11 +237,7 @@ class BatchProcessor:
                         continue
 
         finally:
-            # Clean up
-            timeout_queue.put(None)
-            timeout_thread.join(timeout=5.0)
-            timeout_queue.close()
-
+            # Store any collected timeouts
             if self.timeout_tracker:
                 await self.timeout_tracker.store_all_timeouts(run_id)
 
