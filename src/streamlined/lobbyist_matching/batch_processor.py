@@ -8,7 +8,7 @@ from typing import Any
 
 from db_utils import DatabaseInterface, FilingSection
 from section_processor import process_single_section_with_timeout
-from timeout_handler import RegexTimeout, TimeoutSection, TimeoutTracker
+from timeout_handler import RegexTimeout, TimeoutTracker
 from tqdm import tqdm
 
 
@@ -42,28 +42,30 @@ def process_chunk(
                 unmatched_sections.extend(unmatched)
                 logging.debug(f"Section {section.section_id} marked as unmatched")
 
-        except RegexTimeout as e:
-            logging.warning(f"Timeout processing section {section.section_id}")
-            # Collect timeout information to return to parent process
-            timeout_sections.append(
-                {
-                    "filing_uuid": section.filing_uuid,
-                    "section_id": section.section_id,
-                    "chunk_id": 0,
-                    "start_offset": 0,
-                    "pattern_type": "section_processing",
-                    "processing_time": 60.0,
-                    "error_message": str(e),
-                    "text_length": len(section.text),
-                }
-            )
-            # Return empty results for this section
-            continue
         except Exception as e:
-            logging.error(
-                f"Error processing section {section.section_id}: {str(e)}",
-                exc_info=True,
-            )
+            # Check if this is a timeout-related exception
+            if isinstance(e, RegexTimeout) or "timed out" in str(e).lower():
+                logging.warning(f"Timeout processing section {section.section_id}")
+                # Collect timeout information to return to parent process
+                timeout_sections.append(
+                    {
+                        "filing_uuid": section.filing_uuid,
+                        "section_id": section.section_id,
+                        "chunk_id": 0,
+                        "start_offset": 0,
+                        "pattern_type": "section_processing",
+                        "processing_time": 60.0,
+                        "error_message": str(e),
+                        "text_length": len(section.text),
+                    }
+                )
+                # Continue to next section
+                continue
+            else:
+                logging.error(
+                    f"Error processing section {section.section_id}: {str(e)}",
+                    exc_info=True,
+                )
 
     logging.info(
         f"Chunk complete: {len(all_results)} total matches, {len(unmatched_sections)} unmatched sections, {len(timeout_sections)} timeouts"

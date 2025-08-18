@@ -1588,12 +1588,6 @@ def process_single_section_with_timeout(
         return process_single_section(
             section, timeout_tracker=timeout_tracker, run_id=run_id
         )
-    except RegexTimeout as e:
-        # Re-raise so it can be caught by process_chunk for timeout tracking
-        logging.warning(
-            f"Timeout processing section {section.section_id} - re-raising for tracking"
-        )
-        raise
     finally:
         signal.alarm(0)
 
