@@ -57,6 +57,8 @@ def process_chunk(
                     "text_length": len(section.text),
                 }
             )
+            # Return empty results for this section
+            continue
         except Exception as e:
             logging.error(
                 f"Error processing section {section.section_id}: {str(e)}",
