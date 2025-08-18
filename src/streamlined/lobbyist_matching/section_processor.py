@@ -1415,6 +1415,9 @@ def process_single_section(
 
         return final_results, unmatched_sections
 
+    except RegexTimeout as e:
+        logging.warning(f"Timeout processing section {section.section_id}: {str(e)}")
+        raise  # Re-raise so it can be caught by the wrapper function
     except Exception as e:
         logging.error(
             f"Error processing section {section.section_id}: {str(e)}", exc_info=True
