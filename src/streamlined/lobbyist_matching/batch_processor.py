@@ -14,12 +14,12 @@ from tqdm import tqdm
 
 def process_chunk(
     chunk: list[FilingSection],
-    timeout_tracker: Any = None,
     run_id: int | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Process a chunk of sections with enhanced logging."""
     all_results = []
     unmatched_sections = []
+    timeout_sections = []
 
     chunk_size = len(chunk)
     logging.info(f"Starting processing of chunk with {chunk_size} sections")
@@ -30,7 +30,7 @@ def process_chunk(
                 f"Processing section {section.section_id} ({idx}/{chunk_size})"
             )
             results, unmatched = process_single_section_with_timeout(
-                section, timeout_tracker=timeout_tracker, run_id=run_id
+                section, timeout_tracker=None, run_id=run_id
             )
 
             if results:
@@ -44,8 +44,19 @@ def process_chunk(
 
         except RegexTimeout as e:
             logging.warning(f"Timeout processing section {section.section_id}")
-            # Timeout is already handled by process_single_section_with_timeout
-            # which stores it directly to the timeout_tracker
+            # Collect timeout information to return to parent process
+            timeout_sections.append(
+                {
+                    "filing_uuid": section.filing_uuid,
+                    "section_id": section.section_id,
+                    "chunk_id": 0,
+                    "start_offset": 0,
+                    "pattern_type": "section_processing",
+                    "processing_time": 60.0,
+                    "error_message": str(e),
+                    "text_length": len(section.text),
+                }
+            )
         except Exception as e:
             logging.error(
                 f"Error processing section {section.section_id}: {str(e)}",
@@ -53,9 +64,9 @@ def process_chunk(
             )
 
     logging.info(
-        f"Chunk complete: {len(all_results)} total matches, {len(unmatched_sections)} unmatched sections"
+        f"Chunk complete: {len(all_results)} total matches, {len(unmatched_sections)} unmatched sections, {len(timeout_sections)} timeouts"
     )
-    return all_results, unmatched_sections
+    return all_results, unmatched_sections, timeout_sections
 
 
 @dataclass
@@ -162,20 +173,28 @@ class BatchProcessor:
                             future = executor.submit(
                                 process_chunk,
                                 chunk,
-                                self.timeout_tracker,
                                 run_id,
                             )
                             chunk_futures.append((chunk_idx, future))
 
                         for chunk_idx, future in chunk_futures:
                             try:
-                                chunk_results, chunk_unmatched = future.result(
-                                    timeout=300
+                                chunk_results, chunk_unmatched, chunk_timeouts = (
+                                    future.result(timeout=300)
                                 )
                                 results.extend(chunk_results)
                                 unmatched_sections.extend(chunk_unmatched)
+
+                                # Add timeouts to the tracker
+                                if chunk_timeouts and self.timeout_tracker:
+                                    for timeout_info in chunk_timeouts:
+                                        from timeout_handler import TimeoutSection
+
+                                        timeout = TimeoutSection(**timeout_info)
+                                        self.timeout_tracker.add_timeout(timeout)
+
                                 logging.debug(
-                                    f"Batch {batch_idx}, Chunk {chunk_idx}: {len(chunk_results)} matches"
+                                    f"Batch {batch_idx}, Chunk {chunk_idx}: {len(chunk_results)} matches, {len(chunk_timeouts)} timeouts"
                                 )
                             except Exception as e:
                                 logging.error(
