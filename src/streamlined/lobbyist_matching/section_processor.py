@@ -1420,30 +1420,8 @@ def process_single_section(
 
     except RegexTimeout as e:
         logging.warning(f"Timeout processing section {section.section_id}: {str(e)}")
-        # Store timeout information if tracker is provided
-        if timeout_tracker and run_id is not None:
-            try:
-                from timeout_handler import TimeoutSection
-
-                timeout_info = TimeoutSection(
-                    filing_uuid=section.filing_uuid,
-                    section_id=section.section_id,
-                    chunk_id=0,  # Single section processing
-                    start_offset=0,
-                    pattern_type="section_processing",
-                    processing_time=60.0,
-                    error_message=str(e),
-                    text_length=len(section.text),
-                )
-                timeout_tracker.add_timeout(timeout_info)
-                logging.warning(
-                    f"Timeout for section {section.section_id} stored to tracker"
-                )
-            except Exception as store_error:
-                logging.error(
-                    f"Failed to store timeout for section {section.section_id}: {str(store_error)}"
-                )
-        raise  # Re-raise so it can be caught by the wrapper function
+        # Re-raise so it can be caught by the wrapper function
+        raise
     except Exception as e:
         logging.error(
             f"Error processing section {section.section_id}: {str(e)}", exc_info=True
