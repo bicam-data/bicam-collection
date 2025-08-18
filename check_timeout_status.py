@@ -62,9 +62,12 @@ async def check_timeout_status(run_id: int):
             # Check timeout sections
             timeout_count = await conn.fetchval(
                 """
-                SELECT COUNT(DISTINCT filing_uuid, section_id)
-                FROM lobbied_bill_matching.timeout_sections
-                WHERE run_id = $1
+                SELECT COUNT(*)
+                FROM (
+                    SELECT DISTINCT filing_uuid, section_id
+                    FROM lobbied_bill_matching.timeout_sections
+                    WHERE run_id = $1
+                ) AS distinct_timeouts
                 """,
                 run_id,
             )
