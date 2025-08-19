@@ -427,7 +427,7 @@ async def main():
                     SELECT cts.filing_uuid, cts.section_id, cts.issue_text AS text, f.filing_year
                     FROM timeouts t
                     JOIN raw___lda_pre2008.cleaned_text_sections cts
-                      ON cts.filing_uuid = t.filing_uuid AND cts.section_id = t.section_id
+                      ON cts.filing_uuid = t.filing_uuid AND cts.section_id::TEXT = t.section_id
                     JOIN relational___lda.filings f
                       ON cts.filing_uuid = f.filing_uuid
                     WHERE cts.issue_text IS NOT NULL AND length(cts.issue_text) > 3
@@ -506,7 +506,7 @@ async def main():
             MAX(f.filing_year) as max_year
         FROM lobbied_bill_matching.extracted_references er
          JOIN lobbied_bill_matching.reference_matches rm ON er.reference_id = rm.reference_id
-        JOIN raw___lda_pre2008.cleaned_text_sections cts ON er.section_id = cts.section_id
+        JOIN raw___lda_pre2008.cleaned_text_sections cts ON er.section_id = cts.section_id::TEXT
         JOIN relational___lda.filings f ON cts.filing_uuid = f.filing_uuid
         WHERE er.run_id = {run_id};
         """)
