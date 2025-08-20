@@ -166,7 +166,7 @@ async def main():
                         SELECT cts.filing_uuid, cts.section_id, cts.issue_text AS text, f.filing_year
                         FROM raw___lda_pre2008.cleaned_text_sections cts
                         JOIN relational___lda.filings f ON cts.filing_uuid = f.filing_uuid
-                        WHERE cts.filing_uuid = $1 AND cts.section_id = $2::TEXT
+                        WHERE cts.filing_uuid = $1 AND cts.section_id::TEXT = $2::TEXT
                         AND cts.issue_text IS NOT NULL AND length(cts.issue_text) > 3
                         """,
                         row["filing_uuid"],
