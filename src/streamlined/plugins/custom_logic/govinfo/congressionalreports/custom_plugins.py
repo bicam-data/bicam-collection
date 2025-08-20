@@ -314,6 +314,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         async with self.db_pool.acquire() as conn:
             try:
+                logger.info(
+                    f"Starting congressionalreports_committees streaming with chunk_size={chunk_size}"
+                )
+
                 # First, check if both tables exist
                 tables_exist_query = """
                 SELECT COUNT(*) FROM information_schema.tables
@@ -358,6 +362,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 # Stream using pagination with aggregated formats
                 offset = 0
                 while True:
+                    logger.debug(
+                        f"Fetching congressionalreports_committees chunk at offset {offset}"
+                    )
+
                     # Use JSON aggregation to collect all formats for each text
                     query = f"""
                     SELECT
@@ -395,8 +403,18 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     LIMIT {chunk_size} OFFSET {offset}
                     """
 
+                    logger.debug(
+                        f"Executing query for congressionalreports_committees at offset {offset}"
+                    )
                     rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports_committees at offset {offset}"
+                    )
+
                     if not rows:
+                        logger.info(
+                            f"No more congressionalreports_committees records at offset {offset}"
+                        )
                         break
 
                     chunk = []
@@ -411,6 +429,9 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             continue
 
                     if chunk:  # Only yield if we have valid records
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports_committees records"
+                        )
                         yield chunk
 
                     offset += chunk_size
@@ -438,6 +459,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         async with self.db_pool.acquire() as conn:
             try:
+                logger.info(
+                    f"Starting congressionalreports_members streaming with chunk_size={chunk_size}"
+                )
+
                 # First, check if both tables exist
                 tables_exist_query = """
                 SELECT COUNT(*) FROM information_schema.tables
@@ -480,6 +505,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 # Stream using pagination with aggregated formats
                 offset = 0
                 while True:
+                    logger.debug(
+                        f"Fetching congressionalreports_members chunk at offset {offset}"
+                    )
+
                     # Use JSON aggregation to collect all formats for each text
                     query = f"""
                     SELECT
@@ -502,10 +531,22 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crgm.granule_id = crg.id
                     JOIN {self.staging_schema}.congressionalreports AS cr ON crg.packageid = cr.packageid
                     GROUP BY crg.packageid, crg.granuleid, crgm.bioguideid, crgm.membername, crgm.authorityid, crgm.gpoid, crgmn.authority_fnf, crgmn.authority_other, crg.partnumber, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart, crg.heading
+                    ORDER BY crg.packageid, crg.granuleid NULLS FIRST
+                    LIMIT {chunk_size} OFFSET {offset}
                     """
 
+                    logger.debug(
+                        f"Executing query for congressionalreports_members at offset {offset}"
+                    )
                     rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports_members at offset {offset}"
+                    )
+
                     if not rows:
+                        logger.info(
+                            f"No more congressionalreports_members records at offset {offset}"
+                        )
                         break
 
                     chunk = []
@@ -520,6 +561,9 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             continue
 
                     if chunk:  # Only yield if we have valid records
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports_members records"
+                        )
                         yield chunk
 
                     offset += chunk_size
@@ -547,6 +591,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         async with self.db_pool.acquire() as conn:
             try:
+                logger.info(
+                    f"Starting congressionalreports streaming with chunk_size={chunk_size}"
+                )
+
                 # First, check if both tables exist
                 tables_exist_query = """
                 SELECT COUNT(*) FROM information_schema.tables
@@ -589,6 +637,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 # Stream using pagination with aggregated formats
                 offset = 0
                 while True:
+                    logger.debug(
+                        f"Fetching congressionalreports chunk at offset {offset}"
+                    )
+
                     # Use JSON aggregation to collect all formats for each text
                     query = f"""
                     SELECT * FROM (
@@ -724,8 +776,18 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     LIMIT {chunk_size} OFFSET {offset}
                     """
 
+                    logger.debug(
+                        f"Executing query for congressionalreports at offset {offset}"
+                    )
                     rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports at offset {offset}"
+                    )
+
                     if not rows:
+                        logger.info(
+                            f"No more congressionalreports records at offset {offset}"
+                        )
                         break
 
                     chunk = []
@@ -740,6 +802,9 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             continue
 
                     if chunk:  # Only yield if we have valid records
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports records"
+                        )
                         yield chunk
 
                     offset += chunk_size
@@ -785,6 +850,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         try:
             offset = 0
             while True:
+                logger.debug(
+                    f"Fetching congressionalreports_reference_bills chunk at offset {offset}"
+                )
+
                 async with self.db_pool.acquire() as conn, conn.transaction():
                     query = f"""
                             SELECT crgrc.*, crg.granuleid, crg.partnumber, crg.heading, cr.packageid, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart
@@ -796,8 +865,18 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             LIMIT {chunk_size} OFFSET {offset}
                             """
 
+                    logger.debug(
+                        f"Executing query for congressionalreports_reference_bills at offset {offset}"
+                    )
                     rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports_reference_bills at offset {offset}"
+                    )
+
                     if not rows:
+                        logger.info(
+                            f"No more congressionalreports_reference_bills records at offset {offset}"
+                        )
                         break
 
                     chunk = []
@@ -812,6 +891,9 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             continue
 
                     if chunk:
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports_reference_bills records"
+                        )
                         yield chunk
 
                     offset += chunk_size
@@ -1139,6 +1221,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     FROM {self.staging_schema}.congressionalreports
                 """
                 rows = await conn.fetch(fetch_sql)
+                logger.info(f"Found {len(rows)} records with ils_system_id data")
 
                 # Prepare batch params
                 insert_sql = f"""
@@ -1156,10 +1239,18 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             ils_ids = json.loads(ils_system_id_raw)
                         elif isinstance(ils_system_id_raw, list):
                             ils_ids = ils_system_id_raw
+                        elif isinstance(ils_system_id_raw, int | float):
+                            # Handle case where it's a single integer/float
+                            ils_ids = [str(ils_system_id_raw)]
                         else:
                             ils_ids = [str(ils_system_id_raw)]
                     except json.JSONDecodeError:
                         ils_ids = [str(ils_system_id_raw)]
+
+                    # Ensure ils_ids is always a list
+                    if not isinstance(ils_ids, list):
+                        ils_ids = [str(ils_ids)]
+
                     for ils_id in ils_ids:
                         if ils_id:
                             batch_params.append((row["package_id"], str(ils_id)))
@@ -1172,6 +1263,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                         await conn.executemany(insert_sql, chunk)
                         total_inserted += len(chunk)
 
+                logger.info(f"Inserted {total_inserted} ils_system_id records")
                 results["operations"].append(
                     {
                         "name": "populate_ils_system_id_field",
@@ -1202,6 +1294,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 WHERE serialset_bagid IS NOT NULL OR serialset_docid IS NOT NULL OR serialset_serialsetnumber IS NOT NULL
                 """
                 rows = await conn.fetch(fetch_sql)
+                logger.info(f"Found {len(rows)} records with serialset data")
 
                 serialset_records = []
                 for row in rows:
@@ -1215,10 +1308,18 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             row["serialset_serialsetnumber"],
                             row["agency"],
                             row["volume"],
-                            row["oclc_number"],
-                            row["lccn_number"],
-                            row["issn_number"],
-                            row["last_modified"],
+                            row[
+                                "otheridentifier_oclc"
+                            ],  # Fixed: use correct column name
+                            row[
+                                "otheridentifier_lccn"
+                            ],  # Fixed: use correct column name
+                            row[
+                                "otheridentifier_issn"
+                            ],  # Fixed: use correct column name
+                            self.standardize_date(
+                                row["lastmodified"]
+                            ),  # Fixed: use correct column name and standardize date
                         )
                     )
                 if serialset_records:
@@ -1233,6 +1334,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                         chunk = serialset_records[i : i + chunk_size]
                         await conn.executemany(insert_sql, chunk)
                         serialset_rows_affected += len(chunk)
+                    logger.info(f"Inserted {serialset_rows_affected} serialset records")
                     results["operations"].append(
                         {
                             "name": "populate_serialset_field",
@@ -1241,6 +1343,8 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                         }
                     )
                     results["rows_affected"] += serialset_rows_affected
+                else:
+                    logger.info("No serialset records to insert")
         except Exception as e:
             logger.error(f"Error populating serialset field: {e}", exc_info=True)
             results["operations"].append(
@@ -1268,7 +1372,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
                 while True:
                     fetch_sql = f"""
-                    SELECT c.packageid AS package_id, cg.collectioncode, cgrc.contents
+                    SELECT c.packageid AS package_id, cg.collectioncode, cgr.contents
                     FROM {self.staging_schema}.congressionalreports_granules_references_contents AS cgrc
                     JOIN {self.staging_schema}.congressionalreports_granules_references AS cgr ON cgrc.references_id = cgr.id
                     JOIN {self.staging_schema}.congressionalreports_granules AS cg ON cgr.granule_id = cg.id
@@ -1277,6 +1381,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     LIMIT {limit} OFFSET {offset}
                     """
                     rows = await conn.fetch(fetch_sql)
+                    logger.debug(
+                        f"Processing references chunk at offset {offset}: {len(rows)} rows"
+                    )
+
                     if not rows:
                         break
 
@@ -1411,6 +1519,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
                     offset += limit
 
+                logger.info(f"References processing completed: {total_counts}")
                 results["operations"].append(
                     {
                         "name": "populate_references_field",

@@ -37,9 +37,14 @@ class HearingPackagesCleaner:
     """
 
     #TODO: for now, skip GOVPUB, but then go back manually for jacketnumbers?
-    #TODO: agencies are valid
+    #TODO: agencies are valid, we should clean them
     #TODO: clean committee codes, and fill in empty committees (using fuzzy name matching with other values in the column)
     #TODO: fill in 5k hearings members without bioguide ids
+    ####
+    #SELECT DISTINCT ON (gmn.parsed) * FROM bicam_staging_govinfo.hearingpackages_granules_members AS gm
+    #JOIN bicam_staging_govinfo.hearingpackages_granules_members_name AS gmn ON gm.id = gmn.members_id
+    #WHERE gm.bioguideid IS NULL;
+    ####
     #TODO: granules_committees, committees, granules_references, references, helddates
 
     def __init__(

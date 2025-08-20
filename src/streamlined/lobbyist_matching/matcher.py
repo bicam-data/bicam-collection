@@ -730,7 +730,7 @@ class ReferenceMatcher:
         # Determine if this is a formal title that should match against official titles first
         formal_title_patterns = [
             r"^To\s+",
-            r"^A bill to\s+",
+            r"^A bill \s+",
             r"^A (?:joint\s+|concurrent\s+)?resolution\s+",
             r"^[A-Z][a-z]+ing\b(?!.*(?:Act|Bill|Resolution)$)",
         ]
@@ -918,7 +918,9 @@ class ReferenceMatcher:
             extracted_title=reference.get("title"),
             extracted_bill_number=reference.get("bill_number"),
             extracted_law_number=reference.get("law_number"),
-            matched_congress=None,
+            matched_congress=reference.get(
+                "congress_number"
+            ),  # Preserve congress number from reference
             matched_bill_type=None,
             matched_bill_number=None,
             matched_title=None,

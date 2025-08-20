@@ -642,7 +642,8 @@ class ReferenceMatcher:
             r'^To\s+',
             r'^A bill to\s+',
             r'^A (?:joint\s+|concurrent\s+)?resolution\s+',
-            r'^[A-Z][a-z]+ing\b(?!.*(?:Act|Bill|Resolution)$)'
+            r'^[A-Z][a-z]+ing\b(?!.*(?:Act|Bill|Resolution)$)',
+            r'^An original bill\s+'
         ]
         
         is_formal_title = any(re.match(pattern, extracted_title) for pattern in formal_title_patterns)

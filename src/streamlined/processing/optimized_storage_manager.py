@@ -1578,6 +1578,10 @@ class OptimizedCleanerStorage:
         Yields:
             Batches of records as list of dictionaries
         """
+        logger.info(
+            f"stream_staging_data called for table {table_name} with batch_size={batch_size}, checkpoint_offset={checkpoint_offset}"
+        )
+
         # Determine whether this table should be processed at all
         table_specific_cleaner_exists = bool(
             custom_logic and hasattr(custom_logic, f"_clean_{table_name}_singular")
@@ -1591,6 +1595,10 @@ class OptimizedCleanerStorage:
         if isinstance(mtd_normalized, list):
             mtd_normalized = {table_name: mtd_normalized}
         is_multi_table_root = bool(mtd_normalized and table_name in mtd_normalized)
+
+        logger.info(
+            f"Table {table_name} analysis: cleaner_exists={table_specific_cleaner_exists}, stream_exists={table_specific_stream_exists}, is_multi_table_root={is_multi_table_root}"
+        )
 
         if not (
             table_specific_cleaner_exists
@@ -1615,8 +1623,12 @@ class OptimizedCleanerStorage:
             )
 
             # Call the custom streaming method with batch_size
+            logger.info(
+                f"Calling custom streaming method _stream_{table_name}_joined_chunks"
+            )
             async for chunk in custom_stream_method(batch_size):
                 yield chunk
+            logger.info(f"Completed custom streaming method for {table_name}")
             return
 
         # Check if this is a multi-table data type that needs special handling

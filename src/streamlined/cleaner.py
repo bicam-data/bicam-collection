@@ -350,6 +350,11 @@ class StreamlinedCleaner:
                 else None
             )
 
+            logger.info(
+                f"Starting streaming for table {table} with chunk_size={chunk_size}, start_offset={start_offset}"
+            )
+            logger.info(f"Multi-table config for {table}: {multi_table_data_types}")
+
             async for chunk in cleaner_storage.stream_staging_data(
                 table_name=table,
                 batch_size=chunk_size,
@@ -358,6 +363,10 @@ class StreamlinedCleaner:
                 multi_table_data_types=multi_table_data_types,
                 custom_logic=custom_logic,
             ):
+                logger.debug(
+                    f"Processing chunk for table {table}: {len(chunk)} records"
+                )
+
                 # Process chunk of records
                 chunk_result = await self._process_chunk(
                     chunk,
@@ -373,6 +382,10 @@ class StreamlinedCleaner:
                 stats["errors"] += chunk_result.get("errors", 0)
                 stats["chunks_processed"] += 1
 
+                logger.debug(
+                    f"Completed chunk {stats['chunks_processed']} for table {table}: {chunk_result.get('records_processed', 0)} records processed, {chunk_result.get('errors', 0)} errors"
+                )
+
                 # Update checkpoint periodically
                 if stats["chunks_processed"] % 10 == 0:
                     checkpoint = cleaning_checkpoint.cm.get_or_create_checkpoint(
@@ -383,10 +396,18 @@ class StreamlinedCleaner:
                     checkpoint.processed_items = stats["records_processed"]
                     checkpoint.current_table = table
                     cleaning_checkpoint.save_checkpoint(checkpoint)
+                    logger.info(
+                        f"Updated checkpoint for table {table}: {stats['records_processed']} records processed"
+                    )
+
+            logger.info(
+                f"Completed streaming for table {table}: {stats['chunks_processed']} chunks, {stats['records_processed']} records"
+            )
 
             # Mark table as processed
             if not rerun and stats["records_processed"] > 0:
                 cleaning_checkpoint.mark_table_cleaned(table)
+                logger.info(f"Marked table {table} as cleaned")
 
             stats["success"] = True
 
