@@ -36,7 +36,7 @@ async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
             # Get unmatched references with bill numbers
             unmatched_refs = await conn.fetch(
                 """
-                SELECT 
+                SELECT
                     r.reference_id,
                     r.title,
                     r.bill_type,
@@ -45,7 +45,7 @@ async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
                     r.filing_uuid,
                     r.section_id
                 FROM lobbied_bill_matching.extracted_references r
-                LEFT JOIN lobbied_bill_matching.reference_matches m 
+                LEFT JOIN lobbied_bill_matching.reference_matches m
                     ON r.reference_id = m.reference_id AND m.run_id = $1
                 WHERE r.run_id = $1
                 AND (m.match_type = 'unmatched' OR m.match_id IS NULL)
@@ -62,7 +62,7 @@ async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
             # Load corpus bills
             bills_data = await conn.fetch("""
                 WITH bill_titles AS (
-                    SELECT 
+                    SELECT
                         b.congress::TEXT,
                         b.bill_type,
                         b.bill_number::TEXT,
@@ -70,10 +70,10 @@ async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
                     FROM bicam.bills b
                     LEFT JOIN bicam.bills_titles t ON b.bill_id = t.bill_id
                     GROUP BY b.congress, b.bill_type, b.bill_number
-                    
+
                     UNION
-                    
-                    SELECT 
+
+                    SELECT
                         b.congress_num::TEXT as congress,
                         b.bill_type,
                         b.bill_number::TEXT,
@@ -243,7 +243,7 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
             # Get wrong_title matches
             wrong_titles = await conn.fetch(
                 """
-                SELECT 
+                SELECT
                     r.reference_id,
                     r.title,
                     r.reference_type,
@@ -254,7 +254,7 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
                     m.matched_congress,
                     m.bill_id
                 FROM lobbied_bill_matching.extracted_references r
-                JOIN lobbied_bill_matching.reference_matches m 
+                JOIN lobbied_bill_matching.reference_matches m
                     ON r.reference_id = m.reference_id
                 WHERE r.run_id = $1
                 AND m.run_id = $1
@@ -319,7 +319,7 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
                 await conn.executemany(
                     """
                     UPDATE lobbied_bill_matching.reference_matches
-                    SET 
+                    SET
                         match_type = $1,
                         matched_congress = $2,
                         matched_bill_type = $3,
@@ -403,8 +403,8 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
                 try:
                     exists = await conn.fetchval(
                         """
-                        SELECT 1 FROM pg_indexes 
-                        WHERE tablename = $1 
+                        SELECT 1 FROM pg_indexes
+                        WHERE tablename = $1
                         AND indexname = $2
                     """,
                         "reference_matches"
@@ -426,7 +426,7 @@ async def deduplicate_matches(pool: asyncpg.Pool, run_id: int) -> None:
             result = await conn.execute(
                 """
                 WITH ranked_matches AS (
-                    SELECT 
+                    SELECT
                         m.match_id,
                         ROW_NUMBER() OVER (
                             PARTITION BY m.bill_id, e.section_id
@@ -485,7 +485,7 @@ async def post_process_low_confidence(pool: asyncpg.Pool, run_id: int) -> None:
             # Get low confidence matches
             low_conf_matches = await conn.fetch(
                 """
-                SELECT 
+                SELECT
                     r.reference_id,
                     r.title,
                     r.reference_type,
@@ -498,7 +498,7 @@ async def post_process_low_confidence(pool: asyncpg.Pool, run_id: int) -> None:
                     m.confidence_score,
                     m.update_source
                 FROM lobbied_bill_matching.extracted_references r
-                JOIN lobbied_bill_matching.reference_matches m 
+                JOIN lobbied_bill_matching.reference_matches m
                     ON r.reference_id = m.reference_id
                 WHERE r.run_id = $1
                 AND m.run_id = $1
@@ -553,7 +553,7 @@ async def post_process_low_confidence(pool: asyncpg.Pool, run_id: int) -> None:
                 await conn.executemany(
                     """
                     UPDATE lobbied_bill_matching.reference_matches
-                    SET 
+                    SET
                         updated_bill_id = $1,
                         update_source = $2,
                         matched_title = $3,

@@ -12,11 +12,14 @@ to actual bills in the congressional corpus. It includes:
 
 import asyncio
 import gc
+import json
 import logging
 import multiprocessing as mp
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from multiprocessing import Pool
 from typing import NamedTuple
@@ -74,6 +77,123 @@ class MemoryMonitor:
             gc.collect()
             return True
         return False
+
+
+class MatchingLogger:
+    """Detailed logger for tracking matching results and methods used.
+
+    This logger tracks which matching methods were attempted, which succeeded,
+    and which failed for each reference, storing results in a structured log file.
+    """
+
+    def __init__(self, run_id: int, log_dir: str = "logs"):
+        """Initialize the matching logger.
+
+        Args:
+            run_id (int): The processing run ID
+            log_dir (str): Directory to store log files
+        """
+        self.run_id = run_id
+        self.log_dir = log_dir
+        self.log_file = os.path.join(log_dir, f"matching_results_run_{run_id}.jsonl")
+
+        # Ensure log directory exists
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Initialize log file with header
+        with open(self.log_file, "w") as f:
+            f.write(f"# Matching Results Log for Run {run_id}\n")
+            f.write(f"# Started at: {datetime.now().isoformat()}\n")
+            f.write("# Format: JSON lines with matching details\n\n")
+
+    def log_matching_attempt(
+        self,
+        reference_id: int,
+        reference_type: str,
+        method_attempted: str,
+        success: bool,
+        confidence_score: float = None,
+        matched_bill_id: str = None,
+        error_message: str = None,
+        congress_number: int = None,
+        bill_type: str = None,
+        bill_number: str = None,
+        title: str = None,
+    ):
+        """Log a matching attempt for a reference.
+
+        Args:
+            reference_id (int): The reference ID being processed
+            reference_type (str): Type of reference (bill, law, title, etc.)
+            method_attempted (str): The matching method attempted
+            success (bool): Whether the method succeeded
+            confidence_score (float, optional): Confidence score if successful
+            matched_bill_id (str, optional): Matched bill ID if successful
+            error_message (str, optional): Error message if failed
+            congress_number (int, optional): Congress number from reference
+            bill_type (str, optional): Bill type from reference
+            bill_number (str, optional): Bill number from reference
+            title (str, optional): Title from reference
+        """
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "run_id": self.run_id,
+            "reference_id": reference_id,
+            "reference_type": reference_type,
+            "method_attempted": method_attempted,
+            "success": success,
+            "confidence_score": confidence_score,
+            "matched_bill_id": matched_bill_id,
+            "error_message": error_message,
+            "congress_number": congress_number,
+            "bill_type": bill_type,
+            "bill_number": bill_number,
+            "title": title[:200] + "..."
+            if title and len(title) > 200
+            else title,  # Truncate long titles
+        }
+
+        with open(self.log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+    def log_final_result(
+        self,
+        reference_id: int,
+        final_match_type: str,
+        final_confidence: float,
+        final_bill_id: str = None,
+        methods_attempted: list = None,
+    ):
+        """Log the final result for a reference after all methods attempted.
+
+        Args:
+            reference_id (int): The reference ID
+            final_match_type (str): Final match type (high_confidence_match, unmatched, etc.)
+            final_confidence (float): Final confidence score
+            final_bill_id (str, optional): Final matched bill ID
+            methods_attempted (list, optional): List of methods that were attempted
+        """
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "run_id": self.run_id,
+            "reference_id": reference_id,
+            "event_type": "final_result",
+            "final_match_type": final_match_type,
+            "final_confidence": final_confidence,
+            "final_bill_id": final_bill_id,
+            "methods_attempted": methods_attempted or [],
+        }
+
+        with open(self.log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+    def get_log_file_path(self) -> str:
+        """Get the path to the log file.
+
+        Returns:
+            str: Path to the log file
+        """
+        return self.log_file
 
 
 @dataclass(frozen=True)
@@ -371,9 +491,10 @@ class ReferenceMatcher:
         pools: Process pools for parallel matching
         memory_monitor: Monitors memory usage
         appropriations_titles: Standard appropriations bill titles
+        logger: Optional matching logger for detailed tracking
     """
 
-    def __init__(self, bill_trie: BillTrie):
+    def __init__(self, bill_trie: BillTrie, logger: MatchingLogger = None):
         self.bill_trie = bill_trie
         self.appropriations_trie = AppropriationsTrie()
         self.title_threshold = 0.5
@@ -382,6 +503,8 @@ class ReferenceMatcher:
         self.num_pools = None
         self.current_pool = 0
         self.memory_monitor = MemoryMonitor()
+        self.logger = logger
+
         # Load standard appropriations titles
         self.appropriations_titles = {
             normalize_appropriations_title(title)
@@ -436,31 +559,90 @@ class ReferenceMatcher:
         Returns:
             MatchResult if successful, None if reference invalid
         """
+        methods_attempted = []
+        final_result = None
+
         try:
             if not reference or "reference_id" not in reference:
                 logging.warning("Invalid reference object")
+                if self.logger:
+                    self.logger.log_matching_attempt(
+                        reference_id=reference.get("reference_id")
+                        if reference
+                        else None,
+                        reference_type=reference.get("reference_type")
+                        if reference
+                        else None,
+                        method_attempted="validation",
+                        success=False,
+                        error_message="Invalid reference object",
+                    )
                 return None
 
             ref_type = reference.get("reference_type")
-            logging.info(f"Matching reference type: {ref_type}")
+            reference_id = reference.get("reference_id")
+            logging.info(f"Matching reference {reference_id}, type: {ref_type}")
+
             # Skip combined types
             if ref_type in ("number_in_combined", "title_in_combined"):
+                if self.logger:
+                    self.logger.log_matching_attempt(
+                        reference_id=reference_id,
+                        reference_type=ref_type,
+                        method_attempted="combined_reference_skip",
+                        success=False,
+                        error_message="Skipping combined reference type",
+                    )
                 return None
 
+            # Attempt matching based on reference type
             if ref_type in ("bill", "bill_with_title", "bill_with_title_combined"):
-                return self._match_bill_number(reference)
+                methods_attempted.append("bill_number_match")
+                final_result = self._match_bill_number(reference)
             elif ref_type in ("law", "law_with_title"):
-                return self._match_law_number(reference)
+                methods_attempted.append("law_number_match")
+                final_result = self._match_law_number(reference)
             elif ref_type == "title":
-                return self._match_title_only(reference)
+                methods_attempted.append("title_only_match")
+                final_result = self._match_title_only(reference)
             else:
                 logging.warning(f"Unknown reference type: {ref_type}")
-                return self._create_unmatched(reference)
+                if self.logger:
+                    self.logger.log_matching_attempt(
+                        reference_id=reference_id,
+                        reference_type=ref_type,
+                        method_attempted="unknown_type",
+                        success=False,
+                        error_message=f"Unknown reference type: {ref_type}",
+                    )
+                final_result = self._create_unmatched(reference)
+
         except Exception as e:
-            logging.error(
+            error_msg = (
                 f"Error matching reference {reference.get('reference_id')}: {str(e)}"
             )
-            return self._create_unmatched(reference)
+            logging.error(error_msg)
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference.get("reference_id"),
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="exception_handling",
+                    success=False,
+                    error_message=error_msg,
+                )
+            final_result = self._create_unmatched(reference)
+
+        # Log final result
+        if self.logger and final_result:
+            self.logger.log_final_result(
+                reference_id=final_result.reference_id,
+                final_match_type=final_result.match_type,
+                final_confidence=final_result.confidence_score,
+                final_bill_id=final_result.bill_id,
+                methods_attempted=methods_attempted,
+            )
+
+        return final_result
 
     def _match_bill_number(self, reference: dict) -> MatchResult:
         """Match reference with bill number.
@@ -474,22 +656,45 @@ class ReferenceMatcher:
         congress = reference.get("congress_number")
         bill_type = reference.get("bill_type")
         bill_number = reference.get("bill_number")
+        reference_id = reference.get("reference_id")
 
         logging.info(
             f"Attempting bill number match - Congress: {congress}, Type: {bill_type}, Number: {bill_number}"
         )
 
         if not all([congress, bill_type, bill_number]):
-            logging.warning(
-                f"Missing required fields - Congress: {congress}, Type: {bill_type}, Number: {bill_number}"
-            )
+            error_msg = f"Missing required fields - Congress: {congress}, Type: {bill_type}, Number: {bill_number}"
+            logging.warning(error_msg)
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="bill_number_match",
+                    success=False,
+                    error_message=error_msg,
+                    congress_number=congress,
+                    bill_type=bill_type,
+                    bill_number=bill_number,
+                )
             return self._create_unmatched(reference)
 
         # Special handling: if bill number is all zeros, do not use number for matching
         if isinstance(bill_number, str) and re.fullmatch(r"0+", bill_number):
             bill = None
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="bill_number_match_zero",
+                    success=False,
+                    error_message="Bill number is all zeros, skipping direct lookup",
+                    congress_number=congress,
+                    bill_type=bill_type,
+                    bill_number=bill_number,
+                )
         else:
             bill = self.bill_trie.get_bill(congress, bill_type, bill_number)
+
         if not bill:
             # If number is all zeros, try title-only path using chamber and title
             if (
@@ -497,6 +702,18 @@ class ReferenceMatcher:
                 and re.fullmatch(r"0+", bill_number)
                 and reference.get("title")
             ):
+                if self.logger:
+                    self.logger.log_matching_attempt(
+                        reference_id=reference_id,
+                        reference_type=reference.get("reference_type"),
+                        method_attempted="bill_number_fallback_title",
+                        success=True,
+                        confidence_score=0.0,  # Will be updated by title match
+                        congress_number=congress,
+                        bill_type=bill_type,
+                        bill_number=bill_number,
+                        title=reference.get("title"),
+                    )
                 # Create a shallow reference for title-only matching
                 title_only_ref = {
                     "reference_id": reference.get("reference_id"),
@@ -507,15 +724,39 @@ class ReferenceMatcher:
                 title_match = self._match_title_only(title_only_ref)
                 if title_match and title_match.match_type != "unmatched":
                     return title_match
-            logging.warning(
-                f"No matching bill found in trie for {bill_type}{bill_number}-{congress}"
-            )
+
+            error_msg = f"No matching bill found in trie for {bill_type}{bill_number}-{congress}"
+            logging.warning(error_msg)
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="bill_number_match",
+                    success=False,
+                    error_message=error_msg,
+                    congress_number=congress,
+                    bill_type=bill_type,
+                    bill_number=bill_number,
+                )
             return self._create_unmatched(reference)
 
         logging.info(f"Found matching bill in trie: {bill}")
 
         # Match title if present
         if reference.get("title"):
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="bill_number_match_success",
+                    success=True,
+                    confidence_score=1.0,
+                    matched_bill_id=f"{bill_type}{bill_number}-{congress}",
+                    congress_number=congress,
+                    bill_type=bill_type,
+                    bill_number=bill_number,
+                    title=reference.get("title"),
+                )
             return self._match_with_title(reference, bill)
 
         # Number only match
@@ -527,7 +768,7 @@ class ReferenceMatcher:
             else None
         )
 
-        return MatchResult(
+        result = MatchResult(
             reference_id=reference["reference_id"],
             match_type="high_confidence_match",
             confidence_score=1.0,
@@ -541,6 +782,22 @@ class ReferenceMatcher:
             matched_law_number=None,
             bill_id=f"{bill_type}{bill_number}-{congress}",
         )
+
+        if self.logger:
+            self.logger.log_matching_attempt(
+                reference_id=reference_id,
+                reference_type=reference.get("reference_type"),
+                method_attempted="bill_number_match_success",
+                success=True,
+                confidence_score=1.0,
+                matched_bill_id=f"{bill_type}{bill_number}-{congress}",
+                congress_number=congress,
+                bill_type=bill_type,
+                bill_number=bill_number,
+                title=reference.get("title"),
+            )
+
+        return result
 
     @staticmethod
     def standardize_law_number(law_text: str) -> str:
@@ -567,27 +824,57 @@ class ReferenceMatcher:
             MatchResult with match details
         """
         law_number = reference.get("law_number")
+        reference_id = reference.get("reference_id")
+
         if not law_number:
-            logging.warning("No law number provided in reference")
+            error_msg = "No law number provided in reference"
+            logging.warning(error_msg)
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="law_number_match",
+                    success=False,
+                    error_message=error_msg,
+                )
             return self._create_unmatched(reference)
 
         # Standardize the format before lookup
-        standardized_law = self.standardize_law_number(
-            law_number
-        )  # Note the self. here
+        standardized_law = self.standardize_law_number(law_number)
         logging.info(
             f"Looking up law number {law_number} (standardized: {standardized_law})"
         )
         bill = self.bill_trie.get_by_law(standardized_law)
+
         if not bill:
-            logging.warning(f"No match found for law number {standardized_law}")
+            error_msg = f"No match found for law number {standardized_law}"
+            logging.warning(error_msg)
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="law_number_match",
+                    success=False,
+                    error_message=error_msg,
+                    title=reference.get("title"),
+                )
             return self._create_unmatched(reference)
 
         # Match title if present
         if reference.get("title"):
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="law_number_match_success",
+                    success=True,
+                    confidence_score=1.0,
+                    matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+                    title=reference.get("title"),
+                )
             return self._match_with_title(reference, bill)
 
-        return MatchResult(
+        result = MatchResult(
             reference_id=reference["reference_id"],
             match_type="high_confidence_match",
             confidence_score=1.0,
@@ -602,6 +889,19 @@ class ReferenceMatcher:
             bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
         )
 
+        if self.logger:
+            self.logger.log_matching_attempt(
+                reference_id=reference_id,
+                reference_type=reference.get("reference_type"),
+                method_attempted="law_number_match_success",
+                success=True,
+                confidence_score=1.0,
+                matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+                title=reference.get("title"),
+            )
+
+        return result
+
     def _match_title_only(self, reference: dict) -> MatchResult | None:
         """Match reference by title only.
 
@@ -611,11 +911,30 @@ class ReferenceMatcher:
         Returns:
             MatchResult with match details
         """
+        reference_id = reference.get("reference_id")
+
         if not reference.get("title"):
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="title_only_match",
+                    success=False,
+                    error_message="No title provided in reference",
+                )
             return self._create_unmatched(reference)
 
         # Check if this is an appropriations title
         if "approp" in reference["title"].lower():
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="title_only_appropriations",
+                    success=True,
+                    confidence_score=0.0,  # Will be updated by appropriations match
+                    title=reference.get("title"),
+                )
             result = self._match_appropriations_title(reference)
             if result:
                 return result
@@ -685,7 +1004,7 @@ class ReferenceMatcher:
                 else "moderate_confidence_match"
             )
 
-            return MatchResult(
+            result = MatchResult(
                 reference_id=reference["reference_id"],
                 match_type=match_type,
                 confidence_score=confidence,
@@ -695,6 +1014,34 @@ class ReferenceMatcher:
                 matched_bill_number=bill.bill_number,
                 matched_title=matched_title,
                 bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+            )
+
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="title_only_match_success",
+                    success=True,
+                    confidence_score=confidence,
+                    matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+                    congress_number=congress_info,
+                    bill_type=reference.get("bill_type"),
+                    title=extracted_title,
+                )
+
+            return result
+
+        # No match found
+        if self.logger:
+            self.logger.log_matching_attempt(
+                reference_id=reference_id,
+                reference_type=reference.get("reference_type"),
+                method_attempted="title_only_match",
+                success=False,
+                error_message="No matching title found in corpus",
+                congress_number=congress_info,
+                bill_type=reference.get("bill_type"),
+                title=extracted_title,
             )
 
         return self._create_unmatched(reference)
@@ -755,7 +1102,7 @@ class ReferenceMatcher:
                     continue
                 if title.lower().startswith(normalized_extracted.lower()):
                     logging.debug(f"Found prefix match in primary titles: '{title}'")
-                    return MatchResult(
+                    result = MatchResult(
                         reference_id=reference["reference_id"],
                         match_type="high_confidence_match",
                         confidence_score=0.9,  # High confidence for prefix match
@@ -769,13 +1116,26 @@ class ReferenceMatcher:
                         bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
                     )
 
+                    if self.logger:
+                        self.logger.log_matching_attempt(
+                            reference_id=reference_id,
+                            reference_type=reference.get("reference_type"),
+                            method_attempted="title_with_bill_prefix_match",
+                            success=True,
+                            confidence_score=0.9,
+                            matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+                            title=extracted_title,
+                        )
+
+                    return result
+
             # If no prefix match in primary, check secondary
             for title in secondary_titles:
                 if not title:
                     continue
                 if title.lower().startswith(normalized_extracted.lower()):
                     logging.debug(f"Found prefix match in secondary titles: '{title}'")
-                    return MatchResult(
+                    result = MatchResult(
                         reference_id=reference["reference_id"],
                         match_type="high_confidence_match",
                         confidence_score=0.9,
@@ -788,6 +1148,19 @@ class ReferenceMatcher:
                         matched_title=title,
                         bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
                     )
+
+                    if self.logger:
+                        self.logger.log_matching_attempt(
+                            reference_id=reference_id,
+                            reference_type=reference.get("reference_type"),
+                            method_attempted="title_with_bill_prefix_match_secondary",
+                            success=True,
+                            confidence_score=0.9,
+                            matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+                            title=extracted_title,
+                        )
+
+                    return result
         else:
             primary_titles = tuple(bill.titles or ())
             secondary_titles = tuple(bill.official_titles or ())
@@ -803,7 +1176,7 @@ class ReferenceMatcher:
                 continue
             if normalize_title(title) == normalized_extracted:
                 logging.debug(f"Found exact match in primary titles: '{title}'")
-                return MatchResult(
+                result = MatchResult(
                     reference_id=reference["reference_id"],
                     match_type="high_confidence_match",
                     confidence_score=1.0,
@@ -817,6 +1190,19 @@ class ReferenceMatcher:
                     bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
                 )
 
+                if self.logger:
+                    self.logger.log_matching_attempt(
+                        reference_id=reference_id,
+                        reference_type=reference.get("reference_type"),
+                        method_attempted="title_with_bill_exact_match",
+                        success=True,
+                        confidence_score=1.0,
+                        matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+                        title=extracted_title,
+                    )
+
+                return result
+
         # If no exact match in primary, check secondary
         logging.debug(
             f"\nChecking secondary titles ({len(secondary_titles) if secondary_titles else 0} titles):"
@@ -826,7 +1212,7 @@ class ReferenceMatcher:
                 continue
             if normalize_title(title) == normalized_extracted:
                 logging.debug(f"Found exact match in secondary titles: '{title}'")
-                return MatchResult(
+                result = MatchResult(
                     reference_id=reference["reference_id"],
                     match_type="high_confidence_match",
                     confidence_score=1.0,
@@ -839,6 +1225,19 @@ class ReferenceMatcher:
                     matched_title=title,
                     bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
                 )
+
+                if self.logger:
+                    self.logger.log_matching_attempt(
+                        reference_id=reference_id,
+                        reference_type=reference.get("reference_type"),
+                        method_attempted="title_with_bill_exact_match_secondary",
+                        success=True,
+                        confidence_score=1.0,
+                        matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+                        title=extracted_title,
+                    )
+
+                return result
 
         # If no exact matches, proceed with fuzzy matching on all titles
         year_pattern = re.compile(r"\bof\s+(?:19|20)\d{2}\b")
@@ -877,6 +1276,15 @@ class ReferenceMatcher:
             logging.warning(
                 f"No matching title found for reference {reference['reference_id']}"
             )
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="title_with_bill_fuzzy_match",
+                    success=False,
+                    error_message="No matching title found in fuzzy matching",
+                    title=extracted_title,
+                )
             return self._create_unmatched(reference)
 
         match_type = (
@@ -885,7 +1293,7 @@ class ReferenceMatcher:
             else "wrong_title"
         )
 
-        return MatchResult(
+        result = MatchResult(
             reference_id=reference["reference_id"],
             match_type=match_type,
             confidence_score=best_score,
@@ -898,6 +1306,19 @@ class ReferenceMatcher:
             matched_title=best_title,
             bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
         )
+
+        if self.logger:
+            self.logger.log_matching_attempt(
+                reference_id=reference_id,
+                reference_type=reference.get("reference_type"),
+                method_attempted="title_with_bill_fuzzy_match",
+                success=True,
+                confidence_score=best_score,
+                matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{bill.congress}",
+                title=extracted_title,
+            )
+
+        return result
 
     def _create_unmatched(
         self, reference: dict, match_type: str = "unmatched"
@@ -939,17 +1360,38 @@ class ReferenceMatcher:
         Returns:
             Optional[MatchResult]: A MatchResult if a match is found, None otherwise
         """
+        reference_id = reference.get("reference_id")
+
         if not reference or not reference.get("title"):
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type")
+                    if reference
+                    else None,
+                    method_attempted="appropriations_title_match",
+                    success=False,
+                    error_message="No reference or title provided",
+                )
             return None
 
         matches = self.appropriations_trie.find_matching_bills(reference["title"])
         if not matches:
+            if self.logger:
+                self.logger.log_matching_attempt(
+                    reference_id=reference_id,
+                    reference_type=reference.get("reference_type"),
+                    method_attempted="appropriations_title_match",
+                    success=False,
+                    error_message="No appropriations matches found",
+                    title=reference.get("title"),
+                )
             return None
 
         best_match = matches[0]
         bill, matched_title, confidence = best_match
 
-        return MatchResult(
+        result = MatchResult(
             reference_id=reference.get("reference_id"),
             match_type="high_confidence_match" if confidence >= 0.9 else "wrong_title",
             confidence_score=confidence,
@@ -963,6 +1405,19 @@ class ReferenceMatcher:
             matched_law_number=None,
             bill_id=f"{bill.bill_type}{bill.bill_number}-{max(bill.congresses)}",
         )
+
+        if self.logger:
+            self.logger.log_matching_attempt(
+                reference_id=reference_id,
+                reference_type=reference.get("reference_type"),
+                method_attempted="appropriations_title_match",
+                success=True,
+                confidence_score=confidence,
+                matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{max(bill.congresses)}",
+                title=reference.get("title"),
+            )
+
+        return result
 
 
 async def combine_nearby_references(pool: asyncpg.Pool, run_id: int) -> None:
@@ -1418,9 +1873,10 @@ def standardize_bill_type(
 class MatchingManager:
     """Manages bill matching state and processes."""
 
-    def __init__(self):
+    def __init__(self, logger: MatchingLogger = None):
         self.bill_trie: BillTrie | None = None
         self.matcher: ReferenceMatcher | None = None
+        self.logger = logger
         self._lock = asyncio.Lock()
 
     async def initialize(self, pool: asyncpg.Pool):
@@ -1433,7 +1889,7 @@ class MatchingManager:
             if self.bill_trie is None:
                 logging.info("Loading corpus bills...")
                 self.bill_trie = await load_corpus_bills(pool)
-                self.matcher = ReferenceMatcher(self.bill_trie)
+                self.matcher = ReferenceMatcher(self.bill_trie, logger=self.logger)
                 logging.info("Bill trie initialized and ready")
 
     async def match_references(
@@ -1457,8 +1913,17 @@ class MatchingManager:
         if self.matcher is None:
             await self.initialize(pool)
 
+        # Create logger for this run if not already provided
+        if self.logger is None:
+            self.logger = MatchingLogger(run_id)
+            # Reinitialize matcher with logger
+            self.matcher = ReferenceMatcher(self.bill_trie, logger=self.logger)
+
         try:
             logging.info(f"Starting reference matching for run {run_id}")
+            logging.info(
+                f"Matching results will be logged to: {self.logger.get_log_file_path()}"
+            )
 
             async with pool.acquire() as conn:
                 # Get total count first
@@ -1639,17 +2104,20 @@ class MatchingManager:
             raise
 
 
-def process_batch(refs: list[dict], bill_trie: BillTrie) -> list[MatchResult]:
+def process_batch(
+    refs: list[dict], bill_trie: BillTrie, logger: MatchingLogger = None
+) -> list[MatchResult]:
     """Process a batch of references in a worker process.
 
     Args:
         refs (List[Dict]): List of reference dictionaries to process
         bill_trie (BillTrie): Trie structure containing bill corpus
+        logger (MatchingLogger, optional): Logger for tracking matching attempts
 
     Returns:
         List[MatchResult]: List of match results for the batch
     """
-    matcher = ReferenceMatcher(bill_trie)
+    matcher = ReferenceMatcher(bill_trie, logger=logger)
     results = []
     for ref in refs:
         try:

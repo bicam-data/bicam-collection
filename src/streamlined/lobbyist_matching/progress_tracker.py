@@ -22,13 +22,13 @@ from typing import Any
 
 class ProgressTracker:
     """Tracks progress of bill reference extraction and matching runs.
-    
+
     Uses SQLite to maintain state and track progress across runs. Handles run initialization,
     status updates, and progress tracking for filings and sections.
-    
+
     Attributes:
         db_path (str): Path to SQLite database file
-        
+
     Example:
         tracker = ProgressTracker("progress.db")
         tracker.start_run(1, {"sample_size": 1000})
@@ -37,7 +37,7 @@ class ProgressTracker:
 
     def __init__(self, db_path: str = "progress.db"):
         """Initialize progress tracker.
-        
+
         Args:
             db_path (str): Path to SQLite database file. Defaults to "progress.db"
         """
@@ -46,7 +46,7 @@ class ProgressTracker:
 
     def setup_db(self):
         """Create SQLite database and required tables.
-        
+
         Creates the following tables if they don't exist:
         - runs: Tracks overall run status and progress
         - processed_filings: Records processed filing UUIDs
@@ -97,7 +97,7 @@ class ProgressTracker:
 
     def start_run(self, run_id: int, parameters: dict | None = None) -> None:
         """Initialize a new processing run.
-        
+
         Args:
             run_id (int): Unique identifier for the run
             parameters (Optional[Dict]): Run parameters to store. Defaults to None
@@ -116,7 +116,7 @@ class ProgressTracker:
 
     def update_stage(self, run_id: int, stage: str) -> None:
         """Update the processing stage of a run.
-        
+
         Args:
             run_id (int): Run identifier
             stage (str): New processing stage
@@ -125,7 +125,7 @@ class ProgressTracker:
         try:
             c = conn.cursor()
             c.execute("""
-                UPDATE runs 
+                UPDATE runs
                 SET stage = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE run_id = ?
             """, (stage, run_id))
@@ -136,7 +136,7 @@ class ProgressTracker:
 
     def mark_filings_processed(self, run_id: int, filing_uuids: list[str]) -> None:
         """Mark multiple filings as processed for a run.
-        
+
         Args:
             run_id (int): Run identifier
             filing_uuids (List[str]): List of filing UUIDs to mark as processed
@@ -155,7 +155,7 @@ class ProgressTracker:
 
             # Update last filing in runs table
             c.execute("""
-                UPDATE runs 
+                UPDATE runs
                 SET last_filing_uuid = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE run_id = ?
@@ -166,7 +166,7 @@ class ProgressTracker:
 
     def get_last_filing(self) -> str | None:
         """Get the UUID of the last processed filing.
-        
+
         Returns:
             Optional[str]: UUID of last processed filing, or None if no filings processed
         """
@@ -186,11 +186,11 @@ class ProgressTracker:
 
     def get_unprocessed_filings(self, run_id: int, filing_uuids: list[str]) -> list[str]:
         """Get list of filings that haven't been processed yet.
-        
+
         Args:
             run_id (int): Run identifier
             filing_uuids (List[str]): List of filing UUIDs to check
-            
+
         Returns:
             List[str]: List of filing UUIDs that haven't been processed
         """
@@ -213,10 +213,10 @@ class ProgressTracker:
 
     def get_run_progress(self, run_id: int) -> dict[str, Any]:
         """Get progress information for a run.
-        
+
         Args:
             run_id (int): Run identifier
-            
+
         Returns:
             Dict[str, Any]: Dictionary containing:
                 - status: Current run status
@@ -226,7 +226,7 @@ class ProgressTracker:
                 - parameters: Run parameters
                 - processed_filings: Count of processed filings
                 - processed_sections: Count of processed sections
-                
+
             Returns None if run not found
         """
         conn = sqlite3.connect(self.db_path)

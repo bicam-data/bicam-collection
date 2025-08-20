@@ -472,6 +472,7 @@ async def main():
             logger.info("No timed-out sections to reprocess.")
 
         # Matching and post-processing
+        logger.info("Starting bill reference matching with detailed logging...")
         matching_manager = MatchingManager()
         await matching_manager.initialize(db.pool)
         await matching_manager.match_references(db.pool, run_id)
@@ -494,6 +495,9 @@ async def main():
         logger.info("\n✅ Processing completed successfully!")
         logger.info(f"📊 Run ID: {run_id}")
         logger.info("📋 Check results in lobbied_bill_matching schema")
+        logger.info(
+            "📝 Detailed matching logs saved to logs/matching_results_run_{run_id}.jsonl"
+        )
 
         # Show some basic stats query
         logger.info("\n📈 To view results, try this query:")
