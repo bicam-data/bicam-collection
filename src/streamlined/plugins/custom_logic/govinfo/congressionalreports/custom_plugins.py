@@ -1563,115 +1563,173 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     )
                 else:
                     logger.info(f"Found {len(prod_rows)} records to process")
-                    # Group by (type, number, congress)
-                    groups = {}
-                    for row in prod_rows:
-                        m = re.match(
-                            r"^([a-z]+)(\d+)-([^-]+)-(\d+)$",
-                            str(row["report_id"]),
-                            re.IGNORECASE,
-                        )
-                        if not m:
-                            continue
-                        key = (m.group(1).lower(), m.group(2), m.group(4))
-                        groups.setdefault(key, []).append(dict(row))
 
-                    def parse_order(pkg_id: str) -> tuple[int, int]:
-                        try:
-                            m = re.search(r"(\d+)(?:-(\d+))?$", pkg_id)
-                            if m:
-                                a = int(m.group(1))
-                                b = int(m.group(2)) if m.group(2) else 0
-                                return a, b
-                        except Exception:
-                            pass
-                        return (1 << 30, 1 << 30)
-
+                    # Process in chunks to handle large datasets efficiently
+                    chunk_size = 10000  # Process 10k records at a time
+                    total_chunks = (len(prod_rows) + chunk_size - 1) // chunk_size
                     updated_count = 0
 
-                    for _key, rows in groups.items():
-                        # Order within group by trailing numeric tokens of package_id
-                        rows_with_order = []
-                        for r in rows:
-                            pkg = r.get("package_id") or ""
-                            rows_with_order.append((parse_order(str(pkg)), r))
-                        rows_with_order.sort(key=lambda x: x[0])
+                    for chunk_idx in range(total_chunks):
+                        start_idx = chunk_idx * chunk_size
+                        end_idx = min(start_idx + chunk_size, len(prod_rows))
+                        chunk_rows = prod_rows[start_idx:end_idx]
 
-                        # Assign parts sequentially starting at 1
-                        for idx, (_ord, r) in enumerate(rows_with_order, start=1):
-                            package_id = r["package_id"]
-                            old_report_id = r["report_id"]
-                            is_errata_flag = (
-                                bool(r["is_errata"])
-                                if r["is_errata"] is not None
-                                else False
-                            )
+                        logger.info(
+                            f"Processing chunk {chunk_idx + 1}/{total_chunks} ({len(chunk_rows)} records)"
+                        )
 
+                        # Group by (type, number, congress) for this chunk
+                        groups = {}
+                        for row in chunk_rows:
                             m = re.match(
                                 r"^([a-z]+)(\d+)-([^-]+)-(\d+)$",
-                                str(old_report_id),
+                                str(row["report_id"]),
                                 re.IGNORECASE,
                             )
                             if not m:
                                 continue
-                            rtype, rnum, part_comp, cong = (
-                                m.group(1).lower(),
-                                m.group(2),
-                                m.group(3),
-                                m.group(4),
+                            key = (m.group(1).lower(), m.group(2), m.group(4))
+                            groups.setdefault(key, []).append(dict(row))
+
+                        def parse_order(pkg_id: str) -> tuple[int, int]:
+                            try:
+                                m = re.search(r"(\d+)(?:-(\d+))?$", pkg_id)
+                                if m:
+                                    a = int(m.group(1))
+                                    b = int(m.group(2)) if m.group(2) else 0
+                                    return a, b
+                            except Exception:
+                                pass
+                            return (1 << 30, 1 << 30)
+
+                        # Prepare batch updates for this chunk
+                        main_table_updates = []
+                        committees_updates = []
+                        members_updates = []
+                        serialset_updates = []
+
+                        total_groups = len(groups)
+                        logger.debug(
+                            f"Processing {total_groups} groups in chunk {chunk_idx + 1}"
+                        )
+
+                        for group_idx, (_key, rows) in enumerate(groups.items()):
+                            if group_idx % 1000 == 0 and total_groups > 1000:
+                                logger.debug(
+                                    f"Processing group {group_idx}/{total_groups} in chunk {chunk_idx + 1}"
+                                )
+
+                            # Order within group by trailing numeric tokens of package_id
+                            rows_with_order = []
+                            for r in rows:
+                                pkg = r.get("package_id") or ""
+                                rows_with_order.append((parse_order(str(pkg)), r))
+                            rows_with_order.sort(key=lambda x: x[0])
+
+                            # Assign parts sequentially starting at 1
+                            for idx, (_ord, r) in enumerate(rows_with_order, start=1):
+                                package_id = r["package_id"]
+                                old_report_id = r["report_id"]
+                                is_errata_flag = (
+                                    bool(r["is_errata"])
+                                    if r["is_errata"] is not None
+                                    else False
+                                )
+
+                                m = re.match(
+                                    r"^([a-z]+)(\d+)-([^-]+)-(\d+)$",
+                                    str(old_report_id),
+                                    re.IGNORECASE,
+                                )
+                                if not m:
+                                    continue
+                                rtype, rnum, part_comp, cong = (
+                                    m.group(1).lower(),
+                                    m.group(2),
+                                    m.group(3),
+                                    m.group(4),
+                                )
+
+                                has_errata_suffix = (
+                                    part_comp.endswith("e") or is_errata_flag
+                                )
+                                new_part_token = (
+                                    f"{idx}{'e' if has_errata_suffix else ''}"
+                                )
+                                new_report_id = f"{rtype}{rnum}-{new_part_token}-{cong}"
+
+                                if new_report_id == old_report_id:
+                                    continue
+
+                                # Collect updates for batch processing
+                                main_table_updates.append((new_report_id, package_id))
+                                committees_updates.append((new_report_id, package_id))
+                                members_updates.append((new_report_id, package_id))
+                                serialset_updates.append((new_report_id, package_id))
+
+                        # Execute batch updates for this chunk
+                        if main_table_updates:
+                            logger.info(
+                                f"Executing batch updates for chunk {chunk_idx + 1}: {len(main_table_updates)} records"
                             )
 
-                            has_errata_suffix = (
-                                part_comp.endswith("e") or is_errata_flag
-                            )
-                            new_part_token = f"{idx}{'e' if has_errata_suffix else ''}"
-                            new_report_id = f"{rtype}{rnum}-{new_part_token}-{cong}"
+                            # Update main table in batches
+                            update_batch_size = 1000
+                            for i in range(
+                                0, len(main_table_updates), update_batch_size
+                            ):
+                                batch = main_table_updates[i : i + update_batch_size]
+                                await conn.executemany(
+                                    f"""
+                                    UPDATE {self.production_schema}.congressionalreports
+                                    SET report_id = $1
+                                    WHERE package_id = $2
+                                    """,
+                                    batch,
+                                )
+                                updated_count += len(batch)
 
-                            if new_report_id == old_report_id:
-                                continue
+                            # Update dependent tables in batches
+                            for i in range(
+                                0, len(committees_updates), update_batch_size
+                            ):
+                                batch = committees_updates[i : i + update_batch_size]
+                                await conn.executemany(
+                                    f"""
+                                    UPDATE {self.production_schema}.congressionalreports_committees
+                                    SET report_id = $1
+                                    WHERE package_id = $2
+                                    """,
+                                    batch,
+                                )
 
-                            # Update main table
-                            await conn.execute(
-                                f"""
-                                UPDATE {self.production_schema}.congressionalreports
-                                SET report_id = $1
-                                WHERE package_id = $2
-                                """,
-                                new_report_id,
-                                package_id,
-                            )
+                            for i in range(0, len(members_updates), update_batch_size):
+                                batch = members_updates[i : i + update_batch_size]
+                                await conn.executemany(
+                                    f"""
+                                    UPDATE {self.production_schema}.congressionalreports_members
+                                    SET report_id = $1
+                                    WHERE package_id = $2
+                                    """,
+                                    batch,
+                                )
 
-                            # Update dependent tables keyed by package_id
-                            await conn.execute(
-                                f"""
-                                UPDATE {self.production_schema}.congressionalreports_committees
-                                SET report_id = $1
-                                WHERE package_id = $2
-                                """,
-                                new_report_id,
-                                package_id,
-                            )
-                            await conn.execute(
-                                f"""
-                                UPDATE {self.production_schema}.congressionalreports_members
-                                SET report_id = $1
-                                WHERE package_id = $2
-                                """,
-                                new_report_id,
-                                package_id,
-                            )
-                            await conn.execute(
-                                f"""
-                                UPDATE {self.production_schema}.congressionalreports_serialset
-                                SET report_id = $1
-                                WHERE package_id = $2
-                                """,
-                                new_report_id,
-                                package_id,
-                            )
+                            for i in range(
+                                0, len(serialset_updates), update_batch_size
+                            ):
+                                batch = serialset_updates[i : i + update_batch_size]
+                                await conn.executemany(
+                                    f"""
+                                    UPDATE {self.production_schema}.congressionalreports_serialset
+                                    SET report_id = $1
+                                    WHERE package_id = $2
+                                    """,
+                                    batch,
+                                )
 
-                            updated_count += 1
-
+                    logger.info(
+                        f"Completed placeholder part resolution: {updated_count} records updated across {total_chunks} chunks"
+                    )
                     results["operations"].append(
                         {
                             "name": "resolve_placeholder_parts",
