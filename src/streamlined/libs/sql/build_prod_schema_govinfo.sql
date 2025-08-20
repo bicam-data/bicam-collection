@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.billcollections_reference_laws(
     package_id TEXT,
     law_id TEXT, -- fix law_id
     law_type TEXT,
-    law_number INTEGER,
+    law_number TEXT,
     order_number INTEGER,
     congress INTEGER,
     PRIMARY KEY (package_id, law_id)
@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_reference_laws(
     package_id TEXT,
     law_id TEXT,
     law_type TEXT,
-    law_number INTEGER,
+    law_number TEXT,
     order_number INTEGER,
     congress INTEGER,
     UNIQUE (package_id, law_id)

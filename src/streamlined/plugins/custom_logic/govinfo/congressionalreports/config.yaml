@@ -16,7 +16,7 @@
     - granules
     - committees
     - members
-    - bills
+    - reference_bills
     - serialset
     - ils_system_id
     - reference_codes
@@ -81,7 +81,7 @@
     batch_size: 100
     scaling_factor: 50
 
-- name: bills
+- name: reference_bills
   description: Congressional Reports reference bills data
 
   api:
