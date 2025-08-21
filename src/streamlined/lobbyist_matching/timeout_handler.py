@@ -4,7 +4,7 @@ Module for handling regex pattern matching timeouts.
 This module provides classes and functions to handle timeouts that occur during regex pattern
 matching operations. It includes:
 - Timeout tracking and storage in database
-- Signal-based timeout handling for regex operations 
+- Signal-based timeout handling for regex operations
 - Batch management of timeouts across multiple sections
 - Summary reporting of timeout statistics
 """
@@ -20,7 +20,7 @@ import asyncpg
 @dataclass
 class TimeoutSection:
     """Information about a section that timed out during processing.
-    
+
     Attributes:
         filing_uuid (str): UUID of the filing containing the timed out section
         section_id (str): ID of the specific section that timed out
@@ -31,6 +31,7 @@ class TimeoutSection:
         error_message (str): Description of the timeout error
         text_length (int): Length of text being processed when timeout occurred
     """
+
     filing_uuid: str
     section_id: str
     chunk_id: int
@@ -40,37 +41,40 @@ class TimeoutSection:
     error_message: str
     text_length: int
 
+
 class RegexTimeout(Exception):
     """Exception raised when regex matching times out.
-    
+
     Used to interrupt long-running regex operations that exceed the timeout threshold.
     """
 
+
 def timeout_handler(signum, frame):
     """Signal handler for timeout.
-    
+
     Args:
         signum: Signal number
         frame: Current stack frame
-        
+
     Raises:
         RegexTimeout: Always raises this exception to interrupt the operation
     """
     raise RegexTimeout("Regex pattern matching timed out")
 
+
 def finditer_with_timeout(pattern, text: str, timeout: int = 30) -> list[Any]:
     """Execute finditer with a timeout.
-    
+
     Wraps re.finditer() with a timeout mechanism to prevent infinite/long-running matches.
-    
+
     Args:
         pattern: Compiled regex pattern to match
         text (str): Text to search for matches
         timeout (int): Maximum seconds to allow for matching (default: 30)
-        
+
     Returns:
         List[Any]: List of match objects found before timeout
-        
+
     Raises:
         RegexTimeout: If matching exceeds timeout duration
     """
@@ -88,11 +92,12 @@ def finditer_with_timeout(pattern, text: str, timeout: int = 30) -> list[Any]:
         # Disable the alarm
         signal.alarm(0)
 
+
 class TimeoutTracker:
     """Track and store timeout information.
-    
+
     Manages collection and persistence of timeout events to database.
-    
+
     Attributes:
         pool (asyncpg.Pool): Database connection pool
         timeouts (List[TimeoutSection]): Collection of timeout events
@@ -104,9 +109,9 @@ class TimeoutTracker:
 
     async def initialize_tracking(self, run_id: int):
         """Initialize timeout tracking table.
-        
+
         Creates the database table for storing timeout information if it doesn't exist.
-        
+
         Args:
             run_id (int): ID of the current processing run
         """
@@ -123,21 +128,31 @@ class TimeoutTracker:
                     text_length INTEGER NOT NULL,
                     processing_time FLOAT NOT NULL,
                     error_message TEXT,
+                    is_processed BOOLEAN NOT NULL DEFAULT FALSE,
+                    reprocessing_attempts INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
+            # Add the new columns if they don't exist (for existing tables)
+            await conn.execute("""
+                ALTER TABLE lobbied_bill_matching.timeout_sections 
+                ADD COLUMN IF NOT EXISTS is_processed BOOLEAN NOT NULL DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS reprocessing_attempts INTEGER NOT NULL DEFAULT 0
+            """)
+
     async def store_timeout(self, run_id: int, timeout_info: TimeoutSection):
         """Store information about a timed-out section.
-        
+
         Persists a single timeout event to the database.
-        
+
         Args:
             run_id (int): ID of the current processing run
             timeout_info (TimeoutSection): Information about the timeout event
         """
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO lobbied_bill_matching.timeout_sections (
                     run_id,
                     filing_uuid,
@@ -158,14 +173,84 @@ class TimeoutTracker:
                 timeout_info.pattern_type,
                 timeout_info.text_length,
                 timeout_info.processing_time,
-                timeout_info.error_message
+                timeout_info.error_message,
+            )
+
+    async def mark_section_processed(
+        self, run_id: int, filing_uuid: str, section_id: str
+    ):
+        """Mark a timeout section as successfully processed.
+
+        Args:
+            run_id (int): ID of the processing run
+            filing_uuid (str): UUID of the filing
+            section_id (str): ID of the section that was processed
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE lobbied_bill_matching.timeout_sections
+                SET is_processed = TRUE
+                WHERE run_id = $1 AND filing_uuid = $2 AND section_id = $3
+            """,
+                run_id,
+                filing_uuid,
+                section_id,
+            )
+
+    async def increment_reprocessing_attempts(
+        self, run_id: int, filing_uuid: str, section_id: str
+    ):
+        """Increment the reprocessing attempts counter for a section.
+
+        Args:
+            run_id (int): ID of the processing run
+            filing_uuid (str): UUID of the filing
+            section_id (str): ID of the section being reprocessed
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE lobbied_bill_matching.timeout_sections
+                SET reprocessing_attempts = reprocessing_attempts + 1
+                WHERE run_id = $1 AND filing_uuid = $2 AND section_id = $3
+            """,
+                run_id,
+                filing_uuid,
+                section_id,
+            )
+
+    async def get_unprocessed_timeouts(
+        self, run_id: int, max_attempts: int = 3
+    ) -> list[dict]:
+        """Get timeout sections that haven't been processed yet.
+
+        Args:
+            run_id (int): ID of the processing run
+            max_attempts (int): Maximum number of reprocessing attempts allowed
+
+        Returns:
+            List of timeout sections that need processing
+        """
+        async with self.pool.acquire() as conn:
+            return await conn.fetch(
+                """
+                SELECT DISTINCT filing_uuid, section_id, reprocessing_attempts
+                FROM lobbied_bill_matching.timeout_sections
+                WHERE run_id = $1 
+                AND is_processed = FALSE 
+                AND reprocessing_attempts < $2
+                ORDER BY reprocessing_attempts ASC, section_id
+            """,
+                run_id,
+                max_attempts,
             )
 
     async def store_all_timeouts(self, run_id: int):
         """Store all collected timeouts.
-        
+
         Persists all collected timeout events to the database.
-        
+
         Args:
             run_id (int): ID of the current processing run
         """
@@ -174,7 +259,7 @@ class TimeoutTracker:
 
     def add_timeout(self, timeout: TimeoutSection):
         """Add a timeout to the collection.
-        
+
         Args:
             timeout (TimeoutSection): Timeout event to add
         """
@@ -182,14 +267,15 @@ class TimeoutTracker:
 
     async def print_summary(self, run_id: int):
         """Print summary of timed-out sections.
-        
+
         Queries the database and logs statistics about timeout events grouped by pattern type.
-        
+
         Args:
             run_id (int): ID of the processing run to summarize
         """
         async with self.pool.acquire() as conn:
-            timeouts = await conn.fetch("""
+            timeouts = await conn.fetch(
+                """
                 SELECT 
                     pattern_type,
                     COUNT(*) as count,
@@ -199,7 +285,9 @@ class TimeoutTracker:
                 FROM lobbied_bill_matching.timeout_sections
                 WHERE run_id = $1
                 GROUP BY pattern_type
-            """, run_id)
+            """,
+                run_id,
+            )
 
             if timeouts:
                 logging.info("\nTimeout Summary:")
@@ -207,16 +295,21 @@ class TimeoutTracker:
                 for t in timeouts:
                     logging.info(f"Pattern type: {t['pattern_type']}")
                     logging.info(f"  Number of timeouts: {t['count']}")
-                    logging.info(f"  Average text length: {t['avg_length']:.0f} characters")
-                    logging.info(f"  Average processing time: {t['avg_time']:.2f} seconds")
+                    logging.info(
+                        f"  Average text length: {t['avg_length']:.0f} characters"
+                    )
+                    logging.info(
+                        f"  Average processing time: {t['avg_time']:.2f} seconds"
+                    )
                     logging.info(f"  Affected filings: {t['num_filings']}")
                     logging.info("")
 
+
 class BatchTimeoutManager:
     """Manage timeouts for a batch of sections.
-    
+
     Provides batch management of timeout events through a TimeoutTracker.
-    
+
     Attributes:
         tracker (TimeoutTracker): Tracker instance for storing timeout events
     """
@@ -224,18 +317,20 @@ class BatchTimeoutManager:
     def __init__(self, tracker: TimeoutTracker):
         self.tracker = tracker
 
-    def handle_timeout(self,
-                        filing_uuid: str,
-                        section_id: str,
-                        chunk_id: int,
-                        start_offset: int,
-                        pattern_type: str,
-                        text_length: int,
-                        error: Exception) -> None:
+    def handle_timeout(
+        self,
+        filing_uuid: str,
+        section_id: str,
+        chunk_id: int,
+        start_offset: int,
+        pattern_type: str,
+        text_length: int,
+        error: Exception,
+    ) -> None:
         """Handle a timeout occurrence.
-        
+
         Creates a TimeoutSection instance and adds it to the tracker.
-        
+
         Args:
             filing_uuid (str): UUID of the filing
             section_id (str): ID of the section
@@ -253,6 +348,6 @@ class BatchTimeoutManager:
             pattern_type=pattern_type,
             processing_time=15.0,  # Default timeout value
             error_message=str(error),
-            text_length=text_length
+            text_length=text_length,
         )
         self.tracker.add_timeout(timeout_info)

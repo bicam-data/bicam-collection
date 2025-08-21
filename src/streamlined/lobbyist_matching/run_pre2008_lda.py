@@ -42,20 +42,29 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def create_smart_chunks(
-    text: str, max_chunk_size: int = 500, min_chunk_size: int = 100
+def create_progressive_chunks(
+    text: str,
+    reprocessing_attempts: int = 0,
+    base_max_chunk_size: int = 500,
+    min_chunk_size: int = 50,
 ) -> list[str]:
     """
-    Create intelligent chunks based on text complexity and natural boundaries.
+    Create progressively smaller chunks based on reprocessing attempts.
 
     Args:
         text: Text to chunk
-        max_chunk_size: Maximum chunk size in characters
+        reprocessing_attempts: Number of previous reprocessing attempts
+        base_max_chunk_size: Base maximum chunk size in characters
         min_chunk_size: Minimum chunk size in characters
 
     Returns:
         List of text chunks
     """
+    # Reduce chunk size with each attempt: 500 -> 250 -> 125 -> 62
+    max_chunk_size = max(
+        min_chunk_size, base_max_chunk_size // (2**reprocessing_attempts)
+    )
+
     if len(text) <= max_chunk_size:
         return [text]
 
@@ -68,8 +77,9 @@ def create_smart_chunks(
 
         # If we're not at the end, try to break at a sentence boundary
         if end < len(text):
-            # Look for sentence endings in the last 100 characters
-            search_start = max(start + min_chunk_size, end - 100)
+            # Look for sentence endings in the last 50 characters (reduced for smaller chunks)
+            search_range = min(50, max_chunk_size // 2)
+            search_start = max(start + min_chunk_size, end - search_range)
             for i in range(end - 1, search_start - 1, -1):
                 if text[i] in ".!?":
                     # Found a sentence boundary
@@ -115,6 +125,38 @@ def process_single_section_with_shorter_timeout(
     return process_single_section_with_timeout(
         section, timeout=timeout, timeout_tracker=timeout_tracker, run_id=run_id
     )
+
+
+async def mark_successful_timeout_sections(
+    timeout_tracker: TimeoutTracker, run_id: int, processed_sections: list[dict]
+):
+    """
+    Mark timeout sections as processed when their chunks are successfully processed.
+
+    Args:
+        timeout_tracker: TimeoutTracker instance
+        run_id: ID of the processing run
+        processed_sections: List of successfully processed sections
+    """
+    # Group processed sections by original section ID
+    original_sections = {}
+    for section in processed_sections:
+        if "original_section_id" in section:
+            original_id = section["original_section_id"]
+            if original_id not in original_sections:
+                original_sections[original_id] = []
+            original_sections[original_id].append(section)
+
+    # Mark original sections as processed if any of their chunks succeeded
+    for original_section_id, chunks in original_sections.items():
+        # Extract filing_uuid from the first chunk (they should all be the same)
+        filing_uuid = chunks[0]["filing_uuid"]
+        await timeout_tracker.mark_section_processed(
+            run_id, filing_uuid, original_section_id
+        )
+        logger.info(
+            f"Marked section {original_section_id} as processed (successful chunks: {len(chunks)})"
+        )
 
 
 async def main():
@@ -175,6 +217,12 @@ async def main():
         help="Timeout in seconds for timeout reprocessing (default: 30)",
     )
     parser.add_argument(
+        "--max-reprocessing-attempts",
+        type=int,
+        default=3,
+        help="Maximum number of reprocessing attempts per section (default: 3)",
+    )
+    parser.add_argument(
         "--reprocess-timeouts-only",
         type=int,
         help="Run ID whose timed-out sections should be reprocessed (skips initial processing)",
@@ -222,26 +270,27 @@ async def main():
             logger.info(f"Reprocessing timed-out sections only for run ID: {run_id}")
             db = await DatabaseInterface.create_pool(**db_config)
 
-            # Fetch timed-out sections for the given run
-            async with db.pool.acquire() as conn:
-                rows = await conn.fetch(
-                    """
-                    SELECT DISTINCT filing_uuid, section_id
-                    FROM lobbied_bill_matching.timeout_sections
-                    WHERE run_id = $1
-                    ORDER BY section_id
-                    """,
-                    run_id,
-                )
+            # Fetch unprocessed timeout sections for the given run
+            timeout_tracker = TimeoutTracker(db.pool)
+            await timeout_tracker.initialize_tracking(run_id)
+
+            rows = await timeout_tracker.get_unprocessed_timeouts(
+                run_id, max_attempts=args.max_reprocessing_attempts
+            )
 
             if not rows:
-                logger.info("No timed-out sections found to reprocess.")
+                logger.info("No unprocessed timeout sections found to reprocess.")
                 return
 
-            logger.info(f"Found {len(rows)} timed-out sections to reprocess")
+            logger.info(f"Found {len(rows)} unprocessed timeout sections to reprocess")
 
             sections: list[dict] = []
             for row in rows:
+                # Increment reprocessing attempts for this section
+                await timeout_tracker.increment_reprocessing_attempts(
+                    run_id, row["filing_uuid"], row["section_id"]
+                )
+
                 # Fetch the text for each section from the correct table
                 async with db.pool.acquire() as conn:
                     rec = await conn.fetchrow(
@@ -257,9 +306,12 @@ async def main():
                     )
                 if rec and rec["text"]:
                     text = rec["text"]
-                    # Use smarter chunking for timeout reprocessing
-                    chunks = create_smart_chunks(
-                        text, max_chunk_size=500, min_chunk_size=100
+                    # Use progressive chunking based on reprocessing attempts
+                    chunks = create_progressive_chunks(
+                        text,
+                        reprocessing_attempts=row["reprocessing_attempts"] + 1,
+                        base_max_chunk_size=500,
+                        min_chunk_size=50,
                     )
 
                     for i, chunk_text in enumerate(chunks):
@@ -269,6 +321,9 @@ async def main():
                                 "section_id": f"{rec['section_id']}-chunk-{i}-{len(chunks)}",
                                 "issue_text": chunk_text,
                                 "filing_year": rec["filing_year"],
+                                "original_section_id": row[
+                                    "section_id"
+                                ],  # Track original for marking as processed
                             }
                         )
 
@@ -293,6 +348,9 @@ async def main():
             logger.info(
                 f"Reprocessed {len(sections)} chunks from timed-out sections for run ID: {run_id}"
             )
+
+            # Mark successful sections as processed
+            await mark_successful_timeout_sections(timeout_tracker, run_id, sections)
 
             # Optionally run matching and post-processing
             if args.run_matching_after_timeouts:
@@ -319,20 +377,21 @@ async def main():
             logger.info("Reprocessing timed-out sections in chunks...")
             db = await DatabaseInterface.create_pool(**db_config)
 
-            # Fetch timed-out sections for the given run
-            async with db.pool.acquire() as conn:
-                rows = await conn.fetch(
-                    """
-                    SELECT DISTINCT filing_uuid, section_id
-                    FROM lobbied_bill_matching.timeout_sections
-                    WHERE run_id = $1
-                    ORDER BY section_id
-                    """,
-                    run_id,
-                )
+            # Fetch unprocessed timeout sections for the given run
+            timeout_tracker = TimeoutTracker(db.pool)
+            await timeout_tracker.initialize_tracking(run_id)
+
+            rows = await timeout_tracker.get_unprocessed_timeouts(
+                run_id, max_attempts=args.max_reprocessing_attempts
+            )
 
             sections: list[dict] = []
             for row in rows:
+                # Increment reprocessing attempts for this section
+                await timeout_tracker.increment_reprocessing_attempts(
+                    run_id, row["filing_uuid"], row["section_id"]
+                )
+
                 # Fetch the text for each section
                 async with db.pool.acquire() as conn:
                     rec = await conn.fetchrow(
@@ -348,9 +407,12 @@ async def main():
                     )
                 if rec and rec["text"]:
                     text = rec["text"]
-                    # Use smarter chunking for timeout reprocessing
-                    chunks = create_smart_chunks(
-                        text, max_chunk_size=500, min_chunk_size=100
+                    # Use progressive chunking based on reprocessing attempts
+                    chunks = create_progressive_chunks(
+                        text,
+                        reprocessing_attempts=row["reprocessing_attempts"] + 1,
+                        base_max_chunk_size=500,
+                        min_chunk_size=50,
                     )
 
                     for i, chunk_text in enumerate(chunks):
@@ -360,6 +422,9 @@ async def main():
                                 "section_id": f"{rec['section_id']}-chunk-{i}-{len(chunks)}",
                                 "issue_text": chunk_text,
                                 "filing_year": rec["filing_year"],
+                                "original_section_id": row[
+                                    "section_id"
+                                ],  # Track original for marking as processed
                             }
                         )
 
@@ -380,6 +445,7 @@ async def main():
                 timeout_tracker=timeout_tracker,
             )
             await processor.process_all_sections(run_id, sections)
+            await mark_successful_timeout_sections(timeout_tracker, run_id, sections)
             logger.info(
                 f"Reprocessed {len(sections)} chunks from timed-out sections for run ID: {run_id}"
             )
@@ -550,6 +616,9 @@ async def main():
                 )
                 await timeout_tracker.initialize_tracking(run_id)
                 await processor.process_all_sections(run_id, chunked_sections)
+                await mark_successful_timeout_sections(
+                    timeout_tracker, run_id, chunked_sections
+                )
             else:
                 logger.info(
                     "No valid text found in timed-out sections for reprocessing."
