@@ -14,11 +14,12 @@ import os
 import sys
 
 from dotenv import load_dotenv
+from typing import Any
 
 # Handle imports for both direct execution and module execution
 try:
     from streamlined.lobbyist_matching.batch_processor import BatchProcessor
-    from streamlined.lobbyist_matching.db_utils import DatabaseInterface
+    from streamlined.lobbyist_matching.db_utils import DatabaseInterface, FilingSection
     from streamlined.lobbyist_matching.main import ensure_schema_exists
     from streamlined.lobbyist_matching.matcher import MatchingManager
     from streamlined.lobbyist_matching.post_processor import post_process_all
@@ -34,10 +35,86 @@ except ImportError:
     from streamlined.lobbyist_matching.post_processor import post_process_all
     from streamlined.lobbyist_matching.schema_setup import initialize_run
     from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
+    from streamlined.lobbyist_matching.db_utils import FilingSection
 
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
+
+
+def create_smart_chunks(
+    text: str, max_chunk_size: int = 500, min_chunk_size: int = 100
+) -> list[str]:
+    """
+    Create intelligent chunks based on text complexity and natural boundaries.
+
+    Args:
+        text: Text to chunk
+        max_chunk_size: Maximum chunk size in characters
+        min_chunk_size: Minimum chunk size in characters
+
+    Returns:
+        List of text chunks
+    """
+    if len(text) <= max_chunk_size:
+        return [text]
+
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        # Try to find a good breaking point
+        end = min(start + max_chunk_size, len(text))
+
+        # If we're not at the end, try to break at a sentence boundary
+        if end < len(text):
+            # Look for sentence endings in the last 100 characters
+            search_start = max(start + min_chunk_size, end - 100)
+            for i in range(end - 1, search_start - 1, -1):
+                if text[i] in ".!?":
+                    # Found a sentence boundary
+                    end = i + 1
+                    break
+            else:
+                # No sentence boundary found, try word boundary
+                for i in range(end - 1, search_start - 1, -1):
+                    if text[i].isspace():
+                        end = i + 1
+                        break
+
+        chunk = text[start:end].strip()
+        if chunk:  # Only add non-empty chunks
+            chunks.append(chunk)
+
+        start = end
+
+    return chunks
+
+
+def process_single_section_with_shorter_timeout(
+    section: FilingSection,
+    timeout: int = 30,  # Shorter timeout for timeout reprocessing
+    timeout_tracker: Any = None,
+    run_id: int | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Process a single section with shorter timeout for timeout reprocessing.
+
+    Args:
+        section: FilingSection object to process
+        timeout: Timeout in seconds (default 30 for timeout reprocessing)
+        timeout_tracker: Optional TimeoutTracker instance for storing timeouts
+        run_id: Optional run_id for storing timeouts
+
+    Returns:
+        Same as process_single_section_with_timeout but with shorter timeout
+    """
+    # Import here to avoid circular imports
+    from section_processor import process_single_section_with_timeout
+
+    return process_single_section_with_timeout(
+        section, timeout=timeout, timeout_tracker=timeout_tracker, run_id=run_id
+    )
 
 
 async def main():
@@ -90,6 +167,12 @@ async def main():
         type=int,
         default=5,
         help="Number of text chunks per section when rerunning timeouts",
+    )
+    parser.add_argument(
+        "--timeout-reprocessing-timeout",
+        type=int,
+        default=30,
+        help="Timeout in seconds for timeout reprocessing (default: 30)",
     )
     parser.add_argument(
         "--reprocess-timeouts-only",
@@ -174,34 +257,35 @@ async def main():
                     )
                 if rec and rec["text"]:
                     text = rec["text"]
-                    length = max(1, len(text))
-                    approx_chunk_len = max(1000, length // max(1, chunk_size))
-                    start = 0
-                    while start < length:
-                        end = min(length, start + approx_chunk_len)
-                        chunk_text = text[start:end]
+                    # Use smarter chunking for timeout reprocessing
+                    chunks = create_smart_chunks(
+                        text, max_chunk_size=500, min_chunk_size=100
+                    )
+
+                    for i, chunk_text in enumerate(chunks):
                         sections.append(
                             {
                                 "filing_uuid": str(rec["filing_uuid"]),
-                                "section_id": f"{rec['section_id']}-chunk-{start}-{end}",
+                                "section_id": f"{rec['section_id']}-chunk-{i}-{len(chunks)}",
                                 "issue_text": chunk_text,
                                 "filing_year": rec["filing_year"],
                             }
                         )
-                        start = end
 
             if not sections:
                 logger.info("No valid text found in timed-out sections to reprocess.")
                 return
 
-            logger.info(f"Created {len(sections)} chunked sections for reprocessing")
+            logger.info(
+                f"Created {len(sections)} smart-chunked sections for reprocessing (max 500 chars per chunk)"
+            )
 
             timeout_tracker = TimeoutTracker(db.pool)
             await timeout_tracker.initialize_tracking(run_id)
             processor = BatchProcessor(
                 db=db,
-                batch_size=50,
-                max_concurrent_batches=2,
+                batch_size=25,  # Smaller batch size for timeout reprocessing
+                max_concurrent_batches=1,  # Single batch to avoid resource contention
                 max_workers_per_batch=max(2, mp.cpu_count() // 4),
                 timeout_tracker=timeout_tracker,
             )
@@ -264,32 +348,34 @@ async def main():
                     )
                 if rec and rec["text"]:
                     text = rec["text"]
-                    length = max(1, len(text))
-                    approx_chunk_len = max(1000, length // max(1, chunk_size))
-                    start = 0
-                    while start < length:
-                        end = min(length, start + approx_chunk_len)
-                        chunk_text = text[start:end]
+                    # Use smarter chunking for timeout reprocessing
+                    chunks = create_smart_chunks(
+                        text, max_chunk_size=500, min_chunk_size=100
+                    )
+
+                    for i, chunk_text in enumerate(chunks):
                         sections.append(
                             {
                                 "filing_uuid": str(rec["filing_uuid"]),
-                                "section_id": f"{rec['section_id']}-chunk-{start}-{end}",
+                                "section_id": f"{rec['section_id']}-chunk-{i}-{len(chunks)}",
                                 "issue_text": chunk_text,
                                 "filing_year": rec["filing_year"],
                             }
                         )
-                        start = end
 
             if not sections:
                 logger.info("No timed-out sections found to rerun.")
                 return
 
+            logger.info(
+                f"Created {len(sections)} smart-chunked sections for reprocessing (max 500 chars per chunk)"
+            )
             timeout_tracker = TimeoutTracker(db.pool)
             await timeout_tracker.initialize_tracking(run_id)
             processor = BatchProcessor(
                 db=db,
-                batch_size=50,
-                max_concurrent_batches=2,
+                batch_size=25,  # Smaller batch size for timeout reprocessing
+                max_concurrent_batches=1,  # Single batch to avoid resource contention
                 max_workers_per_batch=max(2, mp.cpu_count() // 4),
                 timeout_tracker=timeout_tracker,
             )
