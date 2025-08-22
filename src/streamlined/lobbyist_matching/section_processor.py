@@ -1090,6 +1090,20 @@ def find_and_clean_titles(
             try:
                 title_text = match.group("title").strip()
                 match_text = match.group(0)
+                title_start = match.start("title")
+                title_end = match.end("title")
+
+                # Clean the title with context for potential expansion
+                cleaned_title, is_law, congress_number = clean_title(
+                    title_text,
+                    filing_year,
+                    original_text=text,
+                    title_start=title_start,
+                    title_end=title_end,
+                )
+
+                if not cleaned_title:
+                    continue
 
                 # Find all bill and law numbers in this match
                 for bill_ref in BILL_NUM_PATTERN.finditer(match_text):
@@ -1102,7 +1116,10 @@ def find_and_clean_titles(
                             for existing in all_matches:
                                 if existing.get("bill_id") == bill_id:
                                     existing.update(
-                                        {"title": title_text, "type": "bill_with_title"}
+                                        {
+                                            "title": cleaned_title,
+                                            "type": "bill_with_title",
+                                        }
                                     )
 
                 for law_ref in LAW_NUM_PATTERN.finditer(match_text):
@@ -1111,7 +1128,7 @@ def find_and_clean_titles(
                     for existing in all_matches:
                         if existing.get("law_number") == law_number:
                             existing.update(
-                                {"title": title_text, "type": "law_with_title"}
+                                {"title": cleaned_title, "type": "law_with_title"}
                             )
 
             except Exception as e:
@@ -1128,23 +1145,43 @@ def add_reference_with_title(
     title_text: str,
     title_before: bool,
     filing_year: int | None,
+    original_text: str = None,
 ) -> None:
     """
-    Add a reference with its associated title to the results.
+    Add a reference with associated title to the results.
 
     Args:
         all_titles: List to append results to
         covered_ranges: List of text ranges already processed
-        seen_titles: Set of titles already found
+        seen_titles: Set of titles already seen (for deduplication)
         context: ReferenceContext object
         title_text: Title text to associate
         title_before: Whether title appears before reference
         filing_year: Optional filing year for context
+        original_text: Original text containing the title (for expansion)
 
     Cleans title, extracts reference components, and adds complete reference to results.
     Handles deduplication and position tracking.
     """
-    cleaned_title, is_law, congress_number = clean_title(title_text, filing_year)
+    # Determine title position for expansion
+    title_start = None
+    title_end = None
+    if original_text and title_before:
+        # Find the title position in the original text
+        title_start = max(0, context.start - len(title_text))
+        title_end = context.start
+    elif original_text and not title_before:
+        title_start = context.end
+        title_end = min(len(original_text), context.end + len(title_text))
+
+    cleaned_title, is_law, congress_number = clean_title(
+        title_text,
+        filing_year,
+        original_text=original_text,
+        title_start=title_start,
+        title_end=title_end,
+    )
+
     if cleaned_title:
         # Determine actual start and end positions based on title position
         start = min(
@@ -1592,8 +1629,83 @@ def process_single_section_with_timeout(
         signal.alarm(0)
 
 
+def expand_short_title(
+    text: str, title_start: int, title_end: int, max_expansion: int = 500
+) -> str:
+    """
+    Expand a short title by looking at surrounding text context.
+
+    This function handles cases where we have very short titles like "A bill", "An original bill",
+    "A resolution", or "Making appropriations" and expands them to include more context after the title.
+
+    Args:
+        text: The full text containing the title
+        title_start: Start position of the short title
+        title_end: End position of the short title
+        max_expansion: Maximum number of characters to expand after the title
+
+    Returns:
+        Expanded title text
+    """
+    short_title_patterns = [
+        r"^A\s+bill$",
+        r"^An\s+original\s+bill$",
+        r"^A\s+resolution$",
+        r"^Making\s+appropriations$",
+        r"^To\s+[a-z]+$",  # Very short "To" titles
+    ]
+
+    title_text = text[title_start:title_end].strip()
+
+    # Check if this is a short title that needs expansion
+    is_short_title = any(
+        re.match(pattern, title_text, re.I) for pattern in short_title_patterns
+    )
+
+    if not is_short_title:
+        return title_text
+
+    # Expand the title by looking forward from the title end
+    # Look for natural break points like periods, semicolons, or commas
+    expanded_end = title_end
+
+    # Look forward for a natural break point
+    for i in range(title_end, min(len(text), title_end + max_expansion)):
+        if text[i] in ".!?\n":
+            expanded_end = i + 1
+            break
+        elif text[i] in ";:":
+            # For semicolons and colons, include up to but not including the punctuation
+            expanded_end = i
+            break
+        elif text[i] == "," and i > title_end + 50:
+            # For commas, only include if we've already expanded significantly
+            expanded_end = i
+            break
+
+    # Extract the expanded title
+    expanded_title = text[title_start:expanded_end].strip()
+
+    # Clean up the expanded title
+    # Remove leading/trailing punctuation and whitespace
+    expanded_title = re.sub(r"^[.,;\s:]+", "", expanded_title)
+    expanded_title = re.sub(r"[.,;\s:]+$", "", expanded_title)
+
+    # If the expanded title is still very short or doesn't contain meaningful content,
+    # fall back to the original title
+    if len(expanded_title.split()) < 3 or len(expanded_title) < 10:
+        return title_text
+
+    return expanded_title
+
+
 def clean_title(
-    title: str, filing_year: int | None = None, is_special_case: bool = False
+    title: str,
+    filing_year: int | None = None,
+    is_special_case: bool = False,
+    original_text: str = None,
+    title_start: int = None,
+    title_end: int = None,
 ) -> tuple[str | None, bool, int | None]:
     """
     Clean and validate a title.
@@ -1602,6 +1714,9 @@ def clean_title(
         title: Title to clean
         filing_year: Optional filing year for context
         is_special_case: Whether to use special case handling
+        original_text: Original text containing the title (for expansion)
+        title_start: Start position of title in original text
+        title_end: End position of title in original text
 
     Returns:
         Tuple containing:
@@ -1614,9 +1729,16 @@ def clean_title(
     2. Standardizing format
     3. Validating length and content
     4. Detecting congress/year information
+    5. Expanding short titles when possible
     """
     if not isinstance(title, str):
         return None, False, None
+
+    # Try to expand short titles if we have the original text context
+    if original_text and title_start is not None and title_end is not None:
+        expanded_title = expand_short_title(original_text, title_start, title_end)
+        if expanded_title != title:
+            title = expanded_title
 
     congress_number = None
     is_law = False
@@ -1656,9 +1778,6 @@ def clean_title(
         )
     )
 
-    if not is_acronym and len(title.split()) < 2:
-        return None, False, None
-
     # Check for year in cleaned title
     year_match = re.search(r"(?:of|for|in)\s+(?:FY\s*)?(?:19|20)(\d{2})\b", title)
     if year_match:
@@ -1672,7 +1791,9 @@ def clean_title(
             act_congress = year_to_congress(year)
             if filing_congress - act_congress > 3:
                 is_law = True
-        congress_number = act_congress
+            congress_number = act_congress
+        else:
+            congress_number = year_to_congress(year)
     else:
         congress_number = year_to_congress(filing_year) if filing_year else None
 

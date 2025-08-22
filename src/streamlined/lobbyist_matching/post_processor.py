@@ -163,7 +163,7 @@ async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
                         )
                         ON CONFLICT (reference_id) DO UPDATE
                         SET match_type = EXCLUDED.match_type,
-                            confidence_score = EXCLUDED.confidence_score,
+                            confidence_score = GREATEST(EXCLUDED.confidence_score, reference_matches.confidence_score),
                             matched_congress = EXCLUDED.matched_congress,
                             matched_bill_type = EXCLUDED.matched_bill_type,
                             matched_bill_number = EXCLUDED.matched_bill_number,
@@ -326,7 +326,7 @@ async def post_process_wrong_titles(pool: asyncpg.Pool, run_id: int) -> None:
                         matched_bill_number = $4,
                         bill_id = $5,
                         matched_title = $6,
-                        confidence_score = $7
+                        confidence_score = GREATEST($7, confidence_score)
                     WHERE match_id = $8
                 """,
                     [
@@ -557,7 +557,7 @@ async def post_process_low_confidence(pool: asyncpg.Pool, run_id: int) -> None:
                         updated_bill_id = $1,
                         update_source = $2,
                         matched_title = $3,
-                        confidence_score = $4
+                        confidence_score = GREATEST($4, confidence_score)
                     WHERE match_id = $5
                 """,
                     [

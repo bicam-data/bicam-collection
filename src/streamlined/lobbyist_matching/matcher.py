@@ -1321,13 +1321,17 @@ class ReferenceMatcher:
         return result
 
     def _create_unmatched(
-        self, reference: dict, match_type: str = "unmatched"
+        self,
+        reference: dict,
+        match_type: str = "unmatched",
+        confidence_score: float = None,
     ) -> MatchResult:
         """Create unmatched result with all required fields.
 
         Args:
             reference (Dict): The reference dictionary containing extracted information
             match_type (str, optional): The type of match result. Defaults to 'unmatched'
+            confidence_score (float, optional): Confidence score to use. If None, defaults to 0.0
 
         Returns:
             MatchResult: A MatchResult object with all fields set to None/empty except reference info
@@ -1335,7 +1339,7 @@ class ReferenceMatcher:
         return MatchResult(
             reference_id=reference.get("reference_id") if reference else None,
             match_type=match_type,
-            confidence_score=0.0,
+            confidence_score=confidence_score if confidence_score is not None else 0.0,
             extracted_title=reference.get("title"),
             extracted_bill_number=reference.get("bill_number"),
             extracted_law_number=reference.get("law_number"),
