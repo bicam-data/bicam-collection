@@ -246,8 +246,16 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             heading = cleaned.get("heading")
             partnumber = cleaned.get("partnumber") or cleaned.get("documentpart")
             volumenumber = cleaned.get("volumenumber")
+
+            # If we have explicit part indicators, don't use placeholder
             if heading or partnumber or volumenumber:
                 return False
+
+            # Check if parse_part_from_fields would find a valid part number (>1)
+            parsed_part = self.parse_part_from_fields(cleaned)
+            if parsed_part > 1:
+                return False
+
             return bool(re.search(r"\d+(?:-\d+)?$", pkg))
         except Exception:
             return False
@@ -279,7 +287,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
     def parse_part_from_fields(self, cleaned: dict[str, Any]) -> int:
         # Priority: explicit partnumber -> title/subtitle -> packageid suffix
-        part_field = cleaned.get("partnumber", cleaned.get("documentpart"))
+        part_field = cleaned.get("partnumber") or cleaned.get("documentpart")
         if part_field:
             part_field_str = str(part_field).strip()
             if part_field_str.isdigit():
@@ -289,11 +297,18 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 return roman_val
 
         # As a last resort, inspect packageid for suffix hints like volII/ptII/-pt2
+        # But avoid matching report numbers (e.g., don't match "pt128" in "CRPT-104hrpt128")
         pkg = str(cleaned.get("packageid", ""))
-        m = re.search(r"(?:vol|pt)[-_.]?([ivx]+|\d+)\b", pkg, re.IGNORECASE)
+
+        # Look for standalone part indicators that are not embedded in report numbers
+        # Pattern: pt/vol followed by number/roman, but not if it's part of a report number
+        m = re.search(
+            r"(?:^|[-_.])(?:vol|pt)[-_.]?([ivx]+|\d+)(?:$|[-_.])", pkg, re.IGNORECASE
+        )
         if m:
             token = m.group(1)
-            if token.isdigit():
+            # Additional check: if the token is a large number (>20), it's likely a report number, not a part
+            if token.isdigit() and int(token) <= 20:
                 return int(token)
             roman_val = self.roman_to_int(token)
             if roman_val is not None:
@@ -629,11 +644,17 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     return
 
                 # Get total count for logging
-                package_count_query = f"""
+                packages_without_granules_query = f"""
                 SELECT COUNT(DISTINCT c.packageid)
                 FROM {self.staging_schema}.congressionalreports c
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM {self.staging_schema}.congressionalreports_granules g 
+                    WHERE g.packageid = c.packageid
+                )
                 """
-                package_count = await conn.fetchval(package_count_query)
+                packages_without_granules_count = await conn.fetchval(
+                    packages_without_granules_query
+                )
 
                 granule_count_query = f"""
                 SELECT COUNT(DISTINCT g.granuleid)
@@ -641,7 +662,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 """
                 granule_count = await conn.fetchval(granule_count_query)
 
-                total_count = package_count + granule_count
+                total_count = packages_without_granules_count + granule_count
 
                 if total_count == 0:
                     logger.info("No congressionalreports records found")
@@ -661,7 +682,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     # Use JSON aggregation to collect all formats for each text
                     query = f"""
                     SELECT * FROM (
-                        -- Package-only row (always include)
+                        -- Package-only rows (only for packages that don't have granules)
                         SELECT
                             c.packageid AS packageid,
                             NULL::text AS granuleid,
@@ -722,10 +743,14 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             NULL::text AS partnumber,
                             NULL::text AS volumenumber
                         FROM {self.staging_schema}.congressionalreports c
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {self.staging_schema}.congressionalreports_granules g 
+                            WHERE g.packageid = c.packageid
+                        )
 
                         UNION ALL
 
-                        -- Granule rows
+                        -- Granule rows (for packages that have granules)
                         SELECT
                             c.packageid AS packageid,
                             g.granuleid AS granuleid,
@@ -1029,7 +1054,6 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             "granule_id": str(cleaned.get("granuleid"))
             if cleaned.get("granuleid")
             else None,
-            # Note: parent_report_id is returned for completeness; add column if you want it persisted
             "parent_report_id": parent_report_id,
             "title": cleaned.get("title", None),
             "subtitle": cleaned.get("subtitle", None),
@@ -1159,74 +1183,223 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         cleaned = record_data.copy()
         report_id, _, granule_id, _, _, _, _ = self._build_report_identity(cleaned)
+        
+        incorrect_granules = ['CRPT-104hrpt201',
+        'CRPT-104hrpt424',
+        'CRPT-104hrpt553',
+        'CRPT-104hrpt565',
+        'CRPT-104hrpt628',
+        'CRPT-104hrpt633',
+        'CRPT-104hrpt704',
+        'CRPT-104hrpt744',
+        'CRPT-104hrpt803',
+        'CRPT-104hrpt842',
+        'CRPT-104hrpt874',
+        'CRPT-104hrpt876',
+        'CRPT-104hrpt886',
+        'CRPT-104hrpt887',
+        'CRPT-105hrpt169',
+        'CRPT-105hrpt19',
+        'CRPT-105hrpt622',
+        'CRPT-105hrpt637',
+        'CRPT-105hrpt743',
+        'CRPT-105hrpt840',
+        'CRPT-106hrpt1040',
+        'CRPT-106hrpt1047',
+        'CRPT-106hrpt1055',
+        'CRPT-106hrpt198-pt1',
+        'CRPT-106hrpt407',
+        'CRPT-106hrpt482',
+        'CRPT-106srpt362',
+        'CRPT-106srpt363',
+        'CRPT-106srpt426',
+        'CRPT-107hrpt486',
+        'CRPT-107hrpt793',
+        'CRPT-107hrpt800',
+        'CRPT-107srpt2',
+        'CRPT-108hrpt799',
+        'CRPT-108hrpt806',
+        'CRPT-108hrpt815',
+        'CRPT-109hrpt163',
+        'CRPT-109hrpt352',
+        'CRPT-109hrpt469',
+        'CRPT-109hrpt733',
+        'CRPT-109hrpt734',
+        'CRPT-109hrpt739',
+        'CRPT-109hrpt747',
+        'CRPT-109hrpt748',
+        'CRPT-110hrpt144',
+        'CRPT-110hrpt186',
+        'CRPT-110hrpt355',
+        'CRPT-110hrpt573',
+        'CRPT-110hrpt73',
+        'CRPT-110hrpt924',
+        'CRPT-110hrpt938',
+        'CRPT-110hrpt940',
+        'CRPT-111hrpt143',
+        'CRPT-111hrpt161',
+        'CRPT-111hrpt194',
+        'CRPT-111hrpt222',
+        'CRPT-111hrpt577',
+        'CRPT-111hrpt63',
+        'CRPT-111hrpt696',
+        'CRPT-111hrpt699',
+        'CRPT-111hrpt700',
+        'CRPT-111hrpt704',
+        'CRPT-111hrpt707',
+        'CRPT-111hrpt710',
+        'CRPT-111hrpt711',
+        'CRPT-111hrpt715',
+        'CRPT-112hrpt104',
+        'CRPT-112hrpt119',
+        'CRPT-112hrpt12',
+        'CRPT-112hrpt120',
+        'CRPT-112hrpt132',
+        'CRPT-112hrpt145',
+        'CRPT-112hrpt259',
+        'CRPT-112hrpt341',
+        'CRPT-112hrpt354',
+        'CRPT-112hrpt470',
+        'CRPT-112hrpt489',
+        'CRPT-112hrpt570',
+        'CRPT-112hrpt631',
+        'CRPT-112hrpt662',
+        'CRPT-112hrpt706',
+        'CRPT-112hrpt739',
+        'CRPT-112hrpt741',
+        'CRPT-112hrpt748',
+        'CRPT-112hrpt751',
+        'CRPT-112hrpt96',
+        'CRPT-113hrpt143',
+        'CRPT-113hrpt302',
+        'CRPT-113hrpt315',
+        'CRPT-113hrpt323',
+        'CRPT-113hrpt425',
+        'CRPT-113hrpt454',
+        'CRPT-113hrpt474',
+        'CRPT-113hrpt681',
+        'CRPT-113hrpt723',
+        'CRPT-113hrpt724',
+        'CRPT-113hrpt96',
+        'CRPT-114hrpt118',
+        'CRPT-114hrpt155',
+        'CRPT-114hrpt198',
+        'CRPT-114hrpt223',
+        'CRPT-114hrpt230',
+        'CRPT-114hrpt884',
+        'CRPT-114hrpt887',
+        'CRPT-114hrpt902',
+        'CRPT-114hrpt904',
+        'CRPT-114hrpt910',
+        'CRPT-114hrpt97',
+        'CRPT-115hrpt1041',
+        'CRPT-115hrpt1042',
+        'CRPT-115hrpt1080',
+        'CRPT-115hrpt1114',
+        'CRPT-115hrpt1116-pt1',
+        'CRPT-115hrpt1117',
+        'CRPT-115hrpt1118',
+        'CRPT-115hrpt1119',
+        'CRPT-115hrpt1121',
+        'CRPT-115hrpt1122',
+        'CRPT-115hrpt1129-pt1',
+        'CRPT-115hrpt626-pt1',
+        'CRPT-115hrpt847',
+        'CRPT-115hrpt851',
+        'CRPT-115hrpt898',
+        'CRPT-116hrpt107',
+        'CRPT-116hrpt446',
+        'CRPT-116hrpt703',
+        'CRPT-116hrpt709',
+        'CRPT-116hrpt711',
+        'CRPT-116hrpt714',
+        'CRPT-116hrpt716',
+        'CRPT-116hrpt719',
+        'CRPT-116hrpt720',
+        'CRPT-117hrpt691',
+        'CRPT-117hrpt700',
+        'CRPT-117hrpt705',
+        'CRPT-117hrpt706',
+        'CRPT-117hrpt707',
+        'CRPT-118hrpt551',
+        'CRPT-118hrpt965',
+        'CRPT-118hrpt969',
+        'CRPT-118hrpt979',
+        ]
 
         bioguide_id_fixes = {
-                            "Mr. Bishop": "B001250", # found via membership in committee on rules in 109th congress
-                            "Mr. Bliley": "B000556",
-                            "Mr. Boehlert": "B000586",
-                            "Mr. Bonner": "B001244",
-                            "Ms. Sanchez": "S001156", # found via membership in committee on ethics in 112th congress
-                            "Mr. Brady": "B000755",
-                            "Mr. Burgess": "B001248",
-                            "Mr. Camp": "C000071",
-                            "Mr. Clinger": "C000523",
-                            "Mr. Collins": "C001093",
-                            "Mr. Conaway": "C001062",
-                            "Mr. Davis": "D000136",
-                            "Mr. Davis of Virginia": "D000136",
-                            "Mr. DeFazio": "D000191",
-                            "Mr. Delahunt": "D000210",
-                            "Mr. Dent": "D000604",
-                            "Mr. Deutch": "D000610",
-                            "Mr. Marchant": "M001158",
-                            "Mr. Dreier": "D000492",
-                            "Mr. Edwards": "E000063",
-                            "Mr. Frelinghuysen": "F000372",
-                            "Mr. Goodling": "G000291",
-                            "Mr. Gowdy": "G000566",
-                            "Mr. Green": "G000410",
-                            "Mr. Hastings": "H000329",
-                            "Mr. Gross": "G000495",
-                            "Mr. Hansen": "H000172",
-                            "Mr. Hefley": "H000444",
-                            "Mr. Mollohan": "M000844",
-                            "Mr. Hensarling": "H001036",
-                            "Mr. Hyde": "H001022",
-                            "Mr. Johnson": "J000126",
-                            "Mr. Kasich of Ohio": "K000016",
-                            "Mr. Kline": "K000363",
-                            "Mr. Lewis": "L000274",
-                            "Mr. McHenry": "M001156",
-                            "Mr. Miller": "M001144",
-                            "Mr. Oberstar": "O000006",
-                            "Mr. Obey": "O000007",
-                            "Mr. Peterson": "P000258",
-                            "Mr. Rogers": "R000395",
-                            "Mr. Ryan": "R000570",
-                            "Mr. Scott": "S000185",
-                            "Mr. Scott of Georgia": "S001157",
-                            "Mrs. Johnson": "J000163",
-                            "Mr. Skelton": "S000465",
-                            "Mrs. Lowey": "L000480",
-                            "Mr. Smith": "S000606",
-                            "Mr. Smith of Texas": "S000583",
-                            "Mr. Solomon": "S000675",
-                            "Mr. Spratt of South Carolina": "S000749",
-                            "Mrs. Rodgers of Washington": "M001159",
-                            "Mr. Thompson": "T000193",
-                            "Mr. Walker": "W000068",
-                            "Mr. Young": "Y000031",
-                            "Mr. Young of Florida": "Y000031",
-                            "Ms. Brooks": "B001284",
-                            "Ms. Greene of Utah": "G000408",
-                            "Ms. Lofgren": "L000397",
-                            "Ms. Wild": "W000826",
-                            "Mr. Guest": "G000591",
-                        }
+            "Mr. Bishop": "B001250",  # found via membership in committee on rules in 109th congress
+            "Mr. Bliley": "B000556",
+            "Mr. Boehlert": "B000586",
+            "Mr. Bonner": "B001244",
+            "Ms. Sanchez": "S001156",  # found via membership in committee on ethics in 112th congress
+            "Mr. Brady": "B000755",
+            "Mr. Burgess": "B001248",
+            "Mr. Camp": "C000071",
+            "Mr. Clinger": "C000523",
+            "Mr. Collins": "C001093",
+            "Mr. Conaway": "C001062",
+            "Mr. Davis": "D000136",
+            "Mr. Davis of Virginia": "D000136",
+            "Mr. DeFazio": "D000191",
+            "Mr. Delahunt": "D000210",
+            "Mr. Dent": "D000604",
+            "Mr. Deutch": "D000610",
+            "Mr. Marchant": "M001158",
+            "Mr. Dreier": "D000492",
+            "Mr. Edwards": "E000063",
+            "Mr. Frelinghuysen": "F000372",
+            "Mr. Goodling": "G000291",
+            "Mr. Gowdy": "G000566",
+            "Mr. Green": "G000410",
+            "Mr. Hastings": "H000329",
+            "Mr. Gross": "G000495",
+            "Mr. Hansen": "H000172",
+            "Mr. Hefley": "H000444",
+            "Mr. Mollohan": "M000844",
+            "Mr. Hensarling": "H001036",
+            "Mr. Hyde": "H001022",
+            "Mr. Johnson": "J000126",
+            "Mr. Kasich of Ohio": "K000016",
+            "Mr. Kline": "K000363",
+            "Mr. Lewis": "L000274",
+            "Mr. McHenry": "M001156",
+            "Mr. Miller": "M001144",
+            "Mr. Oberstar": "O000006",
+            "Mr. Obey": "O000007",
+            "Mr. Peterson": "P000258",
+            "Mr. Rogers": "R000395",
+            "Mr. Ryan": "R000570",
+            "Mr. Scott": "S000185",
+            "Mr. Scott of Georgia": "S001157",
+            "Mrs. Johnson": "J000163",
+            "Mr. Skelton": "S000465",
+            "Mrs. Lowey": "L000480",
+            "Mr. Smith": "S000606",
+            "Mr. Smith of Texas": "S000583",
+            "Mr. Solomon": "S000675",
+            "Mr. Spratt of South Carolina": "S000749",
+            "Mrs. Rodgers of Washington": "M001159",
+            "Mr. Thompson": "T000193",
+            "Mr. Walker": "W000068",
+            "Mr. Young": "Y000031",
+            "Mr. Young of Florida": "Y000031",
+            "Ms. Brooks": "B001284",
+            "Ms. Greene of Utah": "G000408",
+            "Ms. Lofgren": "L000397",
+            "Ms. Wild": "W000826",
+            "Mr. Guest": "G000591",
+        }
 
-        if cleaned.get("parsed", "") in bioguide_id_fixes and cleaned.get("bioguideid", None) is None:
-            cleaned["bioguideid"] = bioguide_id_fixes[cleaned.get("parsed", "")]
-            logger.info(f"Bioguide ID fixed: {cleaned.get('parsed', '')} -> {cleaned.get('bioguideid', 'ID_ERROR')}")
+        if cleaned.get('granuleid') in incorrect_granules:
+            if cleaned.get("parsed", "") in bioguide_id_fixes and cleaned.get("bioguideid", None) is None:
+                cleaned["bioguideid"] = bioguide_id_fixes[cleaned.get("parsed", "")]
+                logger.info(
+                    f"Bioguide ID fixed: {cleaned.get('parsed', '')} -> {cleaned.get('bioguideid', 'ID_ERROR')}"
+                )
+            elif cleaned.get("bioguideid", None) is None:
+                cleaned["bioguideid"] = "ID_ERROR"
+                raise ValueError(f"Bioguide ID not found for {cleaned.get('package_id', 'ID_ERROR')}")
 
         filtered_cleaned = {
             "package_id": cleaned.get("package_id", "ID_ERROR"),
@@ -1543,7 +1716,9 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                                 try:
                                     # Defensive: ensure number and congress are int or None
                                     number_val = self.safe_int(content.get("number"))
-                                    congress_val = self.safe_int(content.get("congress"))
+                                    congress_val = self.safe_int(
+                                        content.get("congress")
+                                    )
                                     # If either is None, skip this record (cannot insert str into int column)
                                     if number_val is None or congress_val is None:
                                         logger.warning(

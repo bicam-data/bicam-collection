@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_reference_bills(
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports(
-    package_id TEXT PRIMARY KEY,
+    package_id TEXT,
     report_id TEXT,
     granule_id TEXT,
     parent_report_id TEXT,
@@ -201,7 +201,8 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports(
     su_doc_class_number TEXT,
     su_doc_item_number TEXT,
     other_su_doc_class_number TEXT,
-    last_modified TIMESTAMP WITH TIME ZONE
+    last_modified TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (package_id, report_id)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_ils_system_id(
