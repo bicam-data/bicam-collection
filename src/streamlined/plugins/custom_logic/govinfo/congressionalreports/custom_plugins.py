@@ -385,7 +385,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     query = f"""
                     SELECT
                         crc.package_id,
-                        NULL as granuleid,
+                        NULL as granule_id,
                         crc.authorityid,
                         crc.committeename,
                         cr.documenttype,
@@ -400,8 +400,8 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     UNION ALL
 
                     SELECT
-                        NULL as package_id,
-                        crg.granuleid,
+                        crg.packageid as package_id,
+                        crg.granuleid AS granule_id,
                         crgc.authorityid,
                         crgc.committeename,
                         cr.documenttype,
@@ -412,9 +412,9 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     FROM {self.staging_schema}.congressionalreports_granules_committees AS crgc
                     JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crgc.granule_id = crg.id
                     JOIN {self.staging_schema}.congressionalreports AS cr ON crg.packageid = cr.packageid
-                    GROUP BY crg.granuleid, crgc.authorityid, crgc.committeename, cr.documenttype, cr.documentnumber, cr.congress, crg.partnumber, crg.heading
+                    GROUP BY crg.packageid, crg.granuleid, crgc.authorityid, crgc.committeename, cr.documenttype, cr.documentnumber, cr.congress, crg.partnumber, crg.heading
 
-                    ORDER BY granuleid, authorityid, committeename
+                    ORDER BY granule_id, authorityid, committeename
                     LIMIT {chunk_size} OFFSET {offset}
                     """
 
@@ -527,8 +527,8 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     # Use JSON aggregation to collect all formats for each text
                     query = f"""
                     SELECT
-                        crg.packageid,
-                        crg.granuleid,
+                        crg.packageid AS package_id,
+                        crg.granuleid AS granule_id,
                         crgm.bioguideid,
                         crgm.membername,
                         crgm.authorityid,
@@ -859,95 +859,94 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 logger.error(f"Error streaming congressionalreports: {e}")
                 raise
 
-    # async def _stream_congressionalreports_reference_bills_joined_chunks(
-    #     self, chunk_size: int
-    # ) -> AsyncGenerator[list[dict[str, Any]], None]:
-    #     """
-    #     Stream congressional reports bills joined chunks.
-    #     """
-    #     if not self.db_pool:
-    #         raise ValueError("Database pool not configured")
+    async def _stream_congressionalreports_reference_bills_joined_chunks(
+        self, chunk_size: int
+    ) -> AsyncGenerator[list[dict[str, Any]], None]:
+        """
+        Stream congressional reports bills joined chunks.
+        """
+        if not self.db_pool:
+            raise ValueError("Database pool not configured")
 
-    #     logger.info(
-    #         f"Streaming congressionalreports_reference_bills records in chunks of {chunk_size}"
-    #     )
+        logger.info(
+            f"Streaming congressionalreports_reference_bills records in chunks of {chunk_size}"
+        )
 
-    #     # Check if tables exist
-    #     async with self.db_pool.acquire() as conn, conn.transaction():
-    #         tables_exist_query = f"""
-    #             SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '{self.staging_schema}' AND table_name IN ('congressionalreports_granules_references_contents', 'congressionalreports_granules_references', 'congressionalreports_granules', 'congressionalreports')
-    #         """
-    #         tables_count = await conn.fetchval(tables_exist_query)
+        # Check if tables exist
+        async with self.db_pool.acquire() as conn, conn.transaction():
+            tables_exist_query = f"""
+                SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '{self.staging_schema}' AND table_name IN ('congressionalreports_granules_references_contents', 'congressionalreports_granules_references', 'congressionalreports_granules', 'congressionalreports')
+            """
+            tables_count = await conn.fetchval(tables_exist_query)
 
-    #         if tables_count < 4:
-    #             logger.warning(
-    #                 f"Missing required tables in {self.staging_schema} schema: "
-    #                 "congressionalreports_granules_references_contents, "
-    #                 "congressionalreports_granules_references, "
-    #                 "congressionalreports_granules, "
-    #                 "congressionalreports"
-    #             )
-    #             return
+            if tables_count < 4:
+                logger.warning(
+                    f"Missing required tables in {self.staging_schema} schema: "
+                    "congressionalreports_granules_references_contents, "
+                    "congressionalreports_granules_references, "
+                    "congressionalreports_granules, "
+                    "congressionalreports"
+                )
+                return
 
-    #     try:
-    #         offset = 0
-    #         while True:
-    #             logger.debug(
-    #                 f"Fetching congressionalreports_reference_bills chunk at offset {offset}"
-    #             )
+        try:
+            offset = 0
+            while True:
+                logger.debug(
+                    f"Fetching congressionalreports_reference_bills chunk at offset {offset}"
+                )
 
-    #             async with self.db_pool.acquire() as conn, conn.transaction():
-    #                 query = f"""
-    #                         SELECT crgrc.*, crg.granuleid, crg.partnumber, crg.heading, cr.packageid, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart
-    #                         FROM {self.staging_schema}.congressionalreports_granules_references_contents AS crgrc
-    #                         JOIN {self.staging_schema}.congressionalreports_granules_references AS crgr ON crgr.id = crgrc.references_id
-    #                         JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crg.id = crgr.granule_id
-    #                         JOIN {self.staging_schema}.congressionalreports AS cr ON crg.packageid = cr.packageid
-    #                         ORDER BY cr.packageid, crg.granuleid NULLS FIRST
-    #                         LIMIT {chunk_size} OFFSET {offset}
-    #                         """
+                async with self.db_pool.acquire() as conn, conn.transaction():
+                    query = f"""
+                            SELECT DISTINCT ON (type, number, congress, references_id) crgrc.*, crg.granuleid AS granule_id, crg.packageid AS package_id
+                            FROM {self.staging_schema}.congressionalreports_granules_references_contents AS crgrc
+                            JOIN {self.staging_schema}.congressionalreports_granules_references AS crgr ON crgr.id = crgrc.references_id
+                            JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crgr.granule_id = crg.id
+                            ORDER BY type, number, congress, references_id, crg.packageid, crg.granuleid NULLS FIRST
+                            LIMIT {chunk_size} OFFSET {offset}
+                            """
 
-    #                 logger.debug(
-    #                     f"Executing query for congressionalreports_reference_bills at offset {offset}"
-    #                 )
-    #                 rows = await conn.fetch(query)
-    #                 logger.debug(
-    #                     f"Retrieved {len(rows)} rows for congressionalreports_reference_bills at offset {offset}"
-    #                 )
+                    logger.debug(
+                        f"Executing query for congressionalreports_reference_bills at offset {offset}"
+                    )
+                    rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports_reference_bills at offset {offset}"
+                    )
 
-    #                 if not rows:
-    #                     logger.info(
-    #                         f"No more congressionalreports_reference_bills records at offset {offset}"
-    #                     )
-    #                     break
+                    if not rows:
+                        logger.info(
+                            f"No more congressionalreports_reference_bills records at offset {offset}"
+                        )
+                        break
 
-    #                 chunk = []
-    #                 for row in rows:
-    #                     try:
-    #                         row_dict = dict(row)
-    #                         chunk.append(row_dict)
-    #                     except Exception as e:
-    #                         logger.error(
-    #                             f"Error converting congressionalreports_reference_bills row to dict: {e}, row type: {type(row)}, row: {row}"
-    #                         )
-    #                         continue
+                    chunk = []
+                    for row in rows:
+                        try:
+                            row_dict = dict(row)
+                            chunk.append(row_dict)
+                        except Exception as e:
+                            logger.error(
+                                f"Error converting congressionalreports_reference_bills row to dict: {e}, row type: {type(row)}, row: {row}"
+                            )
+                            continue
 
-    #                 if chunk:
-    #                     logger.debug(
-    #                         f"Yielding {len(chunk)} congressionalreports_reference_bills records"
-    #                     )
-    #                     yield chunk
+                    if chunk:
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports_reference_bills records"
+                        )
+                        yield chunk
 
-    #                 offset += chunk_size
+                    offset += chunk_size
 
-    #                 if offset % (chunk_size * 10) == 0:
-    #                     logger.debug(
-    #                         f"Streamed {offset} congressionalreports_reference_bills records"
-    #                     )
+                    if offset % (chunk_size * 10) == 0:
+                        logger.debug(
+                            f"Streamed {offset} congressionalreports_reference_bills records"
+                        )
 
-    #     except Exception as e:
-    #         logger.error(f"Error streaming congressionalreports_reference_bills: {e}")
-    #         raise
+        except Exception as e:
+            logger.error(f"Error streaming congressionalreports_reference_bills: {e}")
+            raise
 
     async def _clean_congressionalreports_singular(
         self, record_data: dict[str, Any]
@@ -1139,12 +1138,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         """
         # logger.info(f"Cleaning committees: {record_data}")
         cleaned = record_data.copy()
-        report_id, _, granule_id, _, _, _, _ = self._build_report_identity(cleaned)
 
         filtered_cleaned = {
             "package_id": cleaned.get("package_id", "ID_ERROR"),
-            "granule_id": granule_id,
-            "report_id": report_id,
+            "granule_id": cleaned.get("granule_id", "ID_ERROR"),
             "committee_code": cleaned.get("authorityid", "ID_ERROR"),
             "committee_name": cleaned.get("committeename", None),
         }
@@ -1182,150 +1179,150 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         """
 
         cleaned = record_data.copy()
-        report_id, _, granule_id, _, _, _, _ = self._build_report_identity(cleaned)
-        
-        incorrect_granules = ['CRPT-104hrpt201',
-        'CRPT-104hrpt424',
-        'CRPT-104hrpt553',
-        'CRPT-104hrpt565',
-        'CRPT-104hrpt628',
-        'CRPT-104hrpt633',
-        'CRPT-104hrpt704',
-        'CRPT-104hrpt744',
-        'CRPT-104hrpt803',
-        'CRPT-104hrpt842',
-        'CRPT-104hrpt874',
-        'CRPT-104hrpt876',
-        'CRPT-104hrpt886',
-        'CRPT-104hrpt887',
-        'CRPT-105hrpt169',
-        'CRPT-105hrpt19',
-        'CRPT-105hrpt622',
-        'CRPT-105hrpt637',
-        'CRPT-105hrpt743',
-        'CRPT-105hrpt840',
-        'CRPT-106hrpt1040',
-        'CRPT-106hrpt1047',
-        'CRPT-106hrpt1055',
-        'CRPT-106hrpt198-pt1',
-        'CRPT-106hrpt407',
-        'CRPT-106hrpt482',
-        'CRPT-106srpt362',
-        'CRPT-106srpt363',
-        'CRPT-106srpt426',
-        'CRPT-107hrpt486',
-        'CRPT-107hrpt793',
-        'CRPT-107hrpt800',
-        'CRPT-107srpt2',
-        'CRPT-108hrpt799',
-        'CRPT-108hrpt806',
-        'CRPT-108hrpt815',
-        'CRPT-109hrpt163',
-        'CRPT-109hrpt352',
-        'CRPT-109hrpt469',
-        'CRPT-109hrpt733',
-        'CRPT-109hrpt734',
-        'CRPT-109hrpt739',
-        'CRPT-109hrpt747',
-        'CRPT-109hrpt748',
-        'CRPT-110hrpt144',
-        'CRPT-110hrpt186',
-        'CRPT-110hrpt355',
-        'CRPT-110hrpt573',
-        'CRPT-110hrpt73',
-        'CRPT-110hrpt924',
-        'CRPT-110hrpt938',
-        'CRPT-110hrpt940',
-        'CRPT-111hrpt143',
-        'CRPT-111hrpt161',
-        'CRPT-111hrpt194',
-        'CRPT-111hrpt222',
-        'CRPT-111hrpt577',
-        'CRPT-111hrpt63',
-        'CRPT-111hrpt696',
-        'CRPT-111hrpt699',
-        'CRPT-111hrpt700',
-        'CRPT-111hrpt704',
-        'CRPT-111hrpt707',
-        'CRPT-111hrpt710',
-        'CRPT-111hrpt711',
-        'CRPT-111hrpt715',
-        'CRPT-112hrpt104',
-        'CRPT-112hrpt119',
-        'CRPT-112hrpt12',
-        'CRPT-112hrpt120',
-        'CRPT-112hrpt132',
-        'CRPT-112hrpt145',
-        'CRPT-112hrpt259',
-        'CRPT-112hrpt341',
-        'CRPT-112hrpt354',
-        'CRPT-112hrpt470',
-        'CRPT-112hrpt489',
-        'CRPT-112hrpt570',
-        'CRPT-112hrpt631',
-        'CRPT-112hrpt662',
-        'CRPT-112hrpt706',
-        'CRPT-112hrpt739',
-        'CRPT-112hrpt741',
-        'CRPT-112hrpt748',
-        'CRPT-112hrpt751',
-        'CRPT-112hrpt96',
-        'CRPT-113hrpt143',
-        'CRPT-113hrpt302',
-        'CRPT-113hrpt315',
-        'CRPT-113hrpt323',
-        'CRPT-113hrpt425',
-        'CRPT-113hrpt454',
-        'CRPT-113hrpt474',
-        'CRPT-113hrpt681',
-        'CRPT-113hrpt723',
-        'CRPT-113hrpt724',
-        'CRPT-113hrpt96',
-        'CRPT-114hrpt118',
-        'CRPT-114hrpt155',
-        'CRPT-114hrpt198',
-        'CRPT-114hrpt223',
-        'CRPT-114hrpt230',
-        'CRPT-114hrpt884',
-        'CRPT-114hrpt887',
-        'CRPT-114hrpt902',
-        'CRPT-114hrpt904',
-        'CRPT-114hrpt910',
-        'CRPT-114hrpt97',
-        'CRPT-115hrpt1041',
-        'CRPT-115hrpt1042',
-        'CRPT-115hrpt1080',
-        'CRPT-115hrpt1114',
-        'CRPT-115hrpt1116-pt1',
-        'CRPT-115hrpt1117',
-        'CRPT-115hrpt1118',
-        'CRPT-115hrpt1119',
-        'CRPT-115hrpt1121',
-        'CRPT-115hrpt1122',
-        'CRPT-115hrpt1129-pt1',
-        'CRPT-115hrpt626-pt1',
-        'CRPT-115hrpt847',
-        'CRPT-115hrpt851',
-        'CRPT-115hrpt898',
-        'CRPT-116hrpt107',
-        'CRPT-116hrpt446',
-        'CRPT-116hrpt703',
-        'CRPT-116hrpt709',
-        'CRPT-116hrpt711',
-        'CRPT-116hrpt714',
-        'CRPT-116hrpt716',
-        'CRPT-116hrpt719',
-        'CRPT-116hrpt720',
-        'CRPT-117hrpt691',
-        'CRPT-117hrpt700',
-        'CRPT-117hrpt705',
-        'CRPT-117hrpt706',
-        'CRPT-117hrpt707',
-        'CRPT-118hrpt551',
-        'CRPT-118hrpt965',
-        'CRPT-118hrpt969',
-        'CRPT-118hrpt979',
-        ]
+
+        incorrect_granules = [
+            'CRPT-104hrpt201',
+            'CRPT-104hrpt424',
+            'CRPT-104hrpt553',
+            'CRPT-104hrpt565',
+            'CRPT-104hrpt628',
+            'CRPT-104hrpt633',
+            'CRPT-104hrpt704',
+            'CRPT-104hrpt744',
+            'CRPT-104hrpt803',
+            'CRPT-104hrpt842',
+            'CRPT-104hrpt874',
+            'CRPT-104hrpt876',
+            'CRPT-104hrpt886',
+            'CRPT-104hrpt887',
+            'CRPT-105hrpt169',
+            'CRPT-105hrpt19',
+            'CRPT-105hrpt622',
+            'CRPT-105hrpt637',
+            'CRPT-105hrpt743',
+            'CRPT-105hrpt840',
+            'CRPT-106hrpt1040',
+            'CRPT-106hrpt1047',
+            'CRPT-106hrpt1055',
+            'CRPT-106hrpt198-pt1',
+            'CRPT-106hrpt407',
+            'CRPT-106hrpt482',
+            'CRPT-106srpt362',
+            'CRPT-106srpt363',
+            'CRPT-106srpt426',
+            'CRPT-107hrpt486',
+            'CRPT-107hrpt793',
+            'CRPT-107hrpt800',
+            'CRPT-107srpt2',
+            'CRPT-108hrpt799',
+            'CRPT-108hrpt806',
+            'CRPT-108hrpt815',
+            'CRPT-109hrpt163',
+            'CRPT-109hrpt352',
+            'CRPT-109hrpt469',
+            'CRPT-109hrpt733',
+            'CRPT-109hrpt734',
+            'CRPT-109hrpt739',
+            'CRPT-109hrpt747',
+            'CRPT-109hrpt748',
+            'CRPT-110hrpt144',
+            'CRPT-110hrpt186',
+            'CRPT-110hrpt355',
+            'CRPT-110hrpt573',
+            'CRPT-110hrpt73',
+            'CRPT-110hrpt924',
+            'CRPT-110hrpt938',
+            'CRPT-110hrpt940',
+            'CRPT-111hrpt143',
+            'CRPT-111hrpt161',
+            'CRPT-111hrpt194',
+            'CRPT-111hrpt222',
+            'CRPT-111hrpt577',
+            'CRPT-111hrpt63',
+            'CRPT-111hrpt696',
+            'CRPT-111hrpt699',
+            'CRPT-111hrpt700',
+            'CRPT-111hrpt704',
+            'CRPT-111hrpt707',
+            'CRPT-111hrpt710',
+            'CRPT-111hrpt711',
+            'CRPT-111hrpt715',
+            'CRPT-112hrpt104',
+            'CRPT-112hrpt119',
+            'CRPT-112hrpt12',
+            'CRPT-112hrpt120',
+            'CRPT-112hrpt132',
+            'CRPT-112hrpt145',
+            'CRPT-112hrpt259',
+            'CRPT-112hrpt341',
+            'CRPT-112hrpt354',
+            'CRPT-112hrpt470',
+            'CRPT-112hrpt489',
+            'CRPT-112hrpt570',
+            'CRPT-112hrpt631',
+            'CRPT-112hrpt662',
+            'CRPT-112hrpt706',
+            'CRPT-112hrpt739',
+            'CRPT-112hrpt741',
+            'CRPT-112hrpt748',
+            'CRPT-112hrpt751',
+            'CRPT-112hrpt96',
+            'CRPT-113hrpt143',
+            'CRPT-113hrpt302',
+            'CRPT-113hrpt315',
+            'CRPT-113hrpt323',
+            'CRPT-113hrpt425',
+            'CRPT-113hrpt454',
+            'CRPT-113hrpt474',
+            'CRPT-113hrpt681',
+            'CRPT-113hrpt723',
+            'CRPT-113hrpt724',
+            'CRPT-113hrpt96',
+            'CRPT-114hrpt118',
+            'CRPT-114hrpt155',
+            'CRPT-114hrpt198',
+            'CRPT-114hrpt223',
+            'CRPT-114hrpt230',
+            'CRPT-114hrpt884',
+            'CRPT-114hrpt887',
+            'CRPT-114hrpt902',
+            'CRPT-114hrpt904',
+            'CRPT-114hrpt910',
+            'CRPT-114hrpt97',
+            'CRPT-115hrpt1041',
+            'CRPT-115hrpt1042',
+            'CRPT-115hrpt1080',
+            'CRPT-115hrpt1114',
+            'CRPT-115hrpt1116-pt1',
+            'CRPT-115hrpt1117',
+            'CRPT-115hrpt1118',
+            'CRPT-115hrpt1119',
+            'CRPT-115hrpt1121',
+            'CRPT-115hrpt1122',
+            'CRPT-115hrpt1129-pt1',
+            'CRPT-115hrpt626-pt1',
+            'CRPT-115hrpt847',
+            'CRPT-115hrpt851',
+            'CRPT-115hrpt898',
+            'CRPT-116hrpt107',
+            'CRPT-116hrpt446',
+            'CRPT-116hrpt703',
+            'CRPT-116hrpt709',
+            'CRPT-116hrpt711',
+            'CRPT-116hrpt714',
+            'CRPT-116hrpt716',
+            'CRPT-116hrpt719',
+            'CRPT-116hrpt720',
+            'CRPT-117hrpt691',
+            'CRPT-117hrpt700',
+            'CRPT-117hrpt705',
+            'CRPT-117hrpt706',
+            'CRPT-117hrpt707',
+            'CRPT-118hrpt551',
+            'CRPT-118hrpt965',
+            'CRPT-118hrpt969',
+            'CRPT-118hrpt979',
+            ]
 
         bioguide_id_fixes = {
             "Mr. Bishop": "B001250",  # found via membership in committee on rules in 109th congress
@@ -1403,8 +1400,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         filtered_cleaned = {
             "package_id": cleaned.get("package_id", "ID_ERROR"),
-            "granule_id": granule_id,
-            "report_id": report_id,
+            "granule_id": cleaned.get("granule_id", "ID_ERROR"),
             "bioguide_id": cleaned.get("bioguideid", "ID_ERROR"),
             "membername": cleaned.get("membername", None),
             "authorityid": cleaned.get("authorityid", "ID_ERROR"),
@@ -1425,19 +1421,12 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         - id            text,
         - references_id text,
         - list_index    text
-        - granuleid     text,
-        - partnumber    text,
-        - packageid     text,
-        - documenttype  text,
-        - documentnumber text,
+        - granule_id    text,
+        - package_id    text,
         - congress      text,
-        - documentpart  text,
 
         """
-        logger.info(f"Cleaning congressionalreports_bills: {record_data}")
-
         cleaned = record_data.copy()
-        report_id, _, granule_id, _, _, _, _ = self._build_report_identity(cleaned)
 
         bill_type = cleaned.get("type", "").lower()
         bill_number = cleaned.get("number", "")
@@ -1450,12 +1439,11 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         filtered_cleaned = {
             "package_id": cleaned.get("package_id", "ID_ERROR"),
-            "granule_id": granule_id,
-            "report_id": report_id,
+            "granule_id": cleaned.get("granule_id", "ID_ERROR"),
             "bill_id": bill_id,
             "bill_type": bill_type,
             "bill_number": bill_number,
-            "congress": bill_congress,
+            "congress": self.safe_int(bill_congress),
         }
         return filtered_cleaned
 
@@ -1554,7 +1542,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             async with self.db_pool.acquire() as conn, conn.transaction():
                 # Fetch all records from staging
                 fetch_sql = f"""
-                SELECT packageid as package_id, serialset_bagid, serialset_docid, serialset_serialsetnumber, agency, volume, otheridentifier_oclc, otheridentifier_lccn, otheridentifier_issn, lastmodified, documenttype, documentnumber, congress, documentpart FROM {self.staging_schema}.congressionalreports
+                SELECT packageid as package_id, serialset_bagid, serialset_docid, serialset_serialsetnumber, agency, volume, parentid, otheridentifier_oclc, otheridentifier_lccn, otheridentifier_issn, serialset_isglp, lastmodified, documenttype, documentnumber, congress, documentpart FROM {self.staging_schema}.congressionalreports
                 WHERE serialset_bagid IS NOT NULL OR serialset_docid IS NOT NULL OR serialset_serialsetnumber IS NOT NULL
                 """
                 rows = await conn.fetch(fetch_sql)
@@ -1562,16 +1550,15 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
                 serialset_records = []
                 for row in rows:
-                    report_id, _, _, _, _, _, _ = self._build_report_identity(row)
                     serialset_records.append(
                         (
                             row["package_id"],
-                            report_id,
                             row["serialset_bagid"],
                             row["serialset_docid"],
                             row["serialset_serialsetnumber"],
                             row["agency"],
                             row["volume"],
+                            row["parentid"],
                             row[
                                 "otheridentifier_oclc"
                             ],  # Fixed: use correct column name
@@ -1581,6 +1568,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             row[
                                 "otheridentifier_issn"
                             ],  # Fixed: use correct column name
+                            row["serialset_isglp"],
                             self.standardize_date(
                                 row["lastmodified"]
                             ),  # Fixed: use correct column name and standardize date
@@ -1588,8 +1576,8 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     )
                 if serialset_records:
                     insert_sql = f"""
-                        INSERT INTO {self.production_schema}.congressionalreports_serialset (package_id, report_id, bag_id, doc_id, serialset_number, agency, volume, oclc_number, lccn_number, issn_number, last_modified)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                        INSERT INTO {self.production_schema}.congressionalreports_serialset (package_id, bag_id, doc_id, serialset_number, agency, volume, parent_serialset_id, oclc_number, lccn_number, issn_number, isglp, last_modified)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                         ON CONFLICT (package_id) DO NOTHING
                     """
                     chunk_size = 1000
@@ -2062,44 +2050,6 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                                 )
                                 updated_count += len(batch)
 
-                            # Update dependent tables in batches
-                            for i in range(
-                                0, len(committees_updates), update_batch_size
-                            ):
-                                batch = committees_updates[i : i + update_batch_size]
-                                await conn.executemany(
-                                    f"""
-                                    UPDATE {self.production_schema}.congressionalreports_committees
-                                    SET report_id = $1
-                                    WHERE package_id = $2
-                                    """,
-                                    batch,
-                                )
-
-                            for i in range(0, len(members_updates), update_batch_size):
-                                batch = members_updates[i : i + update_batch_size]
-                                await conn.executemany(
-                                    f"""
-                                    UPDATE {self.production_schema}.congressionalreports_members
-                                    SET report_id = $1
-                                    WHERE package_id = $2
-                                    """,
-                                    batch,
-                                )
-
-                            for i in range(
-                                0, len(serialset_updates), update_batch_size
-                            ):
-                                batch = serialset_updates[i : i + update_batch_size]
-                                await conn.executemany(
-                                    f"""
-                                    UPDATE {self.production_schema}.congressionalreports_serialset
-                                    SET report_id = $1
-                                    WHERE package_id = $2
-                                    """,
-                                    batch,
-                                )
-
                     logger.info(
                         f"Completed placeholder part resolution: {updated_count} records updated across {total_chunks} chunks"
                     )
@@ -2122,5 +2072,78 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 }
             )
             results["status"] = "partial_failure"
+        # ? Operation 5: serialset topics
+        logger.info("Starting serialset topics post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all production rows with placeholder 'x' (including errata 'xe')
+                prod_rows = await conn.fetch(
+                    f"""
+                    SELECT package_id, subjects_topics FROM {self.staging_schema}.congressionalreports
+                    """
+                )
+                for row in prod_rows:
+                    package_id = row["package_id"]
+                    topics = row["subjects_topics"]
+                    if topics:
+                        topic_list = json.loads(topics)
+                        for topic in topic_list:
+                            await conn.execute(
+                                f"""
+                                INSERT INTO {self.production_schema}.congressionalreports_serialset_topics (package_id, topic)
+                                VALUES ($1, $2)
+                                ON CONFLICT (package_id, topic) DO NOTHING
+                                """,
+                                (package_id, topic),
+                            )
+
+        except Exception as e:
+            logger.error(f"Error inserting serialset topics: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "insert_serialset_topics",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+        logger.info("Completed serialset topics post-processing")
+
+        #? Operation 6: serialset committees
+        logger.info("Starting serialset committees post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all production rows with placeholder 'x' (including errata 'xe')
+                prod_rows = await conn.fetch(
+                    f"""
+                    SELECT package_id, committees FROM {self.staging_schema}.congressionalreports
+                    """
+                )
+                for row in prod_rows:
+                    package_id = row["package_id"]
+                    committees = row["committees"]
+                    if committees:
+                        committee_list = json.loads(committees)
+                        for committee in committee_list:
+                            await conn.execute(
+                                f"""
+                                INSERT INTO {self.production_schema}.congressionalreports_committees (package_id, granule_id, committee_code, committee_name)
+                                VALUES ($1, $2, $3, $4)
+                                ON CONFLICT (package_id, granule_id, committee_code, committee_name) DO NOTHING
+                                """,
+                                (package_id, None, committee["authorityId"], committee["committeeName"]),
+                            )
+
+        except Exception as e:
+            logger.error(f"Error inserting serialset committees: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "insert_serialset_committees",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+        logger.info("Completed serialset committees post-processing")
 
         return results

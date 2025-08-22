@@ -213,15 +213,16 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_ils_system_id(
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_serialset(
     package_id TEXT PRIMARY KEY,
-    report_id TEXT,
     bag_id TEXT,
     doc_id TEXT,
     serialset_number TEXT,
     agency TEXT,
     volume TEXT,
+    parent_serialset_id TEXT,
     oclc_number TEXT,
     lccn_number TEXT,
     issn_number TEXT,
+    isglp BOOLEAN,
     last_modified TIMESTAMP WITH TIME ZONE
 );
 
@@ -240,16 +241,14 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_granules(
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_committees(
     package_id TEXT,
     granule_id TEXT,
-    report_id TEXT,
     committee_code TEXT,
     committee_name TEXT,
-    UNIQUE (package_id, granule_id, report_id, committee_code, committee_name)
+    UNIQUE (package_id, granule_id, committee_code, committee_name)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_members(
     package_id TEXT,
     granule_id TEXT,
-    report_id TEXT,
     bioguide_id TEXT,
     membername TEXT,
     authorityid TEXT,
@@ -261,6 +260,9 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_reference_bills(
     granule_id TEXT,
     package_id TEXT,
     bill_id TEXT,
+    bill_type TEXT,
+    bill_number TEXT,
+    congress INTEGER,
     UNIQUE (package_id, granule_id, bill_id)
 );
 
