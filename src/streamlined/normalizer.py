@@ -10,7 +10,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .libs.hierarchical_checkpoint_system import (
@@ -283,7 +283,7 @@ class StreamlinedNormalizer:
             "lists_extracted": 0,
             "columns_cleaned": 0,
             "errors": 0,
-            "start_time": datetime.now(UTC),
+            "start_time": datetime.now(timezone.utc),
         }
 
         try:
@@ -495,7 +495,7 @@ class StreamlinedNormalizer:
             # Ensure checkpoint manager flushes any cached data
             checkpoint_manager.flush_all_caches()
 
-            results["end_time"] = datetime.now(UTC)
+            results["end_time"] = datetime.now(timezone.utc)
             results["duration"] = (
                 results["end_time"] - results["start_time"]
             ).total_seconds()
@@ -651,7 +651,7 @@ class StreamlinedNormalizer:
                         )
 
                         # Add common metadata
-                        flat_data["processed_at"] = datetime.now(UTC).isoformat()
+                        flat_data["processed_at"] = datetime.now(timezone.utc).isoformat()
                         flat_data["source_doc_id"] = source_doc_id
 
                         # Store main record using optimized normalizer storage
@@ -853,7 +853,7 @@ class StreamlinedNormalizer:
                         )
 
                         # Add common metadata
-                        flat_data["processed_at"] = datetime.now(UTC).isoformat()
+                        flat_data["processed_at"] = datetime.now(timezone.utc).isoformat()
                         flat_data["source_doc_id"] = source_doc_id
 
                         # Store main record using optimized normalizer storage

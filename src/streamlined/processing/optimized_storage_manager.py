@@ -20,7 +20,7 @@ import time
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 import asyncpg
@@ -671,7 +671,7 @@ class OptimizedFetcherStorage:
             "id_uuid": data.get("id_uuid", str(uuid.uuid4())),
             "url": data.get("url"),
             "batch_id": batch_id or str(uuid.uuid4()),
-            "scraped_at": datetime.now(UTC),
+            "scraped_at": datetime.now(timezone.utc),
             "etl_batch_id": batch_id or str(uuid.uuid4()),
         }
 
@@ -723,7 +723,7 @@ class OptimizedFetcherStorage:
             "id_uuid": data.get("id_uuid", str(uuid.uuid4())),
             "url": data.get("url"),
             "batch_id": batch_id or str(uuid.uuid4()),
-            "scraped_at": datetime.now(UTC),
+            "scraped_at": datetime.now(timezone.utc),
             "etl_batch_id": batch_id or str(uuid.uuid4()),
         }
 
@@ -822,7 +822,7 @@ class OptimizedFetcherStorage:
                             "id_uuid": str(uuid.uuid4()),
                             "url": record_data.get("url"),
                             "batch_id": batch_id or str(uuid.uuid4()),
-                            "scraped_at": datetime.now(UTC),
+                            "scraped_at": datetime.now(timezone.utc),
                             "etl_batch_id": batch_id or str(uuid.uuid4()),
                         }
 
@@ -927,7 +927,7 @@ class OptimizedFetcherStorage:
             "id_uuid": data.get("id_uuid", str(uuid.uuid4())),
             "url": data.get("granuleLink"),
             "batch_id": batch_id or str(uuid.uuid4()),
-            "scraped_at": datetime.now(UTC),
+            "scraped_at": datetime.now(timezone.utc),
             "etl_batch_id": batch_id or str(uuid.uuid4()),
         }
 

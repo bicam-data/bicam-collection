@@ -9,7 +9,7 @@ different data sources while allowing for custom implementations.
 import html
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
 import asyncpg
@@ -500,7 +500,7 @@ class BaseCleanerLogic:
             # Ensure existing datetime objects are timezone-aware
             if date_value.tzinfo is None:
                 # Assume timezone-naive datetime is in UTC
-                return date_value.replace(tzinfo=UTC)
+                return date_value.replace(tzinfo=timezone.utc)
             return date_value
 
         if isinstance(date_value, str):
@@ -509,7 +509,7 @@ class BaseCleanerLogic:
                 # Ensure parsed datetime is timezone-aware
                 if parsed_date.tzinfo is None:
                     # Assume timezone-naive datetime is in UTC
-                    return parsed_date.replace(tzinfo=UTC)
+                    return parsed_date.replace(tzinfo=timezone.utc)
                 return parsed_date
             except Exception:
                 logger.warning(f"Could not parse date: {date_value}")

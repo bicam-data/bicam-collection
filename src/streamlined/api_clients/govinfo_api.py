@@ -14,7 +14,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -144,15 +144,13 @@ class GovInfoAPIClient(BaseAPIClient):
         # Provide default dates if None is passed
         if start_date is None:
             # Default to 30 days ago if no start date provided
-            from datetime import datetime, timedelta
-
-            start_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+            start_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                "%Y-%m-%d"
+            )
             logger.info(f"No start_date provided, using default: {start_date}")
 
         if end_date is None:
             # Default to today if no end date provided
-            from datetime import datetime
-
             end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             logger.info(f"No end_date provided, using default: {end_date}")
 

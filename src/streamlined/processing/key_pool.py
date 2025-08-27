@@ -8,7 +8,7 @@ with rate limiting and automatic rotation.
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -37,7 +37,7 @@ class PooledAPIKey:
     rate_limit_duration: timedelta = field(
         default_factory=lambda: timedelta(minutes=30)
     )
-    last_request_time: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_request_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
     def requests_remaining(self) -> int:
@@ -54,7 +54,7 @@ class PooledAPIKey:
         if (
             self.state == KeyState.RATE_LIMITED
             and self.rate_limited_at
-            and datetime.now(UTC) - self.rate_limited_at > self.rate_limit_duration
+            and datetime.now(timezone.utc) - self.rate_limited_at > self.rate_limit_duration
         ):
             self.state = KeyState.AVAILABLE
             self.request_count = 0
@@ -65,7 +65,7 @@ class PooledAPIKey:
     def mark_rate_limited(self):
         """Mark key as rate limited and start cooldown."""
         self.state = KeyState.RATE_LIMITED
-        self.rate_limited_at = datetime.now(UTC)
+        self.rate_limited_at = datetime.now(timezone.utc)
         logger.info(
             f"Key {self.key[:8]}... rate limited. Will be available at "
             f"{self.rate_limited_at + self.rate_limit_duration}"
@@ -122,7 +122,7 @@ class DynamicKeyPool:
         """Complete the key checkout process."""
         key_obj.state = KeyState.IN_USE
         key_obj.checked_out_by = worker_id
-        key_obj.checked_out_at = datetime.now(UTC)
+        key_obj.checked_out_at = datetime.now(timezone.utc)
 
         logger.debug(
             f"Checked out key {key_obj.key[:8]}... to {worker_id} "
@@ -162,7 +162,7 @@ class DynamicKeyPool:
 
             # Update usage statistics
             key_obj.request_count += requests_made
-            key_obj.last_request_time = datetime.now(UTC)
+            key_obj.last_request_time = datetime.now(timezone.utc)
 
             if rate_limited or key_obj.request_count >= self.rate_limit_threshold:
                 key_obj.mark_rate_limited()
@@ -208,7 +208,7 @@ class DynamicKeyPool:
 
     async def reset_expired_limits(self):
         """Reset rate limits that have expired."""
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         reset_count = 0
 
         for key_obj in self._keys.values():
