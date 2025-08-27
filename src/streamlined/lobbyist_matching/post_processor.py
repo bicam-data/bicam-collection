@@ -4,8 +4,12 @@ import re
 from collections import defaultdict
 
 import asyncpg
-from .matcher import ReferenceMatcher, calculate_title_similarity, load_corpus_bills
-from .paragraph_processor import process_paragraphs
+from streamlined.lobbyist_matching.matcher import (
+    ReferenceMatcher,
+    calculate_title_similarity,
+    load_corpus_bills,
+)
+from streamlined.lobbyist_matching.paragraph_processor import process_paragraphs
 from tqdm import tqdm
 
 """

@@ -12,9 +12,9 @@ import logging
 import multiprocessing as mp
 import os
 import sys
+from typing import Any
 
 from dotenv import load_dotenv
-from typing import Any
 
 # Handle imports for both direct execution and module execution
 try:
@@ -26,16 +26,29 @@ try:
     from streamlined.lobbyist_matching.schema_setup import initialize_run
     from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
 except ImportError:
-    # When run directly, add the parent directory to path
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    from streamlined.lobbyist_matching.batch_processor import BatchProcessor
-    from streamlined.lobbyist_matching.db_utils import DatabaseInterface
-    from streamlined.lobbyist_matching.main import ensure_schema_exists
-    from streamlined.lobbyist_matching.matcher import MatchingManager
-    from streamlined.lobbyist_matching.post_processor import post_process_all
-    from streamlined.lobbyist_matching.schema_setup import initialize_run
-    from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
-    from streamlined.lobbyist_matching.db_utils import FilingSection
+    # When run directly, add the src directory to path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    src_dir = os.path.join(current_dir, "..", "..")  # Go up two levels to reach src
+    sys.path.insert(0, src_dir)
+
+    # Try the imports again
+    try:
+        from streamlined.lobbyist_matching.batch_processor import BatchProcessor
+        from streamlined.lobbyist_matching.db_utils import (
+            DatabaseInterface,
+            FilingSection,
+        )
+        from streamlined.lobbyist_matching.main import ensure_schema_exists
+        from streamlined.lobbyist_matching.matcher import MatchingManager
+        from streamlined.lobbyist_matching.post_processor import post_process_all
+        from streamlined.lobbyist_matching.schema_setup import initialize_run
+        from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
+    except ImportError as e:
+        print(f"Failed to import modules: {e}")
+        print(f"Current directory: {current_dir}")
+        print(f"Added to path: {src_dir}")
+        print(f"Python path: {sys.path[:3]}")  # Show first 3 entries
+        raise
 
 logging.basicConfig(level=logging.INFO)
 

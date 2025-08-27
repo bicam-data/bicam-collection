@@ -28,7 +28,7 @@ import asyncpg
 import polars as pl
 import psutil
 from rapidfuzz import fuzz
-from .section_processor import TITLE_ENDING_WORDS
+from streamlined.lobbyist_matching.section_processor import TITLE_ENDING_WORDS
 from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO)
