@@ -309,6 +309,7 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_reference_statutes
 CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages(
     package_id TEXT PRIMARY KEY,
     hearing_id TEXT,
+    parent_hearing_id TEXT,
     title TEXT,
     chamber TEXT, -- lower
     congress INTEGER,
@@ -326,12 +327,23 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages(
     last_modified TIMESTAMP WITH TIME ZONE
 );
 
--- DATES???
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_dates(
+    package_id TEXT,
+    date TEXT,
+    UNIQUE (package_id, date)
+);
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_granules(
     granule_id TEXT,
     package_id TEXT,
     PRIMARY KEY (granule_id, package_id)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_agencies(
+    granule_id TEXT,
+    package_id TEXT,
+    agency TEXT,
+    UNIQUE (package_id, granule_id, agency)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_committees(

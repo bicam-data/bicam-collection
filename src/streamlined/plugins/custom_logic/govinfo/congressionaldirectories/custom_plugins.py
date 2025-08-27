@@ -523,12 +523,17 @@ class CongressionaldirectoriesCleanerLogic(BaseCleanerLogic):
             "CDIR-2018-07-27-OK-H-1": "0000000",
             "CDIR-2018-10-29-OK-H-1": "0000000",
         }
-        if cleaned.get("granuleid") in granule_ids_to_fix and cleaned.get("bioguideid") is None:
+        if (
+            cleaned.get("granuleid") in granule_ids_to_fix
+            and cleaned.get("bioguideid") is None
+        ):
             logger.info(f"Fixing bioguideid for granuleid {cleaned.get('granuleid')}")
             cleaned["bioguideid"] = granule_ids_to_fix[cleaned.get("granuleid")]
 
         elif cleaned.get("bioguideid") is None:
-            raise ValueError(f"No bioguideid found for granuleid {cleaned.get('granuleid')}")
+            raise ValueError(
+                f"No bioguideid found for granuleid {cleaned.get('granuleid')}"
+            )
 
         # Map fields from the flat joined row to the members table
         filtered_cleaned = {
@@ -604,16 +609,16 @@ class CongressionaldirectoriesCleanerLogic(BaseCleanerLogic):
                             )
                             continue
                         for isbn in isbns:
-                            if (
-                                not isbn
-                                or not str(isbn).strip()
-                                and " " not in isbn
-                                and "u00a0" not in isbn
-                            ):
+                            # Remove whitespace and non-breaking spaces (both unicode and ascii)
+                            if not isbn:
                                 continue
-                            isbn_records.append((package_id, str(isbn).strip()))
+                            isbn_str = (
+                                str(isbn).replace("\u00a0", "").replace(" ", "").strip()
+                            )
+                            if not isbn_str:
+                                continue
+                            isbn_records.append((package_id, isbn_str))
 
-                    # Insert into production table, avoiding duplicates
                     if isbn_records:
                         insert_sql = f"""
                             INSERT INTO {self.production_schema}.congressionaldirectories_isbn (package_id, isbn)
@@ -707,9 +712,7 @@ class CongressionaldirectoriesCleanerLogic(BaseCleanerLogic):
                         await conn.executemany(insert_sql, zipcode_records)
                         rows_inserted = len(zipcode_records)
                     except Exception as e:
-                        logger.error(
-                            f"Error batch inserting zipcodes: {e}"
-                        )
+                        logger.error(f"Error batch inserting zipcodes: {e}")
                         # Optionally, you could fall back to single inserts here if needed
 
                     results["operations"].append(
@@ -814,7 +817,7 @@ class CongressionaldirectoriesCleanerLogic(BaseCleanerLogic):
                                 online_values["instagram_url"],
                                 online_values["youtube_url"],
                                 online_values["other_url"],
-                                granule_id
+                                granule_id,
                             )
                             rows_updated += 1
                         except Exception as e:
@@ -849,6 +852,32 @@ class CongressionaldirectoriesCleanerLogic(BaseCleanerLogic):
                 results["operations"].append(
                     {
                         "name": "extract_and_insert_online_values",
+                        "status": "error",
+                        "error": str(e),
+                    }
+                )
+                results["status"] = "partial_failure"
+
+            # Operation 4: Remove broken ISBN numbers
+            try:
+                delete_sql = f"""
+                    DELETE FROM {self.production_schema}.congressionaldirectories_isbn
+                    WHERE position('-' in isbn) = 0
+                """
+                await conn.execute(delete_sql)
+                results["operations"].append(
+                    {
+                        "name": "remove_broken_isbns",
+                        "status": "success",
+                        "rows_affected": 0,
+                        "note": "Removed broken ISBN numbers",
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Error removing broken ISBN numbers: {e}")
+                results["operations"].append(
+                    {
+                        "name": "remove_broken_isbns",
                         "status": "error",
                         "error": str(e),
                     }

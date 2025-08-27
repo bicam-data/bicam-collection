@@ -36,17 +36,22 @@ class HearingPackagesCleaner:
     Contains all the custom cleaning methods for hearing packages data.
     """
 
-    #TODO: for now, skip GOVPUB, but then go back manually for jacketnumbers?
-    #TODO: agencies are valid, we should clean them
-    #TODO: clean committee codes, and fill in empty committees (using fuzzy name matching with other values in the column)
-    #TODO: fill in 5k hearings members without bioguide ids
+    #TODO: for now, skip GOVPUB, but then get the jacket numbers from page 1 of the PDFs OR by hand (for example, "GOVPUB-Y4_AP6_1-cdb7e3ca60f825d996dd64fa187d6c2a" is "94361",
+    # "GOVPUB-W1_2-4c91b38b6d6d1632fd0d493849d04bd0" is "70178", and "GOVPUB-W1_2-8b9792340ef80ded080bef86bdfe4656" has to be created: "00315"
+
+    # TODO: fix partnumber/heading/volume/book handling, like "packageid LIKE '%p%v%' OR packageid LIKE '%p%b%' OR packageid LIKE '%v%b%' OR packageid LIKE '%v%p%' OR packageid LIKE '%b%v' OR packageid LIKE '%v%p%' OR packageid LIKE '%b%p%' OR heading is not null"
+    #TODO: agencies are valid, we should clean them but this entity disambiguation would be tough (granules)
+    #TODO: clean committee codes (only one really) "position ('o' in lower(authorityid)) > 4" (both granules and packages)
+    #TODO: fill in 539 hearings members without bioguide ids (granules)
     ####
-    #SELECT DISTINCT ON (gmn.parsed) * FROM bicam_staging_govinfo.hearingpackages_granules_members AS gm
+    #SELECT DISTINCT ON (lower(gmn.parsed)) * FROM bicam_staging_govinfo.hearingpackages_granules_members AS gm
     #JOIN bicam_staging_govinfo.hearingpackages_granules_members_name AS gmn ON gm.id = gmn.members_id
     #WHERE gm.bioguideid IS NULL;
     ####
-    #TODO: granules_committees, committees, granules_references, references, helddates
-
+    # TODO: reference_bills (granules)
+    # TODO: other references (right now, only one code from package)
+    # TODO: helddates (package)
+    # TODO: witnesses (granules)
     def __init__(
         self,
         data_type_name: str = "hearingpackages",
@@ -62,27 +67,287 @@ class HearingPackagesCleaner:
 
         # Set bills-specific multi-table processing configuration
         self.multi_table_data_types = {
-            "bills_texts": ["bills_texts", "bills_texts_formats"],
-            # Add other bills multi-table data types here as needed
+            "hearingpackages_committees": [
+                "hearingpackages_committees",
+                "hearingpackages_granules_committees",
+            ],
+            "hearingpackages_reference_bills": [
+                "hearingpackages_granules_references",
+                "hearingpackages_granules_references_contents",
+            ],
+            "hearingpackages_members": [
+                "hearingpackages_granules_members",
+                "hearingpackages_granules_members_name",
+            ],
+            # "hearingpackages_serialset": ["hearingpackages"],
+            "hearingpackages": [
+                "hearingpackages",
+                "hearingpackages_granules",
+            ],
+            "hearingpackages_witnesses": [
+                "hearingpackages_granules_witnesses",
+            ],
+            "hearingpackages_agencies": [
+                "hearingpackages_granules_agencies",
+            ],
+            "hearingpackages_dates": [
+                "hearingpackages_helddates",
+            ],
         }
 
-    async def _stream_bills_texts_joined_chunks(
+    # =========================
+    # Shared helpers
+    # =========================
+
+    def _detect_is_errata(self, cleaned: dict[str, Any]) -> bool:
+        """Best-effort detection of errata records from available fields.
+
+        Heuristics:
+        - Package-level: package id contains "err"
+        - Granule-level: heading equals "Errata"
+        """
+        try:
+            package_id_val = str(
+                cleaned.get("packageid") or cleaned.get("package_id") or ""
+            )
+            if "err" in package_id_val.lower():
+                return True
+
+            heading_val = cleaned.get("heading")
+            if heading_val is not None and str(heading_val).strip().lower() == "errata":
+                return True
+        except Exception:
+            # Non-fatal; treat as non-errata if parsing fails
+            pass
+        return False
+
+    def _build_report_identity(
+        self, cleaned: dict[str, Any]
+    ) -> tuple[str, str | None, str | None, int, str, str, str]:
+        """
+        Build canonical identity for congressional report rows (packages or granules).
+
+        Returns tuple:
+        - report_id
+        - parent_report_id (nullable)
+        - granule_id (nullable)
+        - part_number (int)
+        - report_type (str)
+        - report_number (str)
+        - congress (str)
+
+        Input must contain: documenttype, documentnumber, congress. Part comes from:
+        - For granules: partnumber if present; else parse via parse_part_from_fields
+        - For packages: parse via parse_part_from_fields
+        Parent part for granules is derived from documentpart or packageid; else 1.
+        """
+        # Support multiple inbound shapes for ids
+        packageid = str(cleaned.get("packageid") or cleaned.get("package_id"))
+        granuleid = cleaned.get("granuleid") or cleaned.get("granule_id")
+
+        report_type = cleaned.get("documenttype")
+        report_type = report_type.lower() if isinstance(report_type, str) else None
+        report_number = cleaned.get("documentnumber") or None
+        congress = str(cleaned.get("congress") or "") or None
+
+        if not all([report_type, report_number, congress]):
+            # Rare fallback: J6 package-only
+            if "J6" in (packageid or ""):
+                report_type = "hrpt"
+                report_number = "663"
+                congress = "117"
+            else:
+                raise ValueError(
+                    f"Invalid report_id inputs: report_type={report_type}, report_number={report_number}, congress={congress}. Record is {cleaned}"
+                )
+
+        if granuleid:
+            part_field = cleaned.get("partnumber")
+            if part_field is None:
+                part_number = self.parse_part_from_fields(cleaned) or 1
+            else:
+                part_str = str(part_field).strip()
+                part_number = (
+                    int(part_str)
+                    if part_str.isdigit()
+                    else (self.roman_to_int(part_str) or 1)
+                )
+
+            # Parent part number from documentpart or packageid; else default 1
+            parent_part_number: int | None = None
+            doc_part_field = cleaned.get("documentpart")
+            if doc_part_field:
+                doc_part_str = str(doc_part_field).strip()
+                if doc_part_str.isdigit():
+                    doc_part_val = int(doc_part_str)
+                else:
+                    doc_part_val = self.roman_to_int(doc_part_str) or None
+                if doc_part_val is not None and doc_part_val != part_number:
+                    parent_part_number = doc_part_val
+            if parent_part_number is None:
+                pkg_lower = (packageid or "").lower()
+                m = re.search(
+                    r"(?:^|[-_.])pt([ivx]+|\d+)(?:$|[-_.])", pkg_lower, re.IGNORECASE
+                )
+                if m:
+                    tok = m.group(1)
+                    parent_part_number = (
+                        int(tok) if tok.isdigit() else (self.roman_to_int(tok) or None)
+                    )
+                if parent_part_number is None:
+                    m = re.search(
+                        r"(?:^|[-_.])vol(?:ume)?([ivx]+|\d+)(?:$|[-_.])",
+                        pkg_lower,
+                        re.IGNORECASE,
+                    )
+                    if m:
+                        tok = m.group(1)
+                        parent_part_number = (
+                            int(tok)
+                            if tok.isdigit()
+                            else (self.roman_to_int(tok) or None)
+                        )
+            if parent_part_number is None:
+                parent_part_number = 1
+
+            parent_report_id = (
+                f"{report_type}{report_number}-{parent_part_number}-{congress}"
+            )
+        else:
+            part_number = self.parse_part_from_fields(cleaned) or 1
+            parent_report_id = None
+
+        # Append errata suffix to the part token when applicable so errata sorts
+        # immediately after the main part (e.g., "2" < "2e" < "3").
+        is_errata = self._detect_is_errata(cleaned)
+
+        # Use placeholder 'x' when package shows trailing numeric tokens but no explicit part in fields
+        part_token_base: str
+        if self._should_use_placeholder_part(cleaned, packageid):
+            part_token_base = "x"
+        else:
+            part_token_base = str(part_number)
+
+        part_token = f"{part_token_base}{'e' if is_errata else ''}"
+        report_id = f"{report_type}{report_number}-{part_token}-{congress}"
+        granule_id = str(granuleid) if granuleid else None
+        return (
+            report_id,
+            parent_report_id,
+            granule_id,
+            part_number,
+            report_type,
+            report_number,
+            congress,
+        )
+
+    def _should_use_placeholder_part(
+        self, cleaned: dict[str, Any], packageid: str | None
+    ) -> bool:
+        """Generalized check for when to emit placeholder part 'x'.
+
+        True when there are no explicit part indicators (heading, partnumber/documentpart, volumenumber)
+        and the package id ends with numeric token(s) like "...-4" or "...-4-3".
+        """
+        try:
+            pkg = str(
+                packageid or cleaned.get("packageid") or cleaned.get("package_id") or ""
+            )
+            heading = cleaned.get("heading")
+            partnumber = cleaned.get("partnumber") or cleaned.get("documentpart")
+            volumenumber = cleaned.get("volumenumber")
+
+            # If we have explicit part indicators, don't use placeholder
+            if heading or partnumber or volumenumber:
+                return False
+
+            # Check if parse_part_from_fields would find a valid part number (>1)
+            parsed_part = self.parse_part_from_fields(cleaned)
+            if parsed_part > 1:
+                return False
+
+            return bool(re.search(r"\d+(?:-\d+)?$", pkg))
+        except Exception:
+            return False
+
+    def roman_to_int(self, roman: str) -> int | None:
+        mapping = {
+            "I": 1,
+            "II": 2,
+            "III": 3,
+            "IV": 4,
+            "V": 5,
+            "VI": 6,
+            "VII": 7,
+            "VIII": 8,
+            "IX": 9,
+            "X": 10,
+            "XI": 11,
+            "XII": 12,
+            "XIII": 13,
+            "XIV": 14,
+            "XV": 15,
+            "XVI": 16,
+            "XVII": 17,
+            "XVIII": 18,
+            "XIX": 19,
+            "XX": 20,
+        }
+        return mapping.get(roman.upper())
+
+    def parse_part_from_fields(self, cleaned: dict[str, Any]) -> int:
+        # Priority: explicit partnumber -> title/subtitle -> packageid suffix
+        part_field = cleaned.get("partnumber") or cleaned.get("documentpart")
+        if part_field:
+            part_field_str = str(part_field).strip()
+            if part_field_str.isdigit():
+                return int(part_field_str)
+            roman_val = self.roman_to_int(part_field_str)
+            if roman_val is not None:
+                return roman_val
+
+        # As a last resort, inspect packageid for suffix hints like volII/ptII/-pt2
+        # But avoid matching report numbers (e.g., don't match "pt128" in "CRPT-104hrpt128")
+        pkg = str(cleaned.get("packageid", ""))
+
+        # Look for standalone part indicators that are not embedded in report numbers
+        # Pattern: pt/vol followed by number/roman, but not if it's part of a report number
+        m = re.search(
+            r"(?:^|[-_.])(?:vol|pt)[-_.]?([ivx]+|\d+)(?:$|[-_.])", pkg, re.IGNORECASE
+        )
+        if m:
+            token = m.group(1)
+            # Additional check: if the token is a large number (>20), it's likely a report number, not a part
+            if token.isdigit() and int(token) <= 20:
+                return int(token)
+            roman_val = self.roman_to_int(token)
+            if roman_val is not None:
+                return roman_val
+
+        return 1
+
+    async def _stream_congressionalreports_committees_joined_chunks(
         self, chunk_size: int
     ) -> AsyncGenerator[list[dict[str, Any]], None]:
         """
-        Stream joined data from bills_texts_staging and bills_texts_formats_staging.
-        Properly aggregates multiple formats per text record.
+        Stream joined data from congressionalreports_committees and congressionalreports_granules_committees.
         """
+        # TODO: between congressionalreports_committees and congressionalreports_granules_committees
+
         if not self.db_pool:
             raise ValueError("Database pool not configured")
 
         async with self.db_pool.acquire() as conn:
             try:
+                logger.info(
+                    f"Starting congressionalreports_committees streaming with chunk_size={chunk_size}"
+                )
+
                 # First, check if both tables exist
                 tables_exist_query = """
                 SELECT COUNT(*) FROM information_schema.tables
                 WHERE table_schema = $1
-                AND table_name IN ('bills_texts', 'bills_texts_formats')
+                AND table_name IN ('congressionalreports_committees', 'congressionalreports_granules_committees')
                 """
                 tables_count = await conn.fetchval(
                     tables_exist_query, self.staging_schema
@@ -90,50 +355,91 @@ class HearingPackagesCleaner:
 
                 if tables_count < 2:
                     logger.warning(
-                        "One or both bills_texts staging tables do not exist"
+                        "One or both congressionalreports_committees staging tables do not exist"
                     )
                     return
 
                 # Get total count for logging
-                count_query = f"""
-                SELECT COUNT(DISTINCT bt.id)
-                FROM {self.staging_schema}.bills_texts bt
+                package_count_query = f"""
+                SELECT DISTINCT ON (c.package_id, c.authorityid) COUNT(*)
+                FROM {self.staging_schema}.congressionalreports_committees AS c
+                GROUP BY c.package_id, c.authorityid
                 """
-                total_count = await conn.fetchval(count_query)
+                package_count = await conn.fetchval(package_count_query)
+
+                granule_count_query = f"""
+                SELECT DISTINCT ON (gc.granule_id, gc.authorityid) COUNT(*)
+                FROM {self.staging_schema}.congressionalreports_granules_committees gc
+                GROUP BY gc.granule_id, gc.authorityid
+                """
+                granule_count = await conn.fetchval(granule_count_query)
+
+                total_count = package_count + granule_count
 
                 if total_count == 0:
-                    logger.info("No bills_texts records found")
+                    logger.info("No congressionalreports_committees records found")
                     return
 
                 logger.info(
-                    f"Streaming {total_count} bills_texts records with formats in chunks of {chunk_size}"
+                    f"Streaming {total_count} congressionalreports_committees records in chunks of {chunk_size}"
                 )
 
                 # Stream using pagination with aggregated formats
                 offset = 0
                 while True:
+                    logger.debug(
+                        f"Fetching congressionalreports_committees chunk at offset {offset}"
+                    )
+
                     # Use JSON aggregation to collect all formats for each text
                     query = f"""
                     SELECT
-                        bt.*,
-                        COALESCE(
-                            json_agg(
-                                json_build_object('type', btf.type, 'url', btf.url)
-                                ORDER BY btf.type
-                            ) FILTER (WHERE btf.type IS NOT NULL),
-                            '[]'::json
-                        ) as formats_json
-                    FROM {self.staging_schema}.bills_texts bt
-                    LEFT JOIN {self.staging_schema}.bills_texts_formats btf
-                        ON bt.bill_id = btf.bill_id AND bt.list_index = btf.list_index
-                    GROUP BY bt.id, bt.bill_id, bt.list_index, bt.date, bt.type,
-                                bt.processed_at
-                    ORDER BY bt.processed_at DESC
+                        crc.package_id,
+                        NULL as granule_id,
+                        crc.authorityid,
+                        crc.committeename,
+                        cr.documenttype,
+                        cr.documentnumber,
+                        cr.congress,
+                        cr.documentpart AS partnumber,
+                        NULL::text AS heading
+                    FROM {self.staging_schema}.congressionalreports_committees AS crc
+                    JOIN {self.staging_schema}.congressionalreports AS cr ON crc.package_id = cr.packageid
+                    GROUP BY crc.package_id, crc.authorityid, crc.committeename, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart
+
+                    UNION ALL
+
+                    SELECT
+                        crg.packageid as package_id,
+                        crg.granuleid AS granule_id,
+                        crgc.authorityid,
+                        crgc.committeename,
+                        cr.documenttype,
+                        cr.documentnumber,
+                        cr.congress,
+                        crg.partnumber,
+                        crg.heading
+                    FROM {self.staging_schema}.congressionalreports_granules_committees AS crgc
+                    JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crgc.granule_id = crg.id
+                    JOIN {self.staging_schema}.congressionalreports AS cr ON crg.packageid = cr.packageid
+                    GROUP BY crg.packageid, crg.granuleid, crgc.authorityid, crgc.committeename, cr.documenttype, cr.documentnumber, cr.congress, crg.partnumber, crg.heading
+
+                    ORDER BY granule_id, authorityid, committeename
                     LIMIT {chunk_size} OFFSET {offset}
                     """
 
+                    logger.debug(
+                        f"Executing query for congressionalreports_committees at offset {offset}"
+                    )
                     rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports_committees at offset {offset}"
+                    )
+
                     if not rows:
+                        logger.info(
+                            f"No more congressionalreports_committees records at offset {offset}"
+                        )
                         break
 
                     chunk = []
@@ -143,11 +449,14 @@ class HearingPackagesCleaner:
                             chunk.append(row_dict)
                         except Exception as e:
                             logger.error(
-                                f"Error converting bills_texts row to dict: {e}, row type: {type(row)}, row: {row}"
+                                f"Error converting congressionalreports_committees row to dict: {e}, row type: {type(row)}, row: {row}"
                             )
                             continue
 
                     if chunk:  # Only yield if we have valid records
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports_committees records"
+                        )
                         yield chunk
 
                     offset += chunk_size
@@ -155,253 +464,1770 @@ class HearingPackagesCleaner:
                     # Log progress periodically
                     if offset % (chunk_size * 10) == 0:
                         logger.debug(
-                            f"Streamed {offset} bills_texts records with formats"
+                            f"Streamed {offset} congressionalreports_committees records"
                         )
 
             except Exception as e:
-                logger.error(f"Error streaming bills_texts with formats: {e}")
+                logger.error(f"Error streaming congressionalreports_committees: {e}")
                 raise
 
-    async def _clean_hearingpackages_singular(
+    async def _stream_congressionalreports_members_joined_chunks(
+        self, chunk_size: int
+    ) -> AsyncGenerator[list[dict[str, Any]], None]:
+        """
+        Stream joined data from congressionalreports_members and congressionalreports_granules_members.
+        """
+        # TODO: between congressionalreports_members and congressionalreports_granules_members
+
+        if not self.db_pool:
+            raise ValueError("Database pool not configured")
+
+        async with self.db_pool.acquire() as conn:
+            try:
+                logger.info(
+                    f"Starting congressionalreports_members streaming with chunk_size={chunk_size}"
+                )
+
+                # First, check if both tables exist
+                tables_exist_query = """
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = $1
+                AND table_name IN ('congressionalreports_granules_members', 'congressionalreports_granules_members_name')
+                """
+                tables_count = await conn.fetchval(
+                    tables_exist_query, self.staging_schema
+                )
+
+                if tables_count < 2:
+                    logger.warning(
+                        "One or both congressionalreports_members staging tables do not exist"
+                    )
+                    return
+
+                # Get total count for logging
+                package_count_query = f"""
+                SELECT COUNT(DISTINCT c.id)
+                FROM {self.staging_schema}.congressionalreports_granules_members c
+                """
+                package_count = await conn.fetchval(package_count_query)
+
+                granule_count_query = f"""
+                SELECT COUNT(DISTINCT gc.id)
+                FROM {self.staging_schema}.congressionalreports_granules_members_name gc
+                """
+                granule_count = await conn.fetchval(granule_count_query)
+
+                total_count = package_count + granule_count
+
+                if total_count == 0:
+                    logger.info("No congressionalreports_committees records found")
+                    return
+
+                logger.info(
+                    f"Streaming {total_count} congressionalreports_committees records in chunks of {chunk_size}"
+                )
+
+                # Stream using pagination with aggregated formats
+                offset = 0
+                while True:
+                    logger.debug(
+                        f"Fetching congressionalreports_members chunk at offset {offset}"
+                    )
+
+                    # Use JSON aggregation to collect all formats for each text
+                    query = f"""
+                    SELECT
+                        crg.packageid AS package_id,
+                        crg.granuleid AS granule_id,
+                        crgm.bioguideid,
+                        crgm.membername,
+                        crgm.authorityid,
+                        crgm.gpoid,
+                        crgmn.parsed,
+                        crgmn.authority_fnf,
+                        crgmn.authority_other,
+                        crg.partnumber,
+                        cr.documenttype,
+                        cr.documentnumber,
+                        cr.congress,
+                        cr.documentpart,
+                        crg.heading
+                    FROM {self.staging_schema}.congressionalreports_granules_members AS crgm
+                    JOIN {self.staging_schema}.congressionalreports_granules_members_name AS crgmn ON crgm.id = crgmn.members_id
+                    JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crgm.granule_id = crg.id
+                    JOIN {self.staging_schema}.congressionalreports AS cr ON crg.packageid = cr.packageid
+                    GROUP BY crg.packageid, crg.granuleid, crgm.bioguideid, crgm.membername, crgm.authorityid, crgm.gpoid, crgmn.parsed, crgmn.authority_fnf, crgmn.authority_other, crg.partnumber, cr.documenttype, cr.documentnumber, cr.congress, cr.documentpart, crg.heading
+                    ORDER BY crg.packageid, crg.granuleid NULLS FIRST
+                    LIMIT {chunk_size} OFFSET {offset}
+                    """
+
+                    logger.debug(
+                        f"Executing query for congressionalreports_members at offset {offset}"
+                    )
+                    rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports_members at offset {offset}"
+                    )
+
+                    if not rows:
+                        logger.info(
+                            f"No more congressionalreports_members records at offset {offset}"
+                        )
+                        break
+
+                    chunk = []
+                    for row in rows:
+                        try:
+                            row_dict = dict(row)
+
+                            # Check if parsed field contains " and " and split into multiple records
+                            parsed_value = row_dict.get("parsed", "")
+                            if parsed_value and " and " in parsed_value:
+                                # Split the parsed field and create separate records
+                                parsed_parts = parsed_value.split(" and ")
+                                for parsed_part in parsed_parts:
+                                    # Create a copy of the row with the split parsed value
+                                    split_row = row_dict.copy()
+                                    split_row["parsed"] = parsed_part.strip()
+                                    # Add a suffix to distinguish between split records if needed
+                                    chunk.append(split_row)
+                            else:
+                                # No splitting needed, add the original row
+                                chunk.append(row_dict)
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error converting congressionalreports_members row to dict: {e}, row type: {type(row)}, row: {row}",
+                                exc_info=True,
+                            )
+                            continue
+
+                    if chunk:  # Only yield if we have valid records
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports_members records"
+                        )
+                        yield chunk
+
+                    offset += chunk_size
+
+                    # Log progress periodically
+                    if offset % (chunk_size * 10) == 0:
+                        logger.debug(
+                            f"Streamed {offset} congressionalreports_members records"
+                        )
+
+            except Exception as e:
+                logger.error(f"Error streaming congressionalreports_members: {e}")
+                raise
+
+    async def _stream_congressionalreports_joined_chunks(
+        self, chunk_size: int
+    ) -> AsyncGenerator[list[dict[str, Any]], None]:
+        """
+        Stream joined data from congressionalreports and congressionalreports_granules.
+        """
+        # TODO: between congressionalreports and congressionalreports_granules
+
+        if not self.db_pool:
+            raise ValueError("Database pool not configured")
+
+        async with self.db_pool.acquire() as conn:
+            try:
+                logger.info(
+                    f"Starting congressionalreports streaming with chunk_size={chunk_size}"
+                )
+
+                # First, check if both tables exist
+                tables_exist_query = """
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = $1
+                AND table_name IN ('congressionalreports', 'congressionalreports_granules')
+                """
+                tables_count = await conn.fetchval(
+                    tables_exist_query, self.staging_schema
+                )
+
+                if tables_count < 2:
+                    logger.warning(
+                        "One or both congressionalreports staging tables do not exist"
+                    )
+                    return
+
+                # Get total count for logging
+                packages_without_granules_query = f"""
+                SELECT COUNT(DISTINCT c.packageid)
+                FROM {self.staging_schema}.congressionalreports c
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM {self.staging_schema}.congressionalreports_granules g
+                    WHERE g.packageid = c.packageid
+                )
+                """
+                packages_without_granules_count = await conn.fetchval(
+                    packages_without_granules_query
+                )
+
+                granule_count_query = f"""
+                SELECT COUNT(DISTINCT g.granuleid)
+                FROM {self.staging_schema}.congressionalreports_granules g
+                """
+                granule_count = await conn.fetchval(granule_count_query)
+
+                total_count = packages_without_granules_count + granule_count
+
+                if total_count == 0:
+                    logger.info("No congressionalreports records found")
+                    return
+
+                logger.info(
+                    f"Streaming {total_count} congressionalreports records in chunks of {chunk_size}"
+                )
+
+                # Stream using pagination with aggregated formats
+                offset = 0
+                while True:
+                    logger.debug(
+                        f"Fetching congressionalreports chunk at offset {offset}"
+                    )
+
+                    # Use JSON aggregation to collect all formats for each text
+                    query = f"""
+                    SELECT * FROM (
+                        -- Package-only rows (only for packages that don't have granules)
+                        SELECT
+                            c.packageid AS packageid,
+                            NULL::text AS granuleid,
+                            c.title AS title,
+                            c.subtitle AS subtitle,
+                            c.branch AS branch,
+                            c.chamber AS chamber,
+                            c.session AS session,
+                            c.category AS category,
+                            c.congress AS congress,
+                            c.docclass AS docclass,
+                            c.download_ziplink AS download_ziplink,
+                            c.download_modslink AS download_modslink,
+                            c.download_premislink AS download_premislink,
+                            c.download_pdflink AS download_pdflink,
+                            c.download_txtlink AS download_txtlink,
+                            c.detailslink AS detailslink,
+                            c.lastmodified AS lastmodified,
+                            c.documenttype AS documenttype,
+                            c.documentnumber AS documentnumber,
+                            c.publisher AS publisher,
+                            c.dateissued AS dateissued,
+                            c.granuleslink AS granuleslink,
+                            c.collectioncode AS collectioncode,
+                            c.collectionname AS collectionname,
+                            c.pages AS pages,
+                            c.otheridentifier_migrated_doc_id AS otheridentifier_migrated_doc_id,
+                            c.sudocclassnumber AS sudocclassnumber,
+                            c.governmentauthor1 AS governmentauthor1,
+                            c.governmentauthor2 AS governmentauthor2,
+                            c.processed_at AS processed_at,
+                            c.source_doc_id AS source_doc_id,
+                            c.otheridentifier_ils_system_id AS otheridentifier_ils_system_id,
+                            c.otheridentifier_sudoc_item_number AS otheridentifier_sudoc_item_number,
+                            c.otheridentifier_sudoc_class_number AS otheridentifier_sudoc_class_number,
+                            c.agency AS agency,
+                            c.volume AS volume,
+                            c.parentid AS parentid,
+                            c.subjects_topics AS subjects_topics,
+                            c.serialset_bagid AS serialset_bagid,
+                            c.serialset_docid AS serialset_docid,
+                            c.serialset_isglp AS serialset_isglp,
+                            c.serialset_serialsetnumber AS serialset_serialsetnumber,
+                            c.otheridentifier_oclc AS otheridentifier_oclc,
+                            c.committees AS committees,
+                            c.dateissuednotspecified AS dateissuednotspecified,
+                            c.otheridentifier_lccn AS otheridentifier_lccn,
+                            c.download_jpeglink AS download_jpeglink,
+                            c.federalpublicationname AS federalpublicationname,
+                            c.download_thumbnailjpeg AS download_thumbnailjpeg,
+                            c._references AS _references,
+                            c.president_id AS president_id,
+                            c.president_names AS president_names,
+                            c.president_party AS president_party,
+                            c.documentpart AS documentpart,
+                            c.otheridentifier_issn AS otheridentifier_issn,
+                            NULL::text AS heading,
+                            NULL::text AS partnumber,
+                            NULL::text AS volumenumber
+                        FROM {self.staging_schema}.congressionalreports c
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {self.staging_schema}.congressionalreports_granules g
+                            WHERE g.packageid = c.packageid
+                        )
+
+                        UNION ALL
+
+                        -- Granule rows (for packages that have granules)
+                        SELECT
+                            c.packageid AS packageid,
+                            g.granuleid AS granuleid,
+                            COALESCE(g.title, c.title) AS title,
+                            c.subtitle AS subtitle,
+                            c.branch AS branch,
+                            c.chamber AS chamber,
+                            c.session AS session,
+                            COALESCE(g.category, c.category) AS category,
+                            c.congress AS congress,
+                            COALESCE(g.docclass, c.docclass) AS docclass,
+                            COALESCE(g.download_ziplink, c.download_ziplink) AS download_ziplink,
+                            COALESCE(g.download_modslink, c.download_modslink) AS download_modslink,
+                            COALESCE(g.download_premislink, c.download_premislink) AS download_premislink,
+                            COALESCE(g.download_pdflink, c.download_pdflink) AS download_pdflink,
+                            COALESCE(g.download_txtlink, c.download_txtlink) AS download_txtlink,
+                            COALESCE(g.detailslink, c.detailslink) AS detailslink,
+                            COALESCE(g.lastmodified, c.lastmodified) AS lastmodified,
+                            c.documenttype AS documenttype,
+                            c.documentnumber AS documentnumber,
+                            c.publisher AS publisher,
+                            c.dateissued AS dateissued,
+                            c.granuleslink AS granuleslink,
+                            c.collectioncode AS collectioncode,
+                            c.collectionname AS collectionname,
+                            c.pages AS pages,
+                            c.otheridentifier_migrated_doc_id AS otheridentifier_migrated_doc_id,
+                            c.sudocclassnumber AS sudocclassnumber,
+                            c.governmentauthor1 AS governmentauthor1,
+                            c.governmentauthor2 AS governmentauthor2,
+                            c.processed_at AS processed_at,
+                            c.source_doc_id AS source_doc_id,
+                            c.otheridentifier_ils_system_id AS otheridentifier_ils_system_id,
+                            c.otheridentifier_sudoc_item_number AS otheridentifier_sudoc_item_number,
+                            c.otheridentifier_sudoc_class_number AS otheridentifier_sudoc_class_number,
+                            c.agency AS agency,
+                            c.volume AS volume,
+                            c.parentid AS parentid,
+                            c.subjects_topics AS subjects_topics,
+                            c.serialset_bagid AS serialset_bagid,
+                            c.serialset_docid AS serialset_docid,
+                            c.serialset_isglp AS serialset_isglp,
+                            c.serialset_serialsetnumber AS serialset_serialsetnumber,
+                            c.otheridentifier_oclc AS otheridentifier_oclc,
+                            c.committees AS committees,
+                            c.dateissuednotspecified AS dateissuednotspecified,
+                            c.otheridentifier_lccn AS otheridentifier_lccn,
+                            c.download_jpeglink AS download_jpeglink,
+                            c.federalpublicationname AS federalpublicationname,
+                            c.download_thumbnailjpeg AS download_thumbnailjpeg,
+                            c._references AS _references,
+                            c.president_id AS president_id,
+                            c.president_names AS president_names,
+                            c.president_party AS president_party,
+                            COALESCE(c.documentpart, g.partnumber, g.volumenumber) AS documentpart,
+                            c.otheridentifier_issn AS otheridentifier_issn,
+                            g.heading AS heading,
+                            g.partnumber AS partnumber,
+                            g.volumenumber AS volumenumber
+                        FROM {self.staging_schema}.congressionalreports c
+                        JOIN {self.staging_schema}.congressionalreports_granules g
+                            ON c.packageid = g.packageid
+                    ) q
+                    ORDER BY q.packageid, q.granuleid NULLS FIRST
+                    LIMIT {chunk_size} OFFSET {offset}
+                    """
+
+                    logger.debug(
+                        f"Executing query for congressionalreports at offset {offset}"
+                    )
+                    rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports at offset {offset}"
+                    )
+
+                    if not rows:
+                        logger.info(
+                            f"No more congressionalreports records at offset {offset}"
+                        )
+                        break
+
+                    chunk = []
+                    for row in rows:
+                        try:
+                            row_dict = dict(row)
+                            chunk.append(row_dict)
+                        except Exception as e:
+                            logger.error(
+                                f"Error converting congressionalreports row to dict: {e}, row type: {type(row)}, row: {row}"
+                            )
+                            continue
+
+                    if chunk:  # Only yield if we have valid records
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports records"
+                        )
+                        yield chunk
+
+                    offset += chunk_size
+
+                    # Log progress periodically
+                    if offset % (chunk_size * 10) == 0:
+                        logger.debug(f"Streamed {offset} congressionalreports records")
+
+            except Exception as e:
+                logger.error(f"Error streaming congressionalreports: {e}")
+                raise
+
+    async def _stream_congressionalreports_reference_bills_joined_chunks(
+        self, chunk_size: int
+    ) -> AsyncGenerator[list[dict[str, Any]], None]:
+        """
+        Stream congressional reports bills joined chunks.
+        """
+        if not self.db_pool:
+            raise ValueError("Database pool not configured")
+
+        logger.info(
+            f"Streaming congressionalreports_reference_bills records in chunks of {chunk_size}"
+        )
+
+        # Check if tables exist
+        async with self.db_pool.acquire() as conn, conn.transaction():
+            tables_exist_query = f"""
+                SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '{self.staging_schema}' AND table_name IN ('congressionalreports_granules_references_contents', 'congressionalreports_granules_references', 'congressionalreports_granules', 'congressionalreports')
+            """
+            tables_count = await conn.fetchval(tables_exist_query)
+
+            if tables_count < 4:
+                logger.warning(
+                    f"Missing required tables in {self.staging_schema} schema: "
+                    "congressionalreports_granules_references_contents, "
+                    "congressionalreports_granules_references, "
+                    "congressionalreports_granules, "
+                    "congressionalreports"
+                )
+                return
+
+        try:
+            offset = 0
+            while True:
+                logger.debug(
+                    f"Fetching congressionalreports_reference_bills chunk at offset {offset}"
+                )
+
+                async with self.db_pool.acquire() as conn, conn.transaction():
+                    query = f"""
+                            SELECT DISTINCT ON (type, number, congress, references_id) crgrc.*, crg.granuleid AS granule_id, crg.packageid AS package_id
+                            FROM {self.staging_schema}.congressionalreports_granules_references_contents AS crgrc
+                            JOIN {self.staging_schema}.congressionalreports_granules_references AS crgr ON crgr.id = crgrc.references_id
+                            JOIN {self.staging_schema}.congressionalreports_granules AS crg ON crgr.granule_id = crg.id
+                            ORDER BY type, number, congress, references_id, crg.packageid, crg.granuleid NULLS FIRST
+                            LIMIT {chunk_size} OFFSET {offset}
+                            """
+
+                    logger.debug(
+                        f"Executing query for congressionalreports_reference_bills at offset {offset}"
+                    )
+                    rows = await conn.fetch(query)
+                    logger.debug(
+                        f"Retrieved {len(rows)} rows for congressionalreports_reference_bills at offset {offset}"
+                    )
+
+                    if not rows:
+                        logger.info(
+                            f"No more congressionalreports_reference_bills records at offset {offset}"
+                        )
+                        break
+
+                    chunk = []
+                    for row in rows:
+                        try:
+                            row_dict = dict(row)
+                            chunk.append(row_dict)
+                        except Exception as e:
+                            logger.error(
+                                f"Error converting congressionalreports_reference_bills row to dict: {e}, row type: {type(row)}, row: {row}"
+                            )
+                            continue
+
+                    if chunk:
+                        logger.debug(
+                            f"Yielding {len(chunk)} congressionalreports_reference_bills records"
+                        )
+                        yield chunk
+
+                    offset += chunk_size
+
+                    if offset % (chunk_size * 10) == 0:
+                        logger.debug(
+                            f"Streamed {offset} congressionalreports_reference_bills records"
+                        )
+
+        except Exception as e:
+            logger.error(f"Error streaming congressionalreports_reference_bills: {e}")
+            raise
+
+    async def _clean_congressionalreports_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
         """
-        Custom cleaning logic for individual bills records.
+        Custom cleaning logic for individual congressional reports records.
         STAGING COLUMNS:
-        pages                                text,
-        title                                text,
-        branch                               text,
-        chamber                              text,
-        session                              text,
-        category                             text,
-        congress                             text,
-        docclass                             text,
-        download_ziplink                     text,
-        download_modslink                    text,
-        download_premislink                  text,
-        packageid                            text,
-        publisher                            text,
-        dateissued                           text,
-        detailslink                          text,
-        relatedlink                          text,
-        documenttype                         text,
-        granuleslink                         text,
-        lastmodified                         text,
-        collectioncode                       text,
-        collectionname                       text,
-        otheridentifier_migrated_doc_id      text,
-        sudocclassnumber                     text,
-        governmentauthor1                    text,
-        governmentauthor2                    text,
-        package_id                           text,
-        processed_at                         text,
-        source_doc_id                        text,
-        otheridentifier_ils_system_id        text,
-        documentnumber                       text,
-        download_pdflink                     text,
-        subtitle                             text,
-        otheridentifier_parent_ils_system_id text,
-        fields_name                          text,
-        fields_value                         text,
-        subjects_topics                      text,
-        committees                           text,
-        otheridentifier_oclc                 text,
-        otheridentifier_purl                 text,
-        otheridentifier_sudoc_item_number    text,
-        seriestitle                          text,
-        otheridentifier_isbn                 text,
-        fields                               text,
-        download_thumbnailjpeg               text,
-        federalpublicationname               text,
-        download_txtlink                     text,
-        _references                          text
+        - pages                              text,
+        - title                              text,
+        - branch                             text,
+        - chamber                            text,
+        - session                            text,
+        - category                           text,
+        - congress                           text,
+        - docclass                           text,
+        - download_ziplink                   text,
+        - download_modslink                  text,
+        - download_premislink                text,
+        - subtitle                           text,
+        - packageid                          text,
+        - publisher                          text,
+        - dateissued                         text,
+        - detailslink                        text,
+        - documenttype                       text,
+        - granuleslink                       text,
+        - lastmodified                       text,
+        - collectioncode                     text,
+        - collectionname                     text,
+        - documentnumber                     text,
+        - otheridentifier_migrated_doc_id    text,
+        - sudocclassnumber                   text,
+        - governmentauthor1                  text,
+        - governmentauthor2                  text,
+        - package_id                         text,
+        - processed_at                       text,
+        - source_doc_id                      text,
+        - otheridentifier_ils_system_id      text,
+        - otheridentifier_sudoc_item_number  text,
+        - download_pdflink                   text,
+        - otheridentifier_sudoc_class_number text,
+        - agency                             text,
+        - volume                             text,
+        - parentid                           text,
+        - subjects_topics                    text,
+        - serialset_bagid                    text,
+        - serialset_docid                    text,
+        - serialset_isglp                    text,
+        - serialset_serialsetnumber          text,
+        - otheridentifier_oclc               text,
+        - committees                         text,
+        - dateissuednotspecified             text,
+        - otheridentifier_lccn               text,
+        - download_txtlink                   text,
+        - download_jpeglink                  text,
+        - federalpublicationname             text,
+        - download_thumbnailjpeg             text,
+        - _references                        text,
+        - president_id                       text,
+        - president_names                    text,
+        - president_party                    text,
+        - documentpart                       text,
+        - otheridentifier_issn               text
+
         FINAL COLUMNS:
-        package_id TEXT PRIMARY KEY,
-        hearing_id TEXT,
-        title TEXT,
-        chamber TEXT, -- lower
-        congress INTEGER,
-        session INTEGER,
-        pages INTEGER,
-        is_appropriation BOOLEAN,
-        issued_at DATE,
-        branch TEXT,
-        government_author1 TEXT,
-        government_author2 TEXT,
-        publisher TEXT,
-        collection_code TEXT,
-        migrated_doc_id TEXT,
-        su_doc_class_number TEXT,
-        last_modified TIMESTAMP WITH TIME ZONE
+        - package_id TEXT PRIMARY KEY,
+        - report_id TEXT,
+        - granule_id TEXT,
+        - title TEXT,
+        - subtitle TEXT,
+        - chamber TEXT, -- lower
+        - congress INTEGER,
+        - session INTEGER,
+        - pages INTEGER,
+        - issued_at DATE,
+        - branch TEXT,
+        - government_author1 TEXT,
+        - government_author2 TEXT,
+        - publisher TEXT,
+        - collection_code TEXT,
+        - migrated_doc_id TEXT,
+        - su_doc_class_number TEXT,
+        - su_doc_item_number TEXT,
+        - last_modified TIMESTAMP WITH TIME ZONE
         """
         cleaned = record_data.copy()
-        # only get hearings that are not GOVPUB
-        cleaned = {k: v for k, v in cleaned.items() if v["collectioncode"] != "GOVPUB"}
+
+        (
+            report_id,
+            parent_report_id,
+            _,
+            _,
+            _,
+            _,
+            _,
+        ) = self._build_report_identity(cleaned)
+
+        # Compute errata flag using shared heuristics
+        errata_detected = self._detect_is_errata(cleaned)
 
         # Apply bills-specific cleaning logic
         filtered_cleaned = {
-            "hearing_id": str(cleaned.get("id", "ID_ERROR")),
-            "hearing_type": str(cleaned.get("type", None).lower()),
-            "hearing_number": float(cleaned.get("number", None)),
+            "package_id": str(cleaned.get("packageid", "ID_ERROR")),
+            "report_id": str(report_id),
+            "granule_id": str(cleaned.get("granuleid"))
+            if cleaned.get("granuleid")
+            else None,
+            "parent_report_id": parent_report_id,
+            "title": cleaned.get("title", None),
+            "subtitle": cleaned.get("subtitle", None),
+            "chamber": self.standardize_chamber(cleaned.get("chamber", None)),
             "congress": self.safe_int(cleaned.get("congress", None)),
-            "title": str(cleaned.get("title", None)),
-            "chamber": str(
-                self.standardize_chamber(cleaned.get("chamber", None))
-            ),
             "session": self.safe_int(cleaned.get("session", None)),
             "pages": self.safe_int(cleaned.get("pages", None)),
-            "is_appropriation": bool(cleaned.get("isappropriation", None)),
-            "issued_at": self.standardize_date(cleaned.get("issuedate", None)),
-            "branch": str(cleaned.get("branch", None)),
-            "government_author1": str(cleaned.get("governmentauthor1", None)),
-            "government_author2": str(cleaned.get("governmentauthor2", None)),
-            "publisher": str(cleaned.get("publisher", None)),
-            "collection_code": str(cleaned.get("collectioncode", None)),
-            "migrated_doc_id": str(cleaned.get("otheridentifier_migrated_doc_id", None)),
-            "su_doc_class_number": str(cleaned.get("sudocclassnumber", None)),
+            "is_errata": errata_detected,
+            "issued_at": self.standardize_date(cleaned.get("dateissued", None)),
+            "branch": cleaned.get("branch", None),
+            "government_author1": cleaned.get("governmentauthor1", None),
+            "government_author2": cleaned.get("governmentauthor2", None),
+            "publisher": cleaned.get("publisher", None),
+            "collection_code": cleaned.get("collectioncode", None),
+            "migrated_doc_id": cleaned.get("otheridentifier_migrated_doc_id", None),
+            "su_doc_class_number": cleaned.get("sudocclassnumber", None),
+            "other_su_doc_class_number": cleaned.get(
+                "otheridentifier_sudoc_class_number", None
+            ),
+            "su_doc_item_number": cleaned.get(
+                "otheridentifier_sudoc_item_number", None
+            ),
             "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
         }
 
         return filtered_cleaned
 
-    async def _clean_hearingpackages_actions_singular(
+    # async def _clean_congressionalreports_serialset_singular(
+    #     self, record_data: dict[str, Any]
+    # ) -> dict[str, Any]:
+    #     """
+    #     Custom cleaning logic for individual congressional reports records.
+    #     FINAL COLUMNS:
+    #     - package_id TEXT PRIMARY KEY,
+    #     - bag_id TEXT,
+    #     - doc_id TEXT,
+    #     - serialset_number TEXT,
+    #     - agency TEXT,
+    #     - volume TEXT,
+    #     - oclc_number TEXT,
+    #     - lccn_number TEXT,
+    #     - issn_number TEXT,
+    #     """
+
+    #     cleaned = record_data.copy()
+    #     report_id, _, _, _, _, _, _ = self._build_report_identity(cleaned)
+
+    #     return {
+    #         "package_id": cleaned.get("package_id", "ID_ERROR"),
+    #         "report_id": report_id,
+    #         "bag_id": cleaned.get("serialset_bagid", None),
+    #         "doc_id": cleaned.get("serialset_docid", None),
+    #         "serialset_number": cleaned.get("serialset_serialsetnumber", None),
+    #         "agency": cleaned.get("agency", None),
+    #         "volume": cleaned.get("volume", None),
+    #         "oclc_number": cleaned.get("otheridentifier_oclc", None),
+    #         "lccn_number": cleaned.get("otheridentifier_lccn", None),
+    #         "issn_number": cleaned.get("otheridentifier_issn", None),
+    #         "last_modified": self.standardize_date(cleaned.get("lastmodified", None)),
+    #     }
+
+    async def _clean_congressionalreports_committees_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Custom cleaning logic for bills actions records."""
+        """
+        Custom cleaning logic for individual bills records.
+        STAGING COLUMNS:
+        - package_id    text,
+        - granuleid    text,
+        - authorityid   text,
+        - committeename text,
+        - documenttype  text,
+        - documentnumber text,
+        - congress      text,
+        - documentpart  text,
+
+        FINAL COLUMNS:
+        - package_id TEXT,
+        - granule_id TEXT,
+        - report_id TEXT,
+        - committee_code TEXT,
+        - committee_name TEXT,
+        """
+        # logger.info(f"Cleaning committees: {record_data}")
         cleaned = record_data.copy()
 
         filtered_cleaned = {
-            "action_id": str(cleaned.get("id", "ID_ERROR")),
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "action_code": str(cleaned.get("actioncode", None)),
-            "action_date": self.standardize_date(cleaned.get("actiondate", None)),
-            "text": self.clean_long_text(cleaned.get("text", None)),
-            "action_type": str(cleaned.get("type", None)),
-            "source_system": str(cleaned.get("sourcesystem_name", None)),
-            "source_system_code": self.safe_int(cleaned.get("sourcesystem_code", None)),
-            "calendar": str(cleaned.get("calendarnumber_calendar", None)),
-            "calendar_number": self.safe_int(
-                cleaned.get("calendarnumber_number", None)
+            "package_id": cleaned.get("package_id", "ID_ERROR"),
+            "granule_id": cleaned.get("granule_id", "ID_ERROR"),
+            "committee_code": cleaned.get("authorityid", "ID_ERROR"),
+            "committee_name": cleaned.get("committeename", None),
+        }
+
+        return filtered_cleaned
+
+    async def _clean_congressionalreports_members_singular(
+        self, record_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Custom cleaning logic for individual bills records.
+        STAGING COLUMNS:
+        crg.packageid,
+        crg.granuleid,
+        crgm.bioguideid,
+        crgm.membername,
+        crgm.authorityid,
+        crgm.gpoid,
+        crgmn.authority_fnf,
+        crgmn.authority_other,
+        crg.partnumber,
+        cr.documenttype,
+        cr.documentnumber,
+        cr.congress,
+        cr.documentpart,
+        crg.heading
+        FINAL COLUMNS:
+        - package_id TEXT,
+        - granule_id TEXT,
+        - report_id TEXT,
+        - bioguide_id TEXT,
+        - membername TEXT,
+        - authorityid TEXT,
+        - gpoid TEXT,
+        """
+
+        cleaned = record_data.copy()
+
+        incorrect_granules = [
+            "CRPT-104hrpt201",
+            "CRPT-104hrpt424",
+            "CRPT-104hrpt553",
+            "CRPT-104hrpt565",
+            "CRPT-104hrpt628",
+            "CRPT-104hrpt633",
+            "CRPT-104hrpt704",
+            "CRPT-104hrpt744",
+            "CRPT-104hrpt803",
+            "CRPT-104hrpt842",
+            "CRPT-104hrpt874",
+            "CRPT-104hrpt876",
+            "CRPT-104hrpt886",
+            "CRPT-104hrpt887",
+            "CRPT-105hrpt169",
+            "CRPT-105hrpt19",
+            "CRPT-105hrpt622",
+            "CRPT-105hrpt637",
+            "CRPT-105hrpt743",
+            "CRPT-105hrpt840",
+            "CRPT-106hrpt1040",
+            "CRPT-106hrpt1047",
+            "CRPT-106hrpt1055",
+            "CRPT-106hrpt198-pt1",
+            "CRPT-106hrpt407",
+            "CRPT-106hrpt482",
+            "CRPT-106srpt362",
+            "CRPT-106srpt363",
+            "CRPT-106srpt426",
+            "CRPT-107hrpt486",
+            "CRPT-107hrpt793",
+            "CRPT-107hrpt800",
+            "CRPT-107srpt2",
+            "CRPT-108hrpt799",
+            "CRPT-108hrpt806",
+            "CRPT-108hrpt815",
+            "CRPT-109hrpt163",
+            "CRPT-109hrpt352",
+            "CRPT-109hrpt469",
+            "CRPT-109hrpt733",
+            "CRPT-109hrpt734",
+            "CRPT-109hrpt739",
+            "CRPT-109hrpt747",
+            "CRPT-109hrpt748",
+            "CRPT-110hrpt144",
+            "CRPT-110hrpt186",
+            "CRPT-110hrpt355",
+            "CRPT-110hrpt573",
+            "CRPT-110hrpt73",
+            "CRPT-110hrpt924",
+            "CRPT-110hrpt938",
+            "CRPT-110hrpt940",
+            "CRPT-111hrpt143",
+            "CRPT-111hrpt161",
+            "CRPT-111hrpt194",
+            "CRPT-111hrpt222",
+            "CRPT-111hrpt577",
+            "CRPT-111hrpt63",
+            "CRPT-111hrpt696",
+            "CRPT-111hrpt699",
+            "CRPT-111hrpt700",
+            "CRPT-111hrpt704",
+            "CRPT-111hrpt707",
+            "CRPT-111hrpt710",
+            "CRPT-111hrpt711",
+            "CRPT-111hrpt715",
+            "CRPT-112hrpt104",
+            "CRPT-112hrpt119",
+            "CRPT-112hrpt12",
+            "CRPT-112hrpt120",
+            "CRPT-112hrpt132",
+            "CRPT-112hrpt145",
+            "CRPT-112hrpt259",
+            "CRPT-112hrpt341",
+            "CRPT-112hrpt354",
+            "CRPT-112hrpt470",
+            "CRPT-112hrpt489",
+            "CRPT-112hrpt570",
+            "CRPT-112hrpt631",
+            "CRPT-112hrpt662",
+            "CRPT-112hrpt706",
+            "CRPT-112hrpt739",
+            "CRPT-112hrpt741",
+            "CRPT-112hrpt748",
+            "CRPT-112hrpt751",
+            "CRPT-112hrpt96",
+            "CRPT-113hrpt143",
+            "CRPT-113hrpt302",
+            "CRPT-113hrpt315",
+            "CRPT-113hrpt323",
+            "CRPT-113hrpt425",
+            "CRPT-113hrpt454",
+            "CRPT-113hrpt474",
+            "CRPT-113hrpt681",
+            "CRPT-113hrpt723",
+            "CRPT-113hrpt724",
+            "CRPT-113hrpt96",
+            "CRPT-114hrpt118",
+            "CRPT-114hrpt155",
+            "CRPT-114hrpt198",
+            "CRPT-114hrpt223",
+            "CRPT-114hrpt230",
+            "CRPT-114hrpt884",
+            "CRPT-114hrpt887",
+            "CRPT-114hrpt902",
+            "CRPT-114hrpt904",
+            "CRPT-114hrpt910",
+            "CRPT-114hrpt97",
+            "CRPT-115hrpt1041",
+            "CRPT-115hrpt1042",
+            "CRPT-115hrpt1080",
+            "CRPT-115hrpt1114",
+            "CRPT-115hrpt1116-pt1",
+            "CRPT-115hrpt1117",
+            "CRPT-115hrpt1118",
+            "CRPT-115hrpt1119",
+            "CRPT-115hrpt1121",
+            "CRPT-115hrpt1122",
+            "CRPT-115hrpt1129-pt1",
+            "CRPT-115hrpt626-pt1",
+            "CRPT-115hrpt847",
+            "CRPT-115hrpt851",
+            "CRPT-115hrpt898",
+            "CRPT-116hrpt107",
+            "CRPT-116hrpt446",
+            "CRPT-116hrpt703",
+            "CRPT-116hrpt709",
+            "CRPT-116hrpt711",
+            "CRPT-116hrpt714",
+            "CRPT-116hrpt716",
+            "CRPT-116hrpt719",
+            "CRPT-116hrpt720",
+            "CRPT-117hrpt691",
+            "CRPT-117hrpt700",
+            "CRPT-117hrpt705",
+            "CRPT-117hrpt706",
+            "CRPT-117hrpt707",
+            "CRPT-118hrpt551",
+            "CRPT-118hrpt965",
+            "CRPT-118hrpt969",
+            "CRPT-118hrpt979",
+            "CRPT-111hrpt715",
+            "CRPT-117hrpt117"
+        ]
+
+        bioguide_id_fixes = {
+            "Mr. Bishop": "B001250",  # found via membership in committee on rules in 109th congress
+            "Mr. Bliley": "B000556",
+            "Mr. Boehlert": "B000586",
+            "Mr. Bonner": "B001244",
+            "Ms. Sanchez": "S001156",  # found via membership in committee on ethics in 112th congress
+            "Mr. Brady": "B000755",
+            "Mr. Burgess": "B001248",
+            "Mr. Camp": "C000071",
+            "Mr. Clinger": "C000523",
+            "Mr. Collins": "C001093",
+            "Mr. Conaway": "C001062",
+            "Mr. Davis": "D000136",
+            "Mr. Davis of Virginia": "D000136",
+            "Mr. DeFazio": "D000191",
+            "Mr. Delahunt": "D000210",
+            "Mr. Dent": "D000604",
+            "Mr. Deutch": "D000610",
+            "Mr. Marchant": "M001158",
+            "Mr. Dreier": "D000492",
+            "Mr. Edwards": "E000063",
+            "Mr. Frelinghuysen": "F000372",
+            "Mr. Goodling": "G000291",
+            "Mr. Gowdy": "G000566",
+            "Mr. Green": "G000410",
+            "Mr. Hastings": "H000329",
+            "Mr. Gross": "G000495",
+            "Mr. Hansen": "H000172",
+            "Mr. Hefley": "H000444",
+            "Mr. Mollohan": "M000844",
+            "Mr. Hensarling": "H001036",
+            "Mr. Hyde": "H001022",
+            "Mr. Johnson": "J000126",
+            "Mr. Kasich of Ohio": "K000016",
+            "Mr. Kline": "K000363",
+            "Mr. Lewis": "L000274",
+            "Mr. McHenry": "M001156",
+            "Mr. Miller": "M001144",
+            "Mr. Oberstar": "O000006",
+            "Mr. Obey": "O000007",
+            "Mr. Peterson": "P000258",
+            "Mr. Rogers": "R000395",
+            "Mr. Ryan": "R000570",
+            "Mr. Scott": "S000185",
+            "Mr. Scott of Georgia": "S001157",
+            "Mrs. Johnson": "J000163",
+            "Mr. Skelton": "S000465",
+            "Mrs. Lowey": "L000480",
+            "Mr. Smith": "S000606",
+            "Mr. Smith of Texas": "S000583",
+            "Mr. Solomon": "S000675",
+            "Mr. Spratt of South Carolina": "S000749",
+            "Mrs. Rodgers of Washington": "M001159",
+            "Mr. Thompson": "T000193",
+            "Mr. Walker": "W000068",
+            "Mr. Young": "Y000031",
+            "Mr. Young of Florida": "Y000031",
+            "Ms. Brooks": "B001284",
+            "Ms. Greene of Utah": "G000408",
+            "Ms. Lofgren": "L000397",
+            "Ms. Wild": "W000826",
+            "Mr. Guest": "G000591",
+            "Brady, Robert A.": "B001227",
+            "Neguse, Joe": "N000191",
+        }
+
+        if cleaned.get("granuleid") in incorrect_granules:
+            if (
+                cleaned.get("parsed", "") in bioguide_id_fixes
+                and cleaned.get("bioguideid", None) is None
+            ):
+                cleaned["bioguideid"] = bioguide_id_fixes[cleaned.get("parsed", "")]
+                logger.info(
+                    f"Bioguide ID fixed: {cleaned.get('parsed', '')} -> {cleaned.get('bioguideid', 'ID_ERROR')}"
+                )
+            elif cleaned.get("bioguideid", None) is None:
+                cleaned["bioguideid"] = "ID_ERROR"
+                raise ValueError(
+                    f"Bioguide ID not found for {cleaned.get('package_id', 'ID_ERROR')}"
+                )
+
+        filtered_cleaned = {
+            "package_id": cleaned.get("package_id", "ID_ERROR"),
+            "granule_id": cleaned.get("granule_id", "ID_ERROR"),
+            "bioguide_id": (
+                cleaned.get("bioguideid")
+                if cleaned.get("bioguideid", None) != ""
+                else "ID_ERROR"
+            ),
+            "membername": cleaned.get("membername", None),
+            "authorityid": (
+                cleaned.get("authorityid")
+                if cleaned.get("authorityid", None) != ""
+                else None
+            ),
+            "gpoid": (
+                cleaned.get("gpoid")
+                if cleaned.get("gpoid", None) != ""
+                else None
             ),
         }
 
         return filtered_cleaned
 
-    # Add other cleaning methods for bills sub-tables
-    async def _clean_hearingpackages_cosponsors_singular(
+    async def _clean_hearingpackages_dates_singular(
         self, record_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Custom cleaning logic for bills cosponsors records."""
+        """
+        Custom cleaning logic for individual hearing packages dates records.
+        """
+        cleaned = record_data.copy()
+        filtered_cleaned = {
+            "package_id": cleaned.get("package_id", "ID_ERROR"),
+            "date": cleaned.get("date", "ID_ERROR"),
+        }
+        return filtered_cleaned
+
+    async def _clean_congressionalreports_reference_bills_singular(
+        self, record_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Custom cleaning logic for individual congressional reports records.
+        STAGING COLUMNS:
+        - type          text,
+        - number        text,
+        - congress      text,
+        - id            text,
+        - references_id text,
+        - list_index    text
+        - granule_id    text,
+        - package_id    text,
+        - congress      text,
+
+        """
         cleaned = record_data.copy()
 
-        filtered_cleaned = {
-            "bill_id": str(cleaned.get("bill_id", "ID_ERROR")),
-            "bioguide_id": str(cleaned.get("bioguideid", "ID_ERROR")),
-            "display_name": str(cleaned.get("fullname", None)),
-            "party": str(cleaned.get("party", None)),
-            "state": str(cleaned.get("state", None)),
-            "district": self.safe_int(cleaned.get("district", None)),
-            "is_original_cosponsor": bool(cleaned.get("isoriginalcosponsor", None)),
-            "sponsorship_date": self.standardize_date(
-                cleaned.get("sponsorshipdate", None)
-            ),
-            "sponsorship_withdrawal_date": self.standardize_date(
-                cleaned.get("sponsorshipwithdrawndate", None)
-            ),
-        }
+        bill_type = cleaned.get("type", "").lower()
+        bill_number = cleaned.get("number", "")
+        bill_congress = cleaned.get("congress", "")
 
+        if all([bill_type, bill_number, bill_congress]):
+            bill_id = f"{bill_type}{bill_number}-{bill_congress}"
+        else:
+            bill_id = None
+
+        filtered_cleaned = {
+            "package_id": cleaned.get("package_id", "ID_ERROR"),
+            "granule_id": cleaned.get("granule_id", "ID_ERROR"),
+            "bill_id": bill_id,
+            "bill_type": bill_type,
+            "bill_number": bill_number,
+            "congress": self.safe_int(bill_congress),
+        }
         return filtered_cleaned
 
     # Add post-processing methods
-    async def _post_process_hearingpackages(self) -> dict[str, Any]:
+    async def _post_process_congressionalreports(self) -> dict[str, Any]:
         """Post-processing operations specific to bills data."""
+        # TODO: ils system id
+        # TODO: serialset topics
+        # TODO: reference laws/codes/statutes
         if not self.db_pool:
             raise ValueError("Database pool not configured")
 
+        logger.info("Starting post-processing operations")
         results = {
             "status": "success",
             "operations": [],
             "rows_affected": 0,
         }
 
-        async with self.db_pool.acquire() as conn:
-            # Operation 1: Populate is_law field based on bills_laws table
-            try:
-                async with conn.transaction():
-                    sql = f"""
-                        UPDATE {self.production_schema}.bills
-                        SET is_law = CASE
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM {self.production_schema}.bills_laws bl
-                                WHERE bl.bill_id = bills.bill_id
-                            ) THEN true
-                            ELSE false
-                        END
-                        WHERE is_law IS NULL;
-                    """
+        # ? Operation 1: ils system id
+        logger.info("Starting ils system id post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all records from staging
+                fetch_sql = f"""
+                    SELECT package_id, otheridentifier_ils_system_id
+                    FROM {self.staging_schema}.congressionalreports
+                """
+                rows = await conn.fetch(fetch_sql)
+                logger.info(f"Found {len(rows)} records with ils_system_id data")
 
-                    result = await conn.execute(sql)
-                    rows_affected = int(result.split()[-1]) if result.split() else 0
+                # Prepare batch params
+                insert_sql = f"""
+                    INSERT INTO {self.production_schema}.congressionalreports_ils_system_id (package_id, ils_system_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT DO NOTHING
+                """
+                batch_params = []
+                for row in rows:
+                    ils_system_id_raw = row["otheridentifier_ils_system_id"]
+                    if not ils_system_id_raw:
+                        continue
+                    try:
+                        if isinstance(ils_system_id_raw, str):
+                            ils_ids = json.loads(ils_system_id_raw)
+                        elif isinstance(ils_system_id_raw, list):
+                            ils_ids = ils_system_id_raw
+                        elif isinstance(ils_system_id_raw, int | float):
+                            # Handle case where it's a single integer/float
+                            ils_ids = [str(ils_system_id_raw)]
+                        else:
+                            ils_ids = [str(ils_system_id_raw)]
+                    except json.JSONDecodeError:
+                        ils_ids = [str(ils_system_id_raw)]
 
-                    results["operations"].append(
-                        {
-                            "name": "populate_is_law_field",
-                            "status": "success",
-                            "rows_affected": rows_affected,
-                        }
-                    )
-                    results["rows_affected"] += rows_affected
+                    # Ensure ils_ids is always a list
+                    if not isinstance(ils_ids, list):
+                        ils_ids = [str(ils_ids)]
 
-                    logger.info(f"Updated is_law for {rows_affected} bills")
+                    for ils_id in ils_ids:
+                        if ils_id:
+                            batch_params.append((row["package_id"], str(ils_id)))
 
-            except Exception as e:
-                logger.error(f"Error populating is_law field: {e}")
+                total_inserted = 0
+                if batch_params:
+                    chunk_size = 1000
+                    for i in range(0, len(batch_params), chunk_size):
+                        chunk = batch_params[i : i + chunk_size]
+                        await conn.executemany(insert_sql, chunk)
+                        total_inserted += len(chunk)
+
+                logger.info(f"Inserted {total_inserted} ils_system_id records")
                 results["operations"].append(
                     {
-                        "name": "populate_is_law_field",
-                        "status": "error",
-                        "error": str(e),
+                        "name": "populate_ils_system_id_field",
+                        "status": "success",
+                        "rows_affected": total_inserted,
                     }
                 )
-                results["status"] = "partial_failure"
+                results["rows_affected"] += total_inserted
+
+        except Exception as e:
+            logger.error(f"Error populating ils_system_id field: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "populate_ils_system_id_field",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+
+        # ? Operation 2: serialset data
+        logger.info("Starting serialset post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all records from staging
+                fetch_sql = f"""
+                SELECT packageid as package_id, serialset_bagid, serialset_docid, serialset_serialsetnumber, agency, volume, parentid, otheridentifier_oclc, otheridentifier_lccn, otheridentifier_issn, serialset_isglp, lastmodified, documenttype, documentnumber, congress, documentpart FROM {self.staging_schema}.congressionalreports
+                WHERE serialset_bagid IS NOT NULL OR serialset_docid IS NOT NULL OR serialset_serialsetnumber IS NOT NULL
+                """
+                rows = await conn.fetch(fetch_sql)
+                logger.info(f"Found {len(rows)} records with serialset data")
+
+                serialset_records = []
+                for row in rows:
+                    # Coerce isglp to proper boolean
+                    isglp_raw = row.get("serialset_isglp")
+                    if isinstance(isglp_raw, str):
+                        isglp = (
+                            True
+                            if isglp_raw.lower() == "true"
+                            else False
+                            if isglp_raw.lower() == "false"
+                            else None
+                        )
+                    else:
+                        isglp = bool(isglp_raw) if isglp_raw is not None else None
+
+                    serialset_records.append(
+                        (
+                            row["package_id"],
+                            row.get("serialset_bagid"),
+                            row.get("serialset_docid"),
+                            row.get("serialset_serialsetnumber"),
+                            row.get("agency"),
+                            row.get("volume"),
+                            row.get("parentid"),
+                            row.get("otheridentifier_oclc"),
+                            row.get("otheridentifier_lccn"),
+                            row.get("otheridentifier_issn"),
+                            isglp,
+                            self.standardize_date(row.get("lastmodified")),
+                        )
+                    )
+                if serialset_records:
+                    insert_sql = f"""
+                        INSERT INTO {self.production_schema}.congressionalreports_serialset (
+                            package_id,
+                            bag_id,
+                            doc_id,
+                            serialset_number,
+                            agency,
+                            volume,
+                            parent_serialset_id,
+                            oclc_number,
+                            lccn_number,
+                            issn_number,
+                            isglp,
+                            last_modified
+                        ) VALUES (
+                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+                        )
+                        ON CONFLICT (package_id) DO NOTHING
+                    """
+                    chunk_size = 1000
+                    serialset_rows_affected = 0
+                    for i in range(0, len(serialset_records), chunk_size):
+                        chunk = serialset_records[i : i + chunk_size]
+                        await conn.executemany(insert_sql, chunk)
+                        serialset_rows_affected += len(chunk)
+                    logger.info(f"Inserted {serialset_rows_affected} serialset records")
+                    results["operations"].append(
+                        {
+                            "name": "populate_serialset_field",
+                            "status": "success",
+                            "rows_affected": serialset_rows_affected,
+                        }
+                    )
+                    results["rows_affected"] += serialset_rows_affected
+                else:
+                    logger.info("No serialset records to insert")
+        except Exception as e:
+            logger.error(f"Error populating serialset field: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "populate_serialset_field",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+        # ? Operation 3: references
+        logger.info("Starting reference post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Chunked processing to avoid huge memory and long transactions
+                offset = 0
+                limit = 5000
+                total_counts = {
+                    "laws": 0,
+                    "statutes": 0,
+                    "codes": 0,
+                    "statute_pages": 0,
+                    "code_sections": 0,
+                }
+
+                chunk_count = 0
+                while True:
+                    chunk_count += 1
+                    fetch_sql = f"""
+                    SELECT package_id, collectioncode, contents
+                    FROM {self.staging_schema}.congressionalreports_references
+                    ORDER BY package_id
+                    LIMIT {limit} OFFSET {offset}
+                    """
+
+                    logger.info(
+                        f"Fetching references chunk {chunk_count} at offset {offset}"
+                    )
+                    rows = await conn.fetch(fetch_sql)
+                    logger.info(
+                        f"Retrieved {len(rows)} rows for references chunk {chunk_count}"
+                    )
+
+                    if not rows:
+                        logger.info(f"No more rows found at offset {offset}, breaking")
+                        break
+
+                    law_params = []
+                    statute_params = []
+                    code_params = []
+                    statute_page_params = []
+                    code_section_params = []
+
+                    # Log sample data to understand structure
+                    if chunk_count == 1 and rows:
+                        sample_row = rows[0]
+                        logger.info(
+                            f"Sample row structure: package_id={sample_row['package_id']}, collectioncode={sample_row['collectioncode']}"
+                        )
+                        logger.info(
+                            f"Sample contents type: {type(sample_row['contents'])}, value: {sample_row['contents'][:200] if sample_row['contents'] else 'None'}"
+                        )
+
+                    for row_idx, row in enumerate(rows):
+                        contents = row["contents"]
+                        collection_code = row["collectioncode"]
+
+                        logger.debug(
+                            f"Processing row {row_idx + 1}/{len(rows)}: collection_code={collection_code}"
+                        )
+
+                        if isinstance(contents, str):
+                            try:
+                                contents = json.loads(contents)
+                                logger.debug(
+                                    f"Parsed JSON contents: {type(contents)}, length: {len(contents) if isinstance(contents, list) else 'N/A'}"
+                                )
+                            except json.JSONDecodeError as e:
+                                logger.warning(
+                                    f"JSON decode error for row {row_idx}: {e}, contents: {contents[:100]}"
+                                )
+                                continue
+
+                        if not contents:
+                            logger.debug(f"Skipping row {row_idx}: empty contents")
+                            continue
+
+                        # Log what we're processing
+                        if isinstance(contents, list):
+                            logger.debug(
+                                f"Processing {len(contents)} content items for collection_code={collection_code}"
+                            )
+                        else:
+                            logger.debug(
+                                f"Processing single content item for collection_code={collection_code}"
+                            )
+
+                        if collection_code == "PLAW":
+                            for content_idx, content in enumerate(
+                                contents if isinstance(contents, list) else [contents]
+                            ):
+                                logger.debug(
+                                    f"Processing PLAW content {content_idx + 1}: {content}"
+                                )
+                                try:
+                                    # Defensive: ensure number and congress are int or None
+                                    number_val = self.safe_int(content.get("number"))
+                                    congress_val = self.safe_int(
+                                        content.get("congress")
+                                    )
+                                    # If either is None, skip this record (cannot insert str into int column)
+                                    if number_val is None or congress_val is None:
+                                        logger.warning(
+                                            f"Skipping PLAW content {content_idx} due to non-integer number/congress: number={content.get('number')}, congress={content.get('congress')}, content={content}"
+                                        )
+                                        continue
+                                    law_params.append(
+                                        (
+                                            row["package_id"],
+                                            f"PL{content.get('congress')}-{content.get('number')}",
+                                            content.get("label", "")
+                                            .split(" ")[0]
+                                            .lower()
+                                            if content.get("label", "")
+                                            else None,
+                                            f"{content.get('congress')}-{content.get('number')}",
+                                            self.safe_int(content.get("number")),
+                                            self.safe_int(content.get("congress")),
+                                        )
+                                    )
+                                except Exception as e:
+                                    logger.error(
+                                        f"Error processing PLAW content {content_idx}: {e}, content: {content}"
+                                    )
+
+                        elif collection_code == "STATUTE":
+                            for content_idx, content in enumerate(
+                                contents if isinstance(contents, list) else [contents]
+                            ):
+                                logger.debug(
+                                    f"Processing STATUTE content {content_idx + 1}: {content}"
+                                )
+                                try:
+                                    report_statute_id = hashlib.sha256(
+                                        f"{row['package_id']}-{content.get('label', '')}-{content.get('pages', '')}-{content.get('title', '')}".encode()
+                                    ).hexdigest()[:16]
+                                    statute_params.append(
+                                        (
+                                            report_statute_id,
+                                            row["package_id"],
+                                            f"{content.get('label', '').lower()}{content.get('title', '')}",
+                                        )
+                                    )
+                                    pages_data = content.get("pages", "[]")
+                                    if isinstance(pages_data, str):
+                                        try:
+                                            pages_list = json.loads(pages_data)
+                                        except json.JSONDecodeError:
+                                            pages_list = [pages_data]
+                                    else:
+                                        pages_list = (
+                                            pages_data
+                                            if isinstance(pages_data, list)
+                                            else []
+                                        )
+                                    for page in pages_list:
+                                        statute_page_params.append(
+                                            (report_statute_id, page)
+                                        )
+                                except Exception as e:
+                                    logger.error(
+                                        f"Error processing STATUTE content {content_idx}: {e}, content: {content}"
+                                    )
+
+                        elif collection_code == "USCODE":
+                            for content_idx, content in enumerate(
+                                contents if isinstance(contents, list) else [contents]
+                            ):
+                                logger.debug(
+                                    f"Processing USCODE content {content_idx + 1}: {content}"
+                                )
+                                try:
+                                    report_code_id = hashlib.sha256(
+                                        f"{row['package_id']}-{content.get('sections', '')}-{content.get('title', '')}".encode()
+                                    ).hexdigest()[:16]
+                                    code_params.append(
+                                        (
+                                            report_code_id,
+                                            row["package_id"],
+                                            f"{content.get('label', '').replace('.', '')}-{content.get('title', '')}",
+                                        )
+                                    )
+                                    sections_data = content.get("sections", "[]")
+                                    if isinstance(sections_data, str):
+                                        try:
+                                            sections_list = json.loads(sections_data)
+                                        except json.JSONDecodeError:
+                                            sections_list = [sections_data]
+                                    else:
+                                        sections_list = (
+                                            sections_data
+                                            if isinstance(sections_data, list)
+                                            else []
+                                        )
+                                    for section in sections_list:
+                                        code_section_params.append(
+                                            (report_code_id, section)
+                                        )
+                                except Exception as e:
+                                    logger.error(
+                                        f"Error processing USCODE content {content_idx}: {e}, content: {content}"
+                                    )
+                        else:
+                            logger.debug(f"Unknown collection_code: {collection_code}")
+
+                    # Log batch sizes before inserting
+                    logger.info(
+                        f"Chunk {chunk_count} batch sizes: laws={len(law_params)}, statutes={len(statute_params)}, codes={len(code_params)}, statute_pages={len(statute_page_params)}, code_sections={len(code_section_params)}"
+                    )
+
+                    # Batch insert
+                    if law_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_laws (package_id, law_id, law_type, law_number, order_number, congress)
+                            VALUES ($1, $2, $3, $4, $5, $6)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, law_params)
+                        total_counts["laws"] += len(law_params)
+                        logger.info(f"Inserted {len(law_params)} law records")
+
+                    if statute_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_statutes (report_statute_id, package_id, reference_statute)
+                            VALUES ($1, $2, $3)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, statute_params)
+                        total_counts["statutes"] += len(statute_params)
+                        logger.info(f"Inserted {len(statute_params)} statute records")
+
+                    if code_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_codes (report_code_id, package_id, reference_code)
+                            VALUES ($1, $2, $3)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, code_params)
+                        total_counts["codes"] += len(code_params)
+                        logger.info(f"Inserted {len(code_params)} code records")
+
+                    if statute_page_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_statutes_pages (report_statute_id, page)
+                            VALUES ($1, $2)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, statute_page_params)
+                        total_counts["statute_pages"] += len(statute_page_params)
+                        logger.info(
+                            f"Inserted {len(statute_page_params)} statute page records"
+                        )
+
+                    if code_section_params:
+                        insert_sql = f"""
+                            INSERT INTO {self.production_schema}.congressionalreports_reference_codes_sections (report_code_id, code_section)
+                            VALUES ($1, $2)
+                            ON CONFLICT DO NOTHING
+                        """
+                        await conn.executemany(insert_sql, code_section_params)
+                        total_counts["code_sections"] += len(code_section_params)
+                        logger.info(
+                            f"Inserted {len(code_section_params)} code section records"
+                        )
+
+                    offset += limit
+                    logger.info(
+                        f"Completed chunk {chunk_count}, moving to offset {offset}"
+                    )
+
+                logger.info(f"References processing completed: {total_counts}")
+                logger.info(
+                    f"Total chunks processed: {chunk_count - 1}"
+                )  # -1 because we increment before checking
+                results["operations"].append(
+                    {
+                        "name": "populate_references_field",
+                        "status": "success",
+                        "rows_affected": sum(total_counts.values()),
+                        "details": total_counts,
+                    }
+                )
+                results["rows_affected"] += sum(total_counts.values())
+        except Exception as e:
+            logger.error(f"Error populating references field: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "populate_references_field",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+
+        # ? Operation 4: Resolve placeholder 'x' part numbers across all reports
+        logger.info("Starting placeholder part resolution post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all production rows with placeholder 'x' (including errata 'xe')
+                prod_rows = await conn.fetch(
+                    f"""
+                    SELECT package_id, report_id, is_errata
+                    FROM {self.production_schema}.congressionalreports
+                    WHERE report_id LIKE '%-x-%' OR report_id LIKE '%-xe-%'
+                    """
+                )
+
+                if not prod_rows:
+                    results["operations"].append(
+                        {
+                            "name": "resolve_placeholder_parts",
+                            "status": "skipped",
+                            "reason": "no placeholder reports found",
+                        }
+                    )
+                else:
+                    logger.info(f"Found {len(prod_rows)} records to process")
+
+                    # Process in chunks to handle large datasets efficiently
+                    chunk_size = 10000  # Process 10k records at a time
+                    total_chunks = (len(prod_rows) + chunk_size - 1) // chunk_size
+                    updated_count = 0
+
+                    for chunk_idx in range(total_chunks):
+                        start_idx = chunk_idx * chunk_size
+                        end_idx = min(start_idx + chunk_size, len(prod_rows))
+                        chunk_rows = prod_rows[start_idx:end_idx]
+
+                        logger.info(
+                            f"Processing chunk {chunk_idx + 1}/{total_chunks} ({len(chunk_rows)} records)"
+                        )
+
+                        # Group by (type, number, congress) for this chunk
+                        groups = {}
+                        for row in chunk_rows:
+                            m = re.match(
+                                r"^([a-z]+)(\d+)-([^-]+)-(\d+)$",
+                                str(row["report_id"]),
+                                re.IGNORECASE,
+                            )
+                            if not m:
+                                continue
+                            key = (m.group(1).lower(), m.group(2), m.group(4))
+                            groups.setdefault(key, []).append(dict(row))
+
+                        def parse_order(pkg_id: str) -> tuple[int, int]:
+                            try:
+                                m = re.search(r"(\d+)(?:-(\d+))?$", pkg_id)
+                                if m:
+                                    a = int(m.group(1))
+                                    b = int(m.group(2)) if m.group(2) else 0
+                                    return a, b
+                            except Exception:
+                                pass
+                            return (1 << 30, 1 << 30)
+
+                        # Prepare batch updates for this chunk
+                        main_table_updates = []
+                        committees_updates = []
+                        members_updates = []
+                        serialset_updates = []
+
+                        total_groups = len(groups)
+                        logger.debug(
+                            f"Processing {total_groups} groups in chunk {chunk_idx + 1}"
+                        )
+
+                        for group_idx, (_key, rows) in enumerate(groups.items()):
+                            if group_idx % 1000 == 0 and total_groups > 1000:
+                                logger.debug(
+                                    f"Processing group {group_idx}/{total_groups} in chunk {chunk_idx + 1}"
+                                )
+
+                            # Order within group by trailing numeric tokens of package_id
+                            rows_with_order = []
+                            for r in rows:
+                                pkg = r.get("package_id") or ""
+                                rows_with_order.append((parse_order(str(pkg)), r))
+                            rows_with_order.sort(key=lambda x: x[0])
+
+                            # Assign parts sequentially starting at 1
+                            for idx, (_ord, r) in enumerate(rows_with_order, start=1):
+                                package_id = r["package_id"]
+                                old_report_id = r["report_id"]
+                                is_errata_flag = (
+                                    bool(r["is_errata"])
+                                    if r["is_errata"] is not None
+                                    else False
+                                )
+
+                                m = re.match(
+                                    r"^([a-z]+)(\d+)-([^-]+)-(\d+)$",
+                                    str(old_report_id),
+                                    re.IGNORECASE,
+                                )
+                                if not m:
+                                    continue
+                                rtype, rnum, part_comp, cong = (
+                                    m.group(1).lower(),
+                                    m.group(2),
+                                    m.group(3),
+                                    m.group(4),
+                                )
+
+                                has_errata_suffix = (
+                                    part_comp.endswith("e") or is_errata_flag
+                                )
+                                new_part_token = (
+                                    f"{idx}{'e' if has_errata_suffix else ''}"
+                                )
+                                new_report_id = f"{rtype}{rnum}-{new_part_token}-{cong}"
+
+                                if new_report_id == old_report_id:
+                                    continue
+
+                                # Collect updates for batch processing
+                                main_table_updates.append((new_report_id, package_id))
+                                committees_updates.append((new_report_id, package_id))
+                                members_updates.append((new_report_id, package_id))
+                                serialset_updates.append((new_report_id, package_id))
+
+                        # Execute batch updates for this chunk
+                        if main_table_updates:
+                            logger.info(
+                                f"Executing batch updates for chunk {chunk_idx + 1}: {len(main_table_updates)} records"
+                            )
+
+                            # Update main table in batches
+                            update_batch_size = 1000
+                            for i in range(
+                                0, len(main_table_updates), update_batch_size
+                            ):
+                                batch = main_table_updates[i : i + update_batch_size]
+                                await conn.executemany(
+                                    f"""
+                                    UPDATE {self.production_schema}.congressionalreports
+                                    SET report_id = $1
+                                    WHERE package_id = $2
+                                    """,
+                                    batch,
+                                )
+                                updated_count += len(batch)
+
+                    logger.info(
+                        f"Completed placeholder part resolution: {updated_count} records updated across {total_chunks} chunks"
+                    )
+                    results["operations"].append(
+                        {
+                            "name": "resolve_placeholder_parts",
+                            "status": "success",
+                            "rows_affected": updated_count,
+                        }
+                    )
+                    results["rows_affected"] += updated_count
+
+        except Exception as e:
+            logger.error(f"Error resolving placeholder parts: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "resolve_placeholder_parts",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+        # ? Operation 5: serialset topics
+        logger.info("Starting serialset topics post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all production rows with placeholder 'x' (including errata 'xe')
+                prod_rows = await conn.fetch(
+                    f"""
+                    SELECT package_id, subjects_topics FROM {self.staging_schema}.congressionalreports
+                    """
+                )
+                insert_rows = []
+                for row in prod_rows:
+                    package_id = row["package_id"]
+                    topics = row["subjects_topics"]
+                    if topics and topics.strip():
+                        try:
+                            topic_list = json.loads(topics)
+                        except json.JSONDecodeError:
+                            topic_list = topics.split(",")
+                        if isinstance(topic_list, list):
+                            for topic in topic_list:
+                                insert_rows.append((package_id, topic))
+                        else:
+                            logger.warning(
+                                f"subjects_topics is not a list for package_id={package_id}: {topics!r}"
+                            )
+                if insert_rows:
+                    await conn.executemany(
+                        f"""
+                        INSERT INTO {self.production_schema}.congressionalreports_serialset_topics (package_id, topic)
+                        VALUES ($1, $2)
+                        ON CONFLICT (package_id, topic) DO NOTHING
+                        """,
+                        insert_rows,
+                    )
+
+        except Exception as e:
+            logger.error(f"Error inserting serialset topics: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "insert_serialset_topics",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+        logger.info("Completed serialset topics post-processing")
+
+        # ? Operation 6: serialset committees
+        logger.info("Starting serialset committees post-processing")
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                # Fetch all production rows with placeholder 'x' (including errata 'xe')
+                prod_rows = await conn.fetch(
+                    f"""
+                    SELECT package_id, committees FROM {self.staging_schema}.congressionalreports
+                    """
+                )
+                insert_rows = []
+                for row in prod_rows:
+                    package_id = row["package_id"]
+                    committees = row["committees"]
+                    if committees:
+                        committee_list = json.loads(committees)
+                        for committee in committee_list:
+                            insert_rows.append(
+                                (
+                                    package_id,
+                                    None,
+                                    committee["authorityId"],
+                                    committee["committeeName"],
+                                )
+                            )
+                if insert_rows:
+                    await conn.executemany(
+                        f"""
+                        INSERT INTO {self.production_schema}.congressionalreports_committees (package_id, granule_id, committee_code, committee_name)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (package_id, granule_id, committee_code, committee_name) DO NOTHING
+                        """,
+                        insert_rows,
+                    )
+
+        except Exception as e:
+            logger.error(f"Error inserting serialset committees: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "insert_serialset_committees",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+        logger.info("Completed serialset committees post-processing")
 
         return results
-
-    # Helper methods from base cleaner
-    def safe_int(self, value: Any, default: int = None) -> int | None:
-        """Safely convert value to int."""
-        if value is None:
-            return default
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return default
-
-    def standardize_chamber(self, chamber: str) -> str | None:
-        """Standardize chamber names."""
-        if not chamber:
-            return None
-        chamber_lower = chamber.lower()
-        if chamber_lower in ["house", "h"]:
-            return "house"
-        elif chamber_lower in ["senate", "s"]:
-            return "senate"
-        else:
-            return chamber_lower
-
-    def standardize_date(self, date_str: str) -> str | None:
-        """Standardize date strings."""
-        if not date_str:
-            return None
-        # Add date parsing logic here
-        return date_str
-
-    def clean_long_text(self, text: str) -> str | None:
-        """Clean long text fields."""
-        if not text:
-            return None
-        # Add text cleaning logic here
-        return text.strip()
-
-

@@ -13,7 +13,12 @@
     create_raw: true
     id_fields: [package_id]
     related_tables:
-    - granules
+    - agencies
+    - committees
+    - members
+    - reference_bills
+    - helddates
+    - witnesses
 
   processing:
     batch_size: 100

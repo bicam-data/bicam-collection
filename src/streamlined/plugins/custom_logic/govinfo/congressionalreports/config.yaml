@@ -13,7 +13,6 @@
     create_raw: true
     id_fields: [package_id]
     related_tables:
-    - granules
     - committees
     - members
     - reference_bills

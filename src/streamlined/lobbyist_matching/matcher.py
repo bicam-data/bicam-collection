@@ -28,7 +28,7 @@ import asyncpg
 import polars as pl
 import psutil
 from rapidfuzz import fuzz
-from section_processor import TITLE_ENDING_WORDS
+from .section_processor import TITLE_ENDING_WORDS
 from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +53,42 @@ REFS_SCHEMA = {
     "title": pl.Utf8,
     "congress_number": pl.Int64,
     "congress_source": pl.Utf8,
+}
+
+# Key words for appropriations matching
+APPROPRIATIONS_KEY_WORDS = {
+    "transportation",
+    "energy",
+    "defense",
+    "health",
+    "education",
+    "labor",
+    "agriculture",
+    "commerce",
+    "justice",
+    "science",
+    "homeland",
+    "security",
+    "interior",
+    "environment",
+    "veterans",
+    "affairs",
+    "state",
+    "foreign",
+    "operations",
+    "urban",
+    "development",
+    "housing",
+    "food",
+    "drug",
+    "administration",
+    "financial",
+    "services",
+    "government",
+    "military",
+    "construction",
+    "legislative",
+    "branch",
 }
 
 
@@ -1356,7 +1392,8 @@ class ReferenceMatcher:
     def _match_appropriations_title(self, reference: dict) -> MatchResult | None:
         """Special matching for appropriations titles.
 
-        Attempts to match appropriations bill titles using a specialized trie structure.
+        Attempts to match appropriations bill titles using a specialized trie structure
+        and key word matching as a fallback.
 
         Args:
             reference (Dict): The reference dictionary containing extracted information
@@ -1379,49 +1416,119 @@ class ReferenceMatcher:
                 )
             return None
 
+        # First try the trie-based approach
         matches = self.appropriations_trie.find_matching_bills(reference["title"])
-        if not matches:
+        if matches:
+            best_match = matches[0]
+            bill, matched_title, confidence = best_match
+
+            result = MatchResult(
+                reference_id=reference.get("reference_id"),
+                match_type="high_confidence_match"
+                if confidence >= 0.9
+                else "wrong_title",
+                confidence_score=confidence,
+                extracted_title=reference["title"],
+                extracted_bill_number=reference.get("bill_number"),
+                extracted_law_number=reference.get("law_number"),
+                matched_congress=max(bill.congresses),
+                matched_bill_type=bill.bill_type,
+                matched_bill_number=bill.bill_number,
+                matched_title=matched_title,
+                matched_law_number=None,
+                bill_id=f"{bill.bill_type}{bill.bill_number}-{max(bill.congresses)}",
+            )
+
             if self.logger:
                 self.logger.log_matching_attempt(
                     reference_id=reference_id,
                     reference_type=reference.get("reference_type"),
-                    method_attempted="appropriations_title_match",
-                    success=False,
-                    error_message="No appropriations matches found",
+                    method_attempted="appropriations_title_match_trie",
+                    success=True,
+                    confidence_score=confidence,
+                    matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{max(bill.congresses)}",
                     title=reference.get("title"),
                 )
-            return None
 
-        best_match = matches[0]
-        bill, matched_title, confidence = best_match
+            return result
 
-        result = MatchResult(
-            reference_id=reference.get("reference_id"),
-            match_type="high_confidence_match" if confidence >= 0.9 else "wrong_title",
-            confidence_score=confidence,
-            extracted_title=reference["title"],
-            extracted_bill_number=reference.get("bill_number"),
-            extracted_law_number=reference.get("law_number"),
-            matched_congress=max(bill.congresses),
-            matched_bill_type=bill.bill_type,
-            matched_bill_number=bill.bill_number,
-            matched_title=matched_title,
-            matched_law_number=None,
-            bill_id=f"{bill.bill_type}{bill.bill_number}-{max(bill.congresses)}",
-        )
+        # If trie approach fails, try key word matching
+        title = reference["title"]
+        title_words = set(re.findall(r"\b\w+\b", title.lower()))
+        key_words_found = title_words & APPROPRIATIONS_KEY_WORDS
 
+        if key_words_found:
+            # Search through all appropriations bills for key word matches
+            best_match = None
+            best_sim = 0
+
+            for bill_key, bill in self.appropriations_trie.bills.items():
+                for orig_title in bill.titles:
+                    if not orig_title:
+                        continue
+
+                    # Extract key words from bill title
+                    bill_title_words = set(re.findall(r"\b\w+\b", orig_title.lower()))
+                    bill_key_words = bill_title_words & APPROPRIATIONS_KEY_WORDS
+
+                    # Check for word overlap
+                    word_overlap = len(key_words_found & bill_key_words)
+                    if word_overlap > 0:
+                        # Calculate similarity
+                        sim = calculate_title_similarity(title, orig_title)
+
+                        # Boost confidence for key word matches
+                        word_boost = min(0.2, word_overlap * 0.1)
+                        adjusted_sim = min(1.0, sim + word_boost)
+
+                        if adjusted_sim >= 0.6 and adjusted_sim > best_sim:
+                            best_sim = adjusted_sim
+                            best_match = (bill, orig_title, adjusted_sim)
+
+            if best_match:
+                bill, matched_title, confidence = best_match
+                result = MatchResult(
+                    reference_id=reference.get("reference_id"),
+                    match_type="high_confidence_match"
+                    if confidence >= 0.8
+                    else "moderate_confidence_match",
+                    confidence_score=confidence,
+                    extracted_title=reference["title"],
+                    extracted_bill_number=reference.get("bill_number"),
+                    extracted_law_number=reference.get("law_number"),
+                    matched_congress=max(bill.congresses),
+                    matched_bill_type=bill.bill_type,
+                    matched_bill_number=bill.bill_number,
+                    matched_title=matched_title,
+                    matched_law_number=None,
+                    bill_id=f"{bill.bill_type}{bill.bill_number}-{max(bill.congresses)}",
+                )
+
+                if self.logger:
+                    self.logger.log_matching_attempt(
+                        reference_id=reference_id,
+                        reference_type=reference.get("reference_type"),
+                        method_attempted="appropriations_title_match_keywords",
+                        success=True,
+                        confidence_score=confidence,
+                        matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{max(bill.congresses)}",
+                        title=reference.get("title"),
+                    )
+
+                return result
+
+        # No match found
         if self.logger:
             self.logger.log_matching_attempt(
                 reference_id=reference_id,
                 reference_type=reference.get("reference_type"),
                 method_attempted="appropriations_title_match",
-                success=True,
-                confidence_score=confidence,
-                matched_bill_id=f"{bill.bill_type}{bill.bill_number}-{max(bill.congresses)}",
+                success=False,
+                error_message="No appropriations matches found",
                 title=reference.get("title"),
             )
 
-        return result
+        return None
 
 
 async def combine_nearby_references(pool: asyncpg.Pool, run_id: int) -> None:

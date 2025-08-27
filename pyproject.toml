@@ -53,6 +53,7 @@ dependencies = [
     "structlog>=23.2.0",
     "python-json-logger>=2.0.0",
     "aiofiles>=24.1.0",
+    "pymupdf>=1.26.4",
 ]
 
 [project.optional-dependencies]

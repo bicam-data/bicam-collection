@@ -648,7 +648,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 SELECT COUNT(DISTINCT c.packageid)
                 FROM {self.staging_schema}.congressionalreports c
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM {self.staging_schema}.congressionalreports_granules g 
+                    SELECT 1 FROM {self.staging_schema}.congressionalreports_granules g
                     WHERE g.packageid = c.packageid
                 )
                 """
@@ -744,7 +744,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                             NULL::text AS volumenumber
                         FROM {self.staging_schema}.congressionalreports c
                         WHERE NOT EXISTS (
-                            SELECT 1 FROM {self.staging_schema}.congressionalreports_granules g 
+                            SELECT 1 FROM {self.staging_schema}.congressionalreports_granules g
                             WHERE g.packageid = c.packageid
                         )
 
@@ -1181,148 +1181,150 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         cleaned = record_data.copy()
 
         incorrect_granules = [
-            'CRPT-104hrpt201',
-            'CRPT-104hrpt424',
-            'CRPT-104hrpt553',
-            'CRPT-104hrpt565',
-            'CRPT-104hrpt628',
-            'CRPT-104hrpt633',
-            'CRPT-104hrpt704',
-            'CRPT-104hrpt744',
-            'CRPT-104hrpt803',
-            'CRPT-104hrpt842',
-            'CRPT-104hrpt874',
-            'CRPT-104hrpt876',
-            'CRPT-104hrpt886',
-            'CRPT-104hrpt887',
-            'CRPT-105hrpt169',
-            'CRPT-105hrpt19',
-            'CRPT-105hrpt622',
-            'CRPT-105hrpt637',
-            'CRPT-105hrpt743',
-            'CRPT-105hrpt840',
-            'CRPT-106hrpt1040',
-            'CRPT-106hrpt1047',
-            'CRPT-106hrpt1055',
-            'CRPT-106hrpt198-pt1',
-            'CRPT-106hrpt407',
-            'CRPT-106hrpt482',
-            'CRPT-106srpt362',
-            'CRPT-106srpt363',
-            'CRPT-106srpt426',
-            'CRPT-107hrpt486',
-            'CRPT-107hrpt793',
-            'CRPT-107hrpt800',
-            'CRPT-107srpt2',
-            'CRPT-108hrpt799',
-            'CRPT-108hrpt806',
-            'CRPT-108hrpt815',
-            'CRPT-109hrpt163',
-            'CRPT-109hrpt352',
-            'CRPT-109hrpt469',
-            'CRPT-109hrpt733',
-            'CRPT-109hrpt734',
-            'CRPT-109hrpt739',
-            'CRPT-109hrpt747',
-            'CRPT-109hrpt748',
-            'CRPT-110hrpt144',
-            'CRPT-110hrpt186',
-            'CRPT-110hrpt355',
-            'CRPT-110hrpt573',
-            'CRPT-110hrpt73',
-            'CRPT-110hrpt924',
-            'CRPT-110hrpt938',
-            'CRPT-110hrpt940',
-            'CRPT-111hrpt143',
-            'CRPT-111hrpt161',
-            'CRPT-111hrpt194',
-            'CRPT-111hrpt222',
-            'CRPT-111hrpt577',
-            'CRPT-111hrpt63',
-            'CRPT-111hrpt696',
-            'CRPT-111hrpt699',
-            'CRPT-111hrpt700',
-            'CRPT-111hrpt704',
-            'CRPT-111hrpt707',
-            'CRPT-111hrpt710',
-            'CRPT-111hrpt711',
-            'CRPT-111hrpt715',
-            'CRPT-112hrpt104',
-            'CRPT-112hrpt119',
-            'CRPT-112hrpt12',
-            'CRPT-112hrpt120',
-            'CRPT-112hrpt132',
-            'CRPT-112hrpt145',
-            'CRPT-112hrpt259',
-            'CRPT-112hrpt341',
-            'CRPT-112hrpt354',
-            'CRPT-112hrpt470',
-            'CRPT-112hrpt489',
-            'CRPT-112hrpt570',
-            'CRPT-112hrpt631',
-            'CRPT-112hrpt662',
-            'CRPT-112hrpt706',
-            'CRPT-112hrpt739',
-            'CRPT-112hrpt741',
-            'CRPT-112hrpt748',
-            'CRPT-112hrpt751',
-            'CRPT-112hrpt96',
-            'CRPT-113hrpt143',
-            'CRPT-113hrpt302',
-            'CRPT-113hrpt315',
-            'CRPT-113hrpt323',
-            'CRPT-113hrpt425',
-            'CRPT-113hrpt454',
-            'CRPT-113hrpt474',
-            'CRPT-113hrpt681',
-            'CRPT-113hrpt723',
-            'CRPT-113hrpt724',
-            'CRPT-113hrpt96',
-            'CRPT-114hrpt118',
-            'CRPT-114hrpt155',
-            'CRPT-114hrpt198',
-            'CRPT-114hrpt223',
-            'CRPT-114hrpt230',
-            'CRPT-114hrpt884',
-            'CRPT-114hrpt887',
-            'CRPT-114hrpt902',
-            'CRPT-114hrpt904',
-            'CRPT-114hrpt910',
-            'CRPT-114hrpt97',
-            'CRPT-115hrpt1041',
-            'CRPT-115hrpt1042',
-            'CRPT-115hrpt1080',
-            'CRPT-115hrpt1114',
-            'CRPT-115hrpt1116-pt1',
-            'CRPT-115hrpt1117',
-            'CRPT-115hrpt1118',
-            'CRPT-115hrpt1119',
-            'CRPT-115hrpt1121',
-            'CRPT-115hrpt1122',
-            'CRPT-115hrpt1129-pt1',
-            'CRPT-115hrpt626-pt1',
-            'CRPT-115hrpt847',
-            'CRPT-115hrpt851',
-            'CRPT-115hrpt898',
-            'CRPT-116hrpt107',
-            'CRPT-116hrpt446',
-            'CRPT-116hrpt703',
-            'CRPT-116hrpt709',
-            'CRPT-116hrpt711',
-            'CRPT-116hrpt714',
-            'CRPT-116hrpt716',
-            'CRPT-116hrpt719',
-            'CRPT-116hrpt720',
-            'CRPT-117hrpt691',
-            'CRPT-117hrpt700',
-            'CRPT-117hrpt705',
-            'CRPT-117hrpt706',
-            'CRPT-117hrpt707',
-            'CRPT-118hrpt551',
-            'CRPT-118hrpt965',
-            'CRPT-118hrpt969',
-            'CRPT-118hrpt979',
-            ]
+            "CRPT-104hrpt201",
+            "CRPT-104hrpt424",
+            "CRPT-104hrpt553",
+            "CRPT-104hrpt565",
+            "CRPT-104hrpt628",
+            "CRPT-104hrpt633",
+            "CRPT-104hrpt704",
+            "CRPT-104hrpt744",
+            "CRPT-104hrpt803",
+            "CRPT-104hrpt842",
+            "CRPT-104hrpt874",
+            "CRPT-104hrpt876",
+            "CRPT-104hrpt886",
+            "CRPT-104hrpt887",
+            "CRPT-105hrpt169",
+            "CRPT-105hrpt19",
+            "CRPT-105hrpt622",
+            "CRPT-105hrpt637",
+            "CRPT-105hrpt743",
+            "CRPT-105hrpt840",
+            "CRPT-106hrpt1040",
+            "CRPT-106hrpt1047",
+            "CRPT-106hrpt1055",
+            "CRPT-106hrpt198-pt1",
+            "CRPT-106hrpt407",
+            "CRPT-106hrpt482",
+            "CRPT-106srpt362",
+            "CRPT-106srpt363",
+            "CRPT-106srpt426",
+            "CRPT-107hrpt486",
+            "CRPT-107hrpt793",
+            "CRPT-107hrpt800",
+            "CRPT-107srpt2",
+            "CRPT-108hrpt799",
+            "CRPT-108hrpt806",
+            "CRPT-108hrpt815",
+            "CRPT-109hrpt163",
+            "CRPT-109hrpt352",
+            "CRPT-109hrpt469",
+            "CRPT-109hrpt733",
+            "CRPT-109hrpt734",
+            "CRPT-109hrpt739",
+            "CRPT-109hrpt747",
+            "CRPT-109hrpt748",
+            "CRPT-110hrpt144",
+            "CRPT-110hrpt186",
+            "CRPT-110hrpt355",
+            "CRPT-110hrpt573",
+            "CRPT-110hrpt73",
+            "CRPT-110hrpt924",
+            "CRPT-110hrpt938",
+            "CRPT-110hrpt940",
+            "CRPT-111hrpt143",
+            "CRPT-111hrpt161",
+            "CRPT-111hrpt194",
+            "CRPT-111hrpt222",
+            "CRPT-111hrpt577",
+            "CRPT-111hrpt63",
+            "CRPT-111hrpt696",
+            "CRPT-111hrpt699",
+            "CRPT-111hrpt700",
+            "CRPT-111hrpt704",
+            "CRPT-111hrpt707",
+            "CRPT-111hrpt710",
+            "CRPT-111hrpt711",
+            "CRPT-111hrpt715",
+            "CRPT-112hrpt104",
+            "CRPT-112hrpt119",
+            "CRPT-112hrpt12",
+            "CRPT-112hrpt120",
+            "CRPT-112hrpt132",
+            "CRPT-112hrpt145",
+            "CRPT-112hrpt259",
+            "CRPT-112hrpt341",
+            "CRPT-112hrpt354",
+            "CRPT-112hrpt470",
+            "CRPT-112hrpt489",
+            "CRPT-112hrpt570",
+            "CRPT-112hrpt631",
+            "CRPT-112hrpt662",
+            "CRPT-112hrpt706",
+            "CRPT-112hrpt739",
+            "CRPT-112hrpt741",
+            "CRPT-112hrpt748",
+            "CRPT-112hrpt751",
+            "CRPT-112hrpt96",
+            "CRPT-113hrpt143",
+            "CRPT-113hrpt302",
+            "CRPT-113hrpt315",
+            "CRPT-113hrpt323",
+            "CRPT-113hrpt425",
+            "CRPT-113hrpt454",
+            "CRPT-113hrpt474",
+            "CRPT-113hrpt681",
+            "CRPT-113hrpt723",
+            "CRPT-113hrpt724",
+            "CRPT-113hrpt96",
+            "CRPT-114hrpt118",
+            "CRPT-114hrpt155",
+            "CRPT-114hrpt198",
+            "CRPT-114hrpt223",
+            "CRPT-114hrpt230",
+            "CRPT-114hrpt884",
+            "CRPT-114hrpt887",
+            "CRPT-114hrpt902",
+            "CRPT-114hrpt904",
+            "CRPT-114hrpt910",
+            "CRPT-114hrpt97",
+            "CRPT-115hrpt1041",
+            "CRPT-115hrpt1042",
+            "CRPT-115hrpt1080",
+            "CRPT-115hrpt1114",
+            "CRPT-115hrpt1116-pt1",
+            "CRPT-115hrpt1117",
+            "CRPT-115hrpt1118",
+            "CRPT-115hrpt1119",
+            "CRPT-115hrpt1121",
+            "CRPT-115hrpt1122",
+            "CRPT-115hrpt1129-pt1",
+            "CRPT-115hrpt626-pt1",
+            "CRPT-115hrpt847",
+            "CRPT-115hrpt851",
+            "CRPT-115hrpt898",
+            "CRPT-116hrpt107",
+            "CRPT-116hrpt446",
+            "CRPT-116hrpt703",
+            "CRPT-116hrpt709",
+            "CRPT-116hrpt711",
+            "CRPT-116hrpt714",
+            "CRPT-116hrpt716",
+            "CRPT-116hrpt719",
+            "CRPT-116hrpt720",
+            "CRPT-117hrpt691",
+            "CRPT-117hrpt700",
+            "CRPT-117hrpt705",
+            "CRPT-117hrpt706",
+            "CRPT-117hrpt707",
+            "CRPT-118hrpt551",
+            "CRPT-118hrpt965",
+            "CRPT-118hrpt969",
+            "CRPT-118hrpt979",
+            "CRPT-111hrpt715",
+            "CRPT-117hrpt117"
+        ]
 
         bioguide_id_fixes = {
             "Mr. Bishop": "B001250",  # found via membership in committee on rules in 109th congress
@@ -1386,25 +1388,44 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             "Ms. Lofgren": "L000397",
             "Ms. Wild": "W000826",
             "Mr. Guest": "G000591",
+            "Brady, Robert A.": "B001227",
+            "Neguse, Joe": "N000191",
         }
 
-        if cleaned.get('granuleid') in incorrect_granules:
-            if cleaned.get("parsed", "") in bioguide_id_fixes and cleaned.get("bioguideid", None) is None:
+        if cleaned.get("granuleid") in incorrect_granules:
+            if (
+                cleaned.get("parsed", "") in bioguide_id_fixes
+                and cleaned.get("bioguideid", None) is None
+            ):
                 cleaned["bioguideid"] = bioguide_id_fixes[cleaned.get("parsed", "")]
                 logger.info(
                     f"Bioguide ID fixed: {cleaned.get('parsed', '')} -> {cleaned.get('bioguideid', 'ID_ERROR')}"
                 )
             elif cleaned.get("bioguideid", None) is None:
                 cleaned["bioguideid"] = "ID_ERROR"
-                raise ValueError(f"Bioguide ID not found for {cleaned.get('package_id', 'ID_ERROR')}")
+                raise ValueError(
+                    f"Bioguide ID not found for {cleaned.get('package_id', 'ID_ERROR')}"
+                )
 
         filtered_cleaned = {
             "package_id": cleaned.get("package_id", "ID_ERROR"),
             "granule_id": cleaned.get("granule_id", "ID_ERROR"),
-            "bioguide_id": cleaned.get("bioguideid", "ID_ERROR"),
+            "bioguide_id": (
+                cleaned.get("bioguideid")
+                if cleaned.get("bioguideid", None) != ""
+                else "ID_ERROR"
+            ),
             "membername": cleaned.get("membername", None),
-            "authorityid": cleaned.get("authorityid", "ID_ERROR"),
-            "gpoid": cleaned.get("gpoid", None),
+            "authorityid": (
+                cleaned.get("authorityid")
+                if cleaned.get("authorityid", None) != ""
+                else None
+            ),
+            "gpoid": (
+                cleaned.get("gpoid")
+                if cleaned.get("gpoid", None) != ""
+                else None
+            ),
         }
 
         return filtered_cleaned
@@ -1550,34 +1571,53 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
                 serialset_records = []
                 for row in rows:
+                    # Coerce isglp to proper boolean
+                    isglp_raw = row.get("serialset_isglp")
+                    if isinstance(isglp_raw, str):
+                        isglp = (
+                            True
+                            if isglp_raw.lower() == "true"
+                            else False
+                            if isglp_raw.lower() == "false"
+                            else None
+                        )
+                    else:
+                        isglp = bool(isglp_raw) if isglp_raw is not None else None
+
                     serialset_records.append(
                         (
                             row["package_id"],
-                            row["serialset_bagid"],
-                            row["serialset_docid"],
-                            row["serialset_serialsetnumber"],
-                            row["agency"],
-                            row["volume"],
-                            row["parentid"],
-                            row[
-                                "otheridentifier_oclc"
-                            ],  # Fixed: use correct column name
-                            row[
-                                "otheridentifier_lccn"
-                            ],  # Fixed: use correct column name
-                            row[
-                                "otheridentifier_issn"
-                            ],  # Fixed: use correct column name
-                            row["serialset_isglp"],
-                            self.standardize_date(
-                                row["lastmodified"]
-                            ),  # Fixed: use correct column name and standardize date
+                            row.get("serialset_bagid"),
+                            row.get("serialset_docid"),
+                            row.get("serialset_serialsetnumber"),
+                            row.get("agency"),
+                            row.get("volume"),
+                            row.get("parentid"),
+                            row.get("otheridentifier_oclc"),
+                            row.get("otheridentifier_lccn"),
+                            row.get("otheridentifier_issn"),
+                            isglp,
+                            self.standardize_date(row.get("lastmodified")),
                         )
                     )
                 if serialset_records:
                     insert_sql = f"""
-                        INSERT INTO {self.production_schema}.congressionalreports_serialset (package_id, bag_id, doc_id, serialset_number, agency, volume, parent_serialset_id, oclc_number, lccn_number, issn_number, isglp, last_modified)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                        INSERT INTO {self.production_schema}.congressionalreports_serialset (
+                            package_id,
+                            bag_id,
+                            doc_id,
+                            serialset_number,
+                            agency,
+                            volume,
+                            parent_serialset_id,
+                            oclc_number,
+                            lccn_number,
+                            issn_number,
+                            isglp,
+                            last_modified
+                        ) VALUES (
+                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+                        )
                         ON CONFLICT (package_id) DO NOTHING
                     """
                     chunk_size = 1000
@@ -2082,20 +2122,31 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     SELECT package_id, subjects_topics FROM {self.staging_schema}.congressionalreports
                     """
                 )
+                insert_rows = []
                 for row in prod_rows:
                     package_id = row["package_id"]
                     topics = row["subjects_topics"]
-                    if topics:
-                        topic_list = json.loads(topics)
-                        for topic in topic_list:
-                            await conn.execute(
-                                f"""
-                                INSERT INTO {self.production_schema}.congressionalreports_serialset_topics (package_id, topic)
-                                VALUES ($1, $2)
-                                ON CONFLICT (package_id, topic) DO NOTHING
-                                """,
-                                (package_id, topic),
+                    if topics and topics.strip():
+                        try:
+                            topic_list = json.loads(topics)
+                        except json.JSONDecodeError:
+                            topic_list = topics.split(",")
+                        if isinstance(topic_list, list):
+                            for topic in topic_list:
+                                insert_rows.append((package_id, topic))
+                        else:
+                            logger.warning(
+                                f"subjects_topics is not a list for package_id={package_id}: {topics!r}"
                             )
+                if insert_rows:
+                    await conn.executemany(
+                        f"""
+                        INSERT INTO {self.production_schema}.congressionalreports_serialset_topics (package_id, topic)
+                        VALUES ($1, $2)
+                        ON CONFLICT (package_id, topic) DO NOTHING
+                        """,
+                        insert_rows,
+                    )
 
         except Exception as e:
             logger.error(f"Error inserting serialset topics: {e}", exc_info=True)
@@ -2109,7 +2160,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             results["status"] = "partial_failure"
         logger.info("Completed serialset topics post-processing")
 
-        #? Operation 6: serialset committees
+        # ? Operation 6: serialset committees
         logger.info("Starting serialset committees post-processing")
         try:
             async with self.db_pool.acquire() as conn, conn.transaction():
@@ -2119,20 +2170,30 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                     SELECT package_id, committees FROM {self.staging_schema}.congressionalreports
                     """
                 )
+                insert_rows = []
                 for row in prod_rows:
                     package_id = row["package_id"]
                     committees = row["committees"]
                     if committees:
                         committee_list = json.loads(committees)
                         for committee in committee_list:
-                            await conn.execute(
-                                f"""
-                                INSERT INTO {self.production_schema}.congressionalreports_committees (package_id, granule_id, committee_code, committee_name)
-                                VALUES ($1, $2, $3, $4)
-                                ON CONFLICT (package_id, granule_id, committee_code, committee_name) DO NOTHING
-                                """,
-                                (package_id, None, committee["authorityId"], committee["committeeName"]),
+                            insert_rows.append(
+                                (
+                                    package_id,
+                                    None,
+                                    committee["authorityId"],
+                                    committee["committeeName"],
+                                )
                             )
+                if insert_rows:
+                    await conn.executemany(
+                        f"""
+                        INSERT INTO {self.production_schema}.congressionalreports_committees (package_id, granule_id, committee_code, committee_name)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (package_id, granule_id, committee_code, committee_name) DO NOTHING
+                        """,
+                        insert_rows,
+                    )
 
         except Exception as e:
             logger.error(f"Error inserting serialset committees: {e}", exc_info=True)
