@@ -9,7 +9,7 @@ data handling more straightforward.
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -165,7 +165,7 @@ class CongressionalAPIClient(BaseAPIClient):
                                     wait_seconds = max(
                                         0,
                                         (
-                                            retry_time - datetime.now(UTC)
+                                            retry_time - datetime.now(timezone.utc)
                                         ).total_seconds(),
                                     )
 
@@ -632,7 +632,9 @@ class CongressionalAPIClient(BaseAPIClient):
                 )
             else:
                 # Fallback: get data from the last N days
-                fallback_date = datetime.now(UTC) - timedelta(days=fallback_days)
+                fallback_date = datetime.now(timezone.utc) - timedelta(
+                    days=fallback_days
+                )
                 from_date = fallback_date.strftime("%Y-%m-%d")
                 logger.info(
                     f"No last processed date found for {data_type}, fetching from {fallback_days} days ago: {from_date}"

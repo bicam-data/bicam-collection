@@ -8,7 +8,7 @@ for both Congressional and GovInfo API clients, reducing code duplication.
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
@@ -101,7 +101,7 @@ class BaseAPIClient(ABC):
                     url,
                     error_message,
                     self._get_data_type_name(),
-                    datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 )
         except Exception as e:
             # Don't let database errors break the API client
@@ -185,7 +185,7 @@ class BaseAPIClient(ABC):
 
                         retry_time = parsedate_to_datetime(retry_after)
                         wait_seconds = max(
-                            0, (retry_time - datetime.now(UTC)).total_seconds()
+                            0, (retry_time - datetime.now(timezone.utc)).total_seconds()
                         )
 
                     logger.info(f"API requested wait time: {wait_seconds} seconds")
@@ -293,7 +293,7 @@ class BaseAPIClient(ABC):
                     data_type,
                     date,
                     total_count,
-                    datetime.now(UTC),
+                    datetime.now(timezone.utc),
                 )
                 return True
         except Exception as e:
