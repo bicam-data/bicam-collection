@@ -68,6 +68,82 @@ APPROPRIATIONS_KEY_WORDS = {
 }
 
 
+async def insert_or_update_reference_match(
+    conn: asyncpg.Connection, match_data: dict
+) -> None:
+    """
+    Insert a new reference match or update existing one if confidence is higher.
+
+    This function handles the case where a reference might already have a match
+    by checking if one exists and updating it if the new match has higher confidence.
+
+    Args:
+        conn: Database connection
+        match_data: Dictionary containing match data
+    """
+    # Check if a match already exists for this reference
+    existing_match = await conn.fetchrow(
+        """
+        SELECT match_id, confidence_score 
+        FROM lobbied_bill_matching.reference_matches 
+        WHERE reference_id = $1 AND run_id = $2
+        """,
+        match_data["reference_id"],
+        match_data["run_id"],
+    )
+
+    if existing_match:
+        # Update existing match if new confidence is higher
+        if match_data["confidence_score"] > existing_match["confidence_score"]:
+            await conn.execute(
+                """
+                UPDATE lobbied_bill_matching.reference_matches
+                SET match_type = $1,
+                    confidence_score = $2,
+                    matched_congress = $3,
+                    matched_bill_type = $4,
+                    matched_bill_number = $5,
+                    matched_title = $6,
+                    bill_id = $7,
+                    update_source = $8
+                WHERE match_id = $9
+                """,
+                match_data["match_type"],
+                match_data["confidence_score"],
+                match_data["matched_congress"],
+                match_data["matched_bill_type"],
+                match_data["matched_bill_number"],
+                match_data["matched_title"],
+                match_data["bill_id"],
+                match_data["update_source"],
+                existing_match["match_id"],
+            )
+    else:
+        # Insert new match
+        await conn.execute(
+            """
+            INSERT INTO lobbied_bill_matching.reference_matches (
+                reference_id, run_id, match_type, confidence_score,
+                extracted_title, extracted_bill_number,
+                matched_congress, matched_bill_type, matched_bill_number,
+                matched_title, bill_id, update_source
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            """,
+            match_data["reference_id"],
+            match_data["run_id"],
+            match_data["match_type"],
+            match_data["confidence_score"],
+            match_data["extracted_title"],
+            match_data["extracted_bill_number"],
+            match_data["matched_congress"],
+            match_data["matched_bill_type"],
+            match_data["matched_bill_number"],
+            match_data["matched_title"],
+            match_data["bill_id"],
+            match_data["update_source"],
+        )
+
+
 async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
     """
     Process unmatched references for potential bill number variations.
@@ -201,44 +277,8 @@ async def process_unmatched_refs(pool: asyncpg.Pool, run_id: int) -> None:
                 batch_size = 100
                 for i in range(0, len(matches_to_insert), batch_size):
                     batch = matches_to_insert[i : i + batch_size]
-                    await conn.executemany(
-                        """
-                        INSERT INTO lobbied_bill_matching.reference_matches (
-                            reference_id, run_id, match_type, confidence_score,
-                            extracted_title, extracted_bill_number,
-                            matched_congress, matched_bill_type, matched_bill_number,
-                            matched_title, bill_id, update_source
-                        ) VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-                        )
-                        ON CONFLICT (reference_id) DO UPDATE
-                        SET match_type = EXCLUDED.match_type,
-                            confidence_score = GREATEST(EXCLUDED.confidence_score, reference_matches.confidence_score),
-                            matched_congress = EXCLUDED.matched_congress,
-                            matched_bill_type = EXCLUDED.matched_bill_type,
-                            matched_bill_number = EXCLUDED.matched_bill_number,
-                            matched_title = EXCLUDED.matched_title,
-                            bill_id = EXCLUDED.bill_id,
-                            update_source = EXCLUDED.update_source
-                    """,
-                        [
-                            (
-                                m["reference_id"],
-                                m["run_id"],
-                                m["match_type"],
-                                m["confidence_score"],
-                                m["extracted_title"],
-                                m["extracted_bill_number"],
-                                m["matched_congress"],
-                                m["matched_bill_type"],
-                                m["matched_bill_number"],
-                                m["matched_title"],
-                                m["bill_id"],
-                                m["update_source"],
-                            )
-                            for m in batch
-                        ],
-                    )
+                    for match_data in batch:
+                        await insert_or_update_reference_match(conn, match_data)
 
             logging.info(
                 f"Updated {len(matches_to_insert)} previously unmatched references"
@@ -785,44 +825,8 @@ async def post_process_bill_type_variations(pool: asyncpg.Pool, run_id: int) -> 
                 batch_size = 100
                 for i in range(0, len(matches_to_insert), batch_size):
                     batch = matches_to_insert[i : i + batch_size]
-                    await conn.executemany(
-                        """
-                        INSERT INTO lobbied_bill_matching.reference_matches (
-                            reference_id, run_id, match_type, confidence_score,
-                            extracted_title, extracted_bill_number,
-                            matched_congress, matched_bill_type, matched_bill_number,
-                            matched_title, bill_id, update_source
-                        ) VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-                        )
-                        ON CONFLICT (reference_id) DO UPDATE
-                        SET match_type = EXCLUDED.match_type,
-                            confidence_score = GREATEST(EXCLUDED.confidence_score, reference_matches.confidence_score),
-                            matched_congress = EXCLUDED.matched_congress,
-                            matched_bill_type = EXCLUDED.matched_bill_type,
-                            matched_bill_number = EXCLUDED.matched_bill_number,
-                            matched_title = EXCLUDED.matched_title,
-                            bill_id = EXCLUDED.bill_id,
-                            update_source = EXCLUDED.update_source
-                    """,
-                        [
-                            (
-                                m["reference_id"],
-                                m["run_id"],
-                                m["match_type"],
-                                m["confidence_score"],
-                                m["extracted_title"],
-                                m["extracted_bill_number"],
-                                m["matched_congress"],
-                                m["matched_bill_type"],
-                                m["matched_bill_number"],
-                                m["matched_title"],
-                                m["bill_id"],
-                                m["update_source"],
-                            )
-                            for m in batch
-                        ],
-                    )
+                    for match_data in batch:
+                        await insert_or_update_reference_match(conn, match_data)
 
             logging.info(
                 f"Updated {len(matches_to_insert)} previously unmatched references with bill type variations"
@@ -982,44 +986,8 @@ async def post_process_congress_range_expansion(
                 batch_size = 100
                 for i in range(0, len(matches_to_insert), batch_size):
                     batch = matches_to_insert[i : i + batch_size]
-                    await conn.executemany(
-                        """
-                        INSERT INTO lobbied_bill_matching.reference_matches (
-                            reference_id, run_id, match_type, confidence_score,
-                            extracted_title, extracted_bill_number,
-                            matched_congress, matched_bill_type, matched_bill_number,
-                            matched_title, bill_id, update_source
-                        ) VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-                        )
-                        ON CONFLICT (reference_id) DO UPDATE
-                        SET match_type = EXCLUDED.match_type,
-                            confidence_score = GREATEST(EXCLUDED.confidence_score, reference_matches.confidence_score),
-                            matched_congress = EXCLUDED.matched_congress,
-                            matched_bill_type = EXCLUDED.matched_bill_type,
-                            matched_bill_number = EXCLUDED.matched_bill_number,
-                            matched_title = EXCLUDED.matched_title,
-                            bill_id = EXCLUDED.bill_id,
-                            update_source = EXCLUDED.update_source
-                    """,
-                        [
-                            (
-                                m["reference_id"],
-                                m["run_id"],
-                                m["match_type"],
-                                m["confidence_score"],
-                                m["extracted_title"],
-                                m["extracted_bill_number"],
-                                m["matched_congress"],
-                                m["matched_bill_type"],
-                                m["matched_bill_number"],
-                                m["matched_title"],
-                                m["bill_id"],
-                                m["update_source"],
-                            )
-                            for m in batch
-                        ],
-                    )
+                    for match_data in batch:
+                        await insert_or_update_reference_match(conn, match_data)
 
             logging.info(
                 f"Updated {len(matches_to_insert)} previously unmatched references with congress range expansion"
@@ -1205,44 +1173,8 @@ async def post_process_enhanced_appropriations(pool: asyncpg.Pool, run_id: int) 
                 batch_size = 100
                 for i in range(0, len(matches_to_insert), batch_size):
                     batch = matches_to_insert[i : i + batch_size]
-                    await conn.executemany(
-                        """
-                        INSERT INTO lobbied_bill_matching.reference_matches (
-                            reference_id, run_id, match_type, confidence_score,
-                            extracted_title, extracted_bill_number,
-                            matched_congress, matched_bill_type, matched_bill_number,
-                            matched_title, bill_id, update_source
-                        ) VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-                        )
-                        ON CONFLICT (reference_id) DO UPDATE
-                        SET match_type = EXCLUDED.match_type,
-                            confidence_score = GREATEST(EXCLUDED.confidence_score, reference_matches.confidence_score),
-                            matched_congress = EXCLUDED.matched_congress,
-                            matched_bill_type = EXCLUDED.matched_bill_type,
-                            matched_bill_number = EXCLUDED.matched_bill_number,
-                            matched_title = EXCLUDED.matched_title,
-                            bill_id = EXCLUDED.bill_id,
-                            update_source = EXCLUDED.update_source
-                    """,
-                        [
-                            (
-                                m["reference_id"],
-                                m["run_id"],
-                                m["match_type"],
-                                m["confidence_score"],
-                                m["extracted_title"],
-                                m["extracted_bill_number"],
-                                m["matched_congress"],
-                                m["matched_bill_type"],
-                                m["matched_bill_number"],
-                                m["matched_title"],
-                                m["bill_id"],
-                                m["update_source"],
-                            )
-                            for m in batch
-                        ],
-                    )
+                    for match_data in batch:
+                        await insert_or_update_reference_match(conn, match_data)
 
             logging.info(
                 f"Updated {len(matches_to_insert)} previously unmatched references with enhanced appropriations matching"
