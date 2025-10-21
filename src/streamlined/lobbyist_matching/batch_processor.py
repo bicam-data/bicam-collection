@@ -6,10 +6,13 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
-from db_utils import DatabaseInterface, FilingSection
-from section_processor import process_single_section_with_timeout
-from timeout_handler import RegexTimeout, TimeoutTracker
 from tqdm import tqdm
+
+from streamlined.lobbyist_matching.db_utils import DatabaseInterface, FilingSection
+from streamlined.lobbyist_matching.section_processor import (
+    process_single_section_with_timeout,
+)
+from streamlined.lobbyist_matching.timeout_handler import RegexTimeout, TimeoutTracker
 
 
 def process_chunk(
@@ -192,7 +195,9 @@ class BatchProcessor:
                                 # Add timeouts to the tracker
                                 if chunk_timeouts and self.timeout_tracker:
                                     for timeout_info in chunk_timeouts:
-                                        from timeout_handler import TimeoutSection
+                                        from streamlined.lobbyist_matching.timeout_handler import (
+                                            TimeoutSection,
+                                        )
 
                                         timeout = TimeoutSection(**timeout_info)
                                         self.timeout_tracker.add_timeout(timeout)

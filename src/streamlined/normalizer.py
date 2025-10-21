@@ -10,7 +10,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .libs.hierarchical_checkpoint_system import (
@@ -94,6 +94,22 @@ class StreamlinedNormalizer:
         # Generate SHA-256 hash
         hash_obj = hashlib.sha256(hash_string.encode("utf-8"))
         return hash_obj.hexdigest()[:16]  # Use first 16 characters for readability
+
+    def _safe_suffix(self, name: str) -> str:
+        """
+        Normalize a list/extracted column suffix used to build table names.
+
+        - Strips leading underscores
+        - Collapses multiple underscores
+        Ensures we don't produce names like "hearingpackages__references".
+        """
+        try:
+            suffix = str(name) if name is not None else ""
+        except Exception:
+            suffix = ""
+        suffix = suffix.lstrip("_")
+        suffix = re.sub(r"_+", "_", suffix)
+        return suffix
 
     def _get_parent_table_suffix(self, table_name: str) -> str:
         """
@@ -283,7 +299,7 @@ class StreamlinedNormalizer:
             "lists_extracted": 0,
             "columns_cleaned": 0,
             "errors": 0,
-            "start_time": datetime.now(timezone.utc),
+            "start_time": datetime.now(UTC),
         }
 
         try:
@@ -495,7 +511,7 @@ class StreamlinedNormalizer:
             # Ensure checkpoint manager flushes any cached data
             checkpoint_manager.flush_all_caches()
 
-            results["end_time"] = datetime.now(timezone.utc)
+            results["end_time"] = datetime.now(UTC)
             results["duration"] = (
                 results["end_time"] - results["start_time"]
             ).total_seconds()
@@ -651,7 +667,9 @@ class StreamlinedNormalizer:
                         )
 
                         # Add common metadata
-                        flat_data["processed_at"] = datetime.now(timezone.utc).isoformat()
+                        flat_data["processed_at"] = datetime.now(
+                            UTC
+                        ).isoformat()
                         flat_data["source_doc_id"] = source_doc_id
 
                         # Store main record using optimized normalizer storage
@@ -853,7 +871,9 @@ class StreamlinedNormalizer:
                         )
 
                         # Add common metadata
-                        flat_data["processed_at"] = datetime.now(timezone.utc).isoformat()
+                        flat_data["processed_at"] = datetime.now(
+                            UTC
+                        ).isoformat()
                         flat_data["source_doc_id"] = source_doc_id
 
                         # Store main record using optimized normalizer storage
@@ -1699,7 +1719,7 @@ class StreamlinedNormalizer:
             if not isinstance(value, list) or not value:
                 continue
 
-            table_name = f"{parent_table_name}_{key}".lower()
+            table_name = f"{parent_table_name}_{self._safe_suffix(key)}".lower()
             records = []
 
             for idx, item in enumerate(value):
@@ -1742,7 +1762,7 @@ class StreamlinedNormalizer:
             if not isinstance(value, list) or not value:
                 continue
 
-            table_name = f"{config.table_name}_{key}".lower()
+            table_name = f"{config.table_name}_{self._safe_suffix(key)}".lower()
             records = []
 
             for idx, item in enumerate(value):

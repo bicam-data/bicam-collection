@@ -26,9 +26,17 @@ from typing import NamedTuple
 
 import asyncpg
 import polars as pl
-import psutil
 from rapidfuzz import fuzz
 from streamlined.lobbyist_matching.section_processor import TITLE_ENDING_WORDS
+from streamlined.lobbyist_matching.utils.bill_utils import (
+    standardize_law_number as _std_law_num,
+)
+from streamlined.lobbyist_matching.utils.memory import (
+    MemoryMonitor as _SharedMemoryMonitor,
+)
+from streamlined.lobbyist_matching.utils.constants import (
+    APPROPRIATIONS_KEY_WORDS as _APPROPS,
+)
 from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO)
@@ -55,64 +63,12 @@ REFS_SCHEMA = {
     "congress_source": pl.Utf8,
 }
 
-# Key words for appropriations matching
-APPROPRIATIONS_KEY_WORDS = {
-    "transportation",
-    "energy",
-    "defense",
-    "health",
-    "education",
-    "labor",
-    "agriculture",
-    "commerce",
-    "justice",
-    "science",
-    "homeland",
-    "security",
-    "interior",
-    "environment",
-    "veterans",
-    "affairs",
-    "state",
-    "foreign",
-    "operations",
-    "urban",
-    "development",
-    "housing",
-    "food",
-    "drug",
-    "administration",
-    "financial",
-    "services",
-    "government",
-    "military",
-    "construction",
-    "legislative",
-    "branch",
-}
+# Key words for appropriations matching (shared)
+APPROPRIATIONS_KEY_WORDS = _APPROPS
 
 
-class MemoryMonitor:
-    """Monitor memory usage and trigger cleanup when needed.
-
-    Attributes:
-        threshold (int): Memory usage threshold percentage to trigger cleanup
-    """
-
-    def __init__(self, threshold_percent=80):
-        self.threshold = threshold_percent
-
-    def check_memory(self):
-        """Check memory usage and cleanup if above threshold.
-
-        Returns:
-            bool: True if cleanup was performed, False otherwise
-        """
-        memory = psutil.virtual_memory()
-        if memory.percent > self.threshold:
-            gc.collect()
-            return True
-        return False
+class MemoryMonitor(_SharedMemoryMonitor):
+    pass
 
 
 class MatchingLogger:
@@ -837,18 +793,8 @@ class ReferenceMatcher:
 
     @staticmethod
     def standardize_law_number(law_text: str) -> str:
-        """Standardize law number format to match trie.
-
-        Args:
-            law_text: Raw law number text
-
-        Returns:
-            Standardized law number format
-        """
-        # Extract just the numbers and hyphen
-        nums = re.sub(r"[^\d-]", "", law_text)
-        # Return standardized format with no space
-        return f"PL{nums}"
+        """Standardize law number format to match trie (shared util)."""
+        return _std_law_num(law_text)
 
     def _match_law_number(self, reference: dict) -> MatchResult:
         """Match reference with law number.
@@ -1858,7 +1804,12 @@ async def load_corpus_bills(pool: asyncpg.Pool) -> BillTrie:
     trie = BillTrie()
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch(r"""
+        # Disable timeouts for large corpus load
+        await conn.execute("SET statement_timeout TO 0")
+        await conn.execute("SET idle_in_transaction_session_timeout TO 0")
+        await conn.execute("SET lock_timeout TO 0")
+        rows = await conn.fetch(
+            r"""
             WITH staging_bills AS (
                 SELECT 
                     NULLIF(TRIM(CAST(b.congress AS TEXT)), '')::INTEGER as congress,
@@ -1907,7 +1858,9 @@ async def load_corpus_bills(pool: asyncpg.Pool) -> BillTrie:
             SELECT * FROM staging_bills
             UNION ALL
             SELECT * FROM relational_bills
-        """)
+        """,
+            timeout=3600,
+        )
 
         logging.info(f"Loaded {len(rows)} bills from corpus")
 

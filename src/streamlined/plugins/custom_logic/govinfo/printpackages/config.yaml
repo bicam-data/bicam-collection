@@ -14,6 +14,9 @@
     id_fields: [package_id]
     related_tables:
     - granules
+    - committees
+    - reference_bills
+    - agencies
 
   processing:
     batch_size: 100

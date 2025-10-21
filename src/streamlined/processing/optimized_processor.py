@@ -8,7 +8,7 @@ key allocation and work distribution.
 import asyncio
 import logging
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..libs.hierarchical_checkpoint_system import (
@@ -80,7 +80,7 @@ class OptimizedParallelProcessor:
 
         The fetcher handles all checkpoint logic internally.
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         # =============================================================================
         # STEP 1: FETCH RAW PAGINATION METADATA
@@ -374,7 +374,7 @@ class OptimizedParallelProcessor:
             "data_type": data_type,
             "total_workers": len(workers),
             "total_keys": len(self.key_pool._keys),
-            "duration": (datetime.now(timezone.utc) - start_time).total_seconds(),
+            "duration": (datetime.now(UTC) - start_time).total_seconds(),
             "total_processed": 0,
             "total_errors": 0,
             "worker_stats": [],
@@ -448,7 +448,7 @@ class OptimizedParallelProcessor:
                 await asyncio.sleep(1)
                 continue
 
-            chunk_start = datetime.now(timezone.utc)
+            chunk_start = datetime.now(UTC)
 
             # Process the chunk with dynamic key allocation
             try:
@@ -467,7 +467,7 @@ class OptimizedParallelProcessor:
                 worker_stats["chunks_completed"] += 1
 
                 # Report completion with duration for adaptive sizing
-                duration = (datetime.now(timezone.utc) - chunk_start).total_seconds()
+                duration = (datetime.now(UTC) - chunk_start).total_seconds()
                 await work_queue.complete_work(
                     worker_id, chunk.chunk_id, True, duration
                 )
@@ -1203,7 +1203,7 @@ class OptimizedParallelProcessor:
         Returns:
             Dictionary with processing results and metrics
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         logger.info("=" * 60)
         logger.info("FETCHING RELATED TABLES FROM EXISTING DATA (PARALLEL)")
@@ -1422,7 +1422,7 @@ class OptimizedParallelProcessor:
         total_processed = sum(stats["processed"] for stats in worker_stats)
         total_errors = sum(stats["errors"] for stats in worker_stats)
         total_related_items = sum(stats["related_items"] for stats in worker_stats)
-        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+        duration = (datetime.now(UTC) - start_time).total_seconds()
 
         logger.info(f"Successfully processed {total_processed} items")
         logger.info(f"Fetched {total_related_items} related items")
@@ -1669,3 +1669,23 @@ class OptimizedParallelProcessor:
                 logger.warning(f"Method {method_name} not found in custom logic")
 
         return related_data
+
+    def get_checkpoint_stats(self, data_type: str) -> dict[str, Any]:
+        """
+        Get checkpoint statistics for a data type.
+
+        This method provides checkpoint statistics by delegating to the
+        hierarchical checkpoint manager if available, or returning empty stats.
+
+        Args:
+            data_type: The data type to get stats for
+
+        Returns:
+            Dictionary containing checkpoint statistics by phase
+        """
+        # For now, return empty stats since this processor doesn't directly
+        # manage checkpoints - the fetcher does
+        logger.warning(
+            f"get_checkpoint_stats called for {data_type} but OptimizedParallelProcessor doesn't manage checkpoints directly"
+        )
+        return {}

@@ -35,17 +35,20 @@ from datetime import datetime
 
 import asyncpg
 import psutil
-from batch_processor import BatchProcessor
-from db_utils import DatabaseInterface, FilingSection
 from dotenv import load_dotenv
-from matcher import MatchingManager
-from post_processor import post_process_all
-from schema_setup import (
+from tqdm import tqdm
+
+from streamlined.lobbyist_matching.batch_processor import BatchProcessor
+from streamlined.lobbyist_matching.db_utils import DatabaseInterface, FilingSection
+from streamlined.lobbyist_matching.matcher import MatchingManager
+from streamlined.lobbyist_matching.post_processor import post_process_all
+from streamlined.lobbyist_matching.schema_setup import (
     create_schema,
     initialize_run,
 )
-from timeout_handler import TimeoutTracker
-from tqdm import tqdm
+from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
+from streamlined.lobbyist_matching.utils.chunking import create_progressive_chunks
+from streamlined.lobbyist_matching.utils.config import resolve_db_config
 
 matching_manager = MatchingManager()
 
@@ -797,13 +800,7 @@ async def main():
 
     load_dotenv()
 
-    db_config = {
-        "host": os.getenv("POSTGRESQL_HOST"),
-        "port": int(os.getenv("POSTGRESQL_PORT", 5432)),
-        "user": os.getenv("POSTGRESQL_USER"),
-        "password": os.getenv("POSTGRESQL_PASSWORD"),
-        "database": os.getenv("POSTGRESQL_DB"),
-    }
+    db_config = resolve_db_config()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -863,22 +860,24 @@ async def main():
                         )
                     if rec and rec["text"]:
                         text = rec["text"]
-                        # Split text into chunks
-                        length = max(1, len(text))
-                        approx_chunk_len = max(1000, length // max(1, chunk_size))
-                        start = 0
-                        while start < length:
-                            end = min(length, start + approx_chunk_len)
-                            chunk_text = text[start:end]
+                        # Split text into chunks (shared util)
+                        for idx, chunk_text in enumerate(
+                            create_progressive_chunks(
+                                text,
+                                reprocessing_attempts=0,
+                                base_max_chunk_size=max(
+                                    1000, len(text) // max(1, chunk_size)
+                                ),
+                            )
+                        ):
                             sections.append(
                                 FilingSection(
                                     filing_uuid=str(rec["filing_uuid"]),
-                                    section_id=f"{rec['section_id']}-chunk-{start}-{end}",
+                                    section_id=f"{rec['section_id']}-chunk-{idx}",
                                     text=chunk_text,
                                     filing_year=rec["filing_year"],
                                 )
                             )
-                            start = end
                 if not sections:
                     logging.info("No timed-out sections found to rerun.")
                 else:

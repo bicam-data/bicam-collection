@@ -15,7 +15,7 @@ Features:
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Any
 
@@ -33,7 +33,7 @@ class APIKeySession:
         self.current_key_index = 0
         self.assigned_to: str | None = None
         self.active = False
-        self.last_used = datetime.now(timezone.utc)
+        self.last_used = datetime.now(UTC)
 
     def get_primary_key(self) -> str:
         """Get the primary API key for this session."""
@@ -65,7 +65,7 @@ class APIKeyStatus:
         self.assigned_session: str | None = (
             None  # session_id if part of parallel session
         )
-        self.last_used: datetime = datetime.now(timezone.utc)
+        self.last_used: datetime = datetime.now(UTC)
         self.request_count: int = 0
         self.is_rate_limited: bool = False
         self.rate_limit_until: datetime | None = None
@@ -388,7 +388,7 @@ class SystemAPIKeyManager:
             # Update key status
             for key in available_keys:
                 self.key_status[key].assigned_to = data_type
-                self.key_status[key].last_used = datetime.now(timezone.utc)
+                self.key_status[key].last_used = datetime.now(UTC)
 
             logger.info(
                 f"Assigned {len(available_keys)} keys to {data_type}: {available_keys}"
@@ -494,7 +494,7 @@ class SystemAPIKeyManager:
         with self._lock:
             if key in self.key_status:
                 self.key_status[key].is_rate_limited = True
-                self.key_status[key].rate_limit_until = datetime.now(timezone.utc) + timedelta(
+                self.key_status[key].rate_limit_until = datetime.now(UTC) + timedelta(
                     seconds=duration_seconds
                 )
                 logger.warning(
@@ -514,7 +514,7 @@ class SystemAPIKeyManager:
         """Update last used time for a key."""
         with self._lock:
             if key in self.key_status:
-                self.key_status[key].last_used = datetime.now(timezone.utc)
+                self.key_status[key].last_used = datetime.now(UTC)
                 self.key_status[key].request_count += 1
                 self.key_status[
                     key
@@ -543,7 +543,7 @@ class SystemAPIKeyManager:
     def cleanup_expired_rate_limits(self):
         """Clean up expired rate limits."""
         with self._lock:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for status in self.key_status.values():
                 if (
                     status.is_rate_limited

@@ -15,6 +15,9 @@
     id_fields: [package_id]
     related_tables:
     - granules
+    - committees
+    - serialset
+    - serialset_topics
 
   processing:
     batch_size: 100

@@ -16,6 +16,11 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from streamlined.lobbyist_matching.utils.chunking import (
+    create_progressive_chunks as _create_progressive_chunks,
+)
+from streamlined.lobbyist_matching.utils.config import resolve_db_config
+
 # Handle imports for both direct execution and module execution
 try:
     from streamlined.lobbyist_matching.batch_processor import BatchProcessor
@@ -55,63 +60,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def create_progressive_chunks(
-    text: str,
-    reprocessing_attempts: int = 0,
-    base_max_chunk_size: int = 500,
-    min_chunk_size: int = 50,
-) -> list[str]:
-    """
-    Create progressively smaller chunks based on reprocessing attempts.
-
-    Args:
-        text: Text to chunk
-        reprocessing_attempts: Number of previous reprocessing attempts
-        base_max_chunk_size: Base maximum chunk size in characters
-        min_chunk_size: Minimum chunk size in characters
-
-    Returns:
-        List of text chunks
-    """
-    # Reduce chunk size with each attempt: 500 -> 250 -> 125 -> 62
-    max_chunk_size = max(
-        min_chunk_size, base_max_chunk_size // (2**reprocessing_attempts)
-    )
-
-    if len(text) <= max_chunk_size:
-        return [text]
-
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        # Try to find a good breaking point
-        end = min(start + max_chunk_size, len(text))
-
-        # If we're not at the end, try to break at a sentence boundary
-        if end < len(text):
-            # Look for sentence endings in the last 50 characters (reduced for smaller chunks)
-            search_range = min(50, max_chunk_size // 2)
-            search_start = max(start + min_chunk_size, end - search_range)
-            for i in range(end - 1, search_start - 1, -1):
-                if text[i] in ".!?":
-                    # Found a sentence boundary
-                    end = i + 1
-                    break
-            else:
-                # No sentence boundary found, try word boundary
-                for i in range(end - 1, search_start - 1, -1):
-                    if text[i].isspace():
-                        end = i + 1
-                        break
-
-        chunk = text[start:end].strip()
-        if chunk:  # Only add non-empty chunks
-            chunks.append(chunk)
-
-        start = end
-
-    return chunks
+def create_progressive_chunks(*args, **kwargs):
+    # Backward-compatibility shim delegating to shared utils
+    return _create_progressive_chunks(*args, **kwargs)
 
 
 def process_single_section_with_shorter_timeout(
@@ -133,7 +84,9 @@ def process_single_section_with_shorter_timeout(
         Same as process_single_section_with_timeout but with shorter timeout
     """
     # Import here to avoid circular imports
-    from section_processor import process_single_section_with_timeout
+    from streamlined.lobbyist_matching.section_processor import (
+        process_single_section_with_timeout,
+    )
 
     return process_single_section_with_timeout(
         section, timeout=timeout, timeout_tracker=timeout_tracker, run_id=run_id
@@ -252,13 +205,7 @@ async def main():
     load_dotenv()
 
     # Database configuration
-    db_config = {
-        "host": os.getenv("POSTGRESQL_HOST"),
-        "port": int(os.getenv("POSTGRESQL_PORT", 5432)),
-        "user": os.getenv("POSTGRESQL_USERNAME"),
-        "password": os.getenv("POSTGRESQL_PASSWORD"),
-        "database": os.getenv("POSTGRESQL_DATABASE"),
-    }
+    db_config = resolve_db_config()
 
     # Configure the pre-2008 table with necessary joins
     table_config = {

@@ -12,7 +12,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .libs.hierarchical_checkpoint_system import (
@@ -277,14 +277,14 @@ class StreamlinedFetcher:
                     f"Using last processed date for {self.data_type_name}: {from_date}"
                 )
             else:
-                from_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                from_date = (datetime.now(UTC) - timedelta(days=30)).strftime(
                     "%Y-%m-%d"
                 )
                 logger.info(
                     f"No last processed date for {self.data_type_name}, using fallback: {from_date}"
                 )
         if not to_date:
-            to_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            to_date = datetime.now(UTC).strftime("%Y-%m-%d")
             logger.info(f"Using current date as end date: {to_date}")
 
         # Check for existing checkpoint
@@ -1175,7 +1175,7 @@ class StreamlinedFetcher:
                     "id_uuid": str(uuid.uuid4()),
                     "url": item.get("url"),
                     "batch_id": batch_id or str(uuid.uuid4()),
-                    "scraped_at": datetime.now(timezone.utc),
+                    "scraped_at": datetime.now(UTC),
                     "payload": json.dumps(item, default=str),
                     "source_doc_id": source_doc_id,
                     "etl_batch_id": batch_id or str(uuid.uuid4()),
@@ -1246,7 +1246,7 @@ class StreamlinedFetcher:
         stats = {
             "total_processed": 0,
             "errors": 0,
-            "start_time": datetime.now(timezone.utc),
+            "start_time": datetime.now(UTC),
         }
 
         processed_count = 0
@@ -1323,7 +1323,7 @@ class StreamlinedFetcher:
                     break
 
             stats["duration"] = (
-                datetime.now(timezone.utc) - stats["start_time"]
+                datetime.now(UTC) - stats["start_time"]
             ).total_seconds()
 
             # Save final checkpoint
@@ -1413,7 +1413,7 @@ class StreamlinedFetcher:
                     elif last_total_count == 0 and self.data_source == "govinfo":
                         # For GovInfo data types with no data, use current date to indicate we checked
 
-                        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
 
                         success = await self.client.update_last_processed_date(
                             data_type=self.data_type_name,

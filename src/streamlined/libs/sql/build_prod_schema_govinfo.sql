@@ -138,23 +138,34 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.billcollections_committees(
 
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages(
-    package_id TEXT PRIMARY KEY,
+    package_id TEXT,
     print_id TEXT,
+    granule_id TEXT,
+    print_set_id TEXT,
+    print_type TEXT,
+    print_number TEXT,
+    part_number INTEGER,
     title TEXT,
+    subtitle TEXT,
     chamber TEXT, -- lower
     congress INTEGER,
     session INTEGER,
     pages INTEGER,
     document_number TEXT,
     issued_at DATE,
+    is_errata BOOLEAN,
     branch TEXT,
     government_author1 TEXT,
     government_author2 TEXT,
     publisher TEXT,
+    federal_publication_name TEXT,
     collection_code TEXT,
     migrated_doc_id TEXT,
     su_doc_class_number TEXT,
-    last_modified TIMESTAMP WITH TIME ZONE
+    isbn TEXT,
+    stock_number TEXT,
+    last_modified TIMESTAMP WITH TIME ZONE,
+    UNIQUE (package_id, granule_id)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_granules(
@@ -176,14 +187,71 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_reference_bills(
     package_id TEXT,
     granule_id TEXT,
     bill_id TEXT,
+    bill_type TEXT,
+    bill_number TEXT,
+    congress INTEGER,
     UNIQUE (package_id, granule_id, bill_id)
 );
+
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_reference_laws(
+    package_id TEXT,
+    law_id TEXT,
+    law_type TEXT,
+    law_number TEXT,
+    order_number INTEGER,
+    congress INTEGER,
+    UNIQUE (package_id, law_id)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_reference_codes(
+    report_code_id TEXT,
+    package_id TEXT,
+    reference_code TEXT,
+    UNIQUE (report_code_id, package_id, reference_code)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_reference_codes_sections(
+    report_code_id TEXT,
+    code_section TEXT,
+    UNIQUE (report_code_id, code_section)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_reference_statutes(
+    report_statute_id TEXT,
+    package_id TEXT,
+    reference_statute TEXT,
+    UNIQUE (report_statute_id, package_id, reference_statute)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_reference_statutes_pages(
+    report_statute_id TEXT,
+    page TEXT,
+    UNIQUE (report_statute_id, page)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_ils_system_id(
+    package_id TEXT,
+    ils_system_id TEXT,
+    UNIQUE (package_id, ils_system_id)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.printpackages_agencies(
+    package_id TEXT,
+    granule_id TEXT,
+    agency TEXT,
+    UNIQUE (package_id, granule_id, agency)
+);
+
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports(
     package_id TEXT,
     report_id TEXT,
     granule_id TEXT,
-    parent_report_id TEXT,
+    report_set_id TEXT,
+    report_type TEXT,
+    report_number INTEGER,
+    part_number INTEGER,
     title TEXT,
     subtitle TEXT,
     chamber TEXT, -- lower
@@ -305,26 +373,45 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionalreports_reference_statutes
 
 
 
-
 CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages(
-    package_id TEXT PRIMARY KEY,
+    package_id TEXT,
     hearing_id TEXT,
-    parent_hearing_id TEXT,
+    granule_id TEXT,
+    hearing_set_id TEXT,
     title TEXT,
+    subtitle TEXT,
+    hearing_type TEXT,
+    hearing_number TEXT,
+    part_number INTEGER,
     chamber TEXT, -- lower
     congress INTEGER,
     session INTEGER,
     pages INTEGER,
     is_appropriation BOOLEAN,
+    is_errata BOOLEAN,
     issued_at DATE,
     branch TEXT,
     government_author1 TEXT,
     government_author2 TEXT,
     publisher TEXT,
     collection_code TEXT,
+    federal_publication_name TEXT,
     migrated_doc_id TEXT,
     su_doc_class_number TEXT,
-    last_modified TIMESTAMP WITH TIME ZONE
+    last_modified TIMESTAMP WITH TIME ZONE,
+    UNIQUE (package_id, granule_id)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_ils_system_id(
+    package_id TEXT,
+    ils_system_id TEXT,
+    UNIQUE (package_id, ils_system_id)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_su_doc_item_number(
+    package_id TEXT,
+    su_doc_item_number TEXT,
+    UNIQUE (package_id, su_doc_item_number)
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_dates(
@@ -340,8 +427,8 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_granules(
 );
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_agencies(
-    granule_id TEXT,
     package_id TEXT,
+    granule_id TEXT,
     agency TEXT,
     UNIQUE (package_id, granule_id, agency)
 );
@@ -359,6 +446,8 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_members(
     package_id TEXT,
     bioguide_id TEXT,
     name TEXT,
+    authority_id TEXT,
+    gpo_id TEXT,
     UNIQUE (package_id, granule_id, bioguide_id, name)
 );
 
@@ -366,25 +455,74 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_reference_bills(
     granule_id TEXT,
     package_id TEXT,
     bill_id TEXT,
+    bill_type TEXT,
+    bill_number TEXT,
+    congress INTEGER,
     UNIQUE (package_id, granule_id, bill_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_witnesses(
-    granule_id TEXT,
-    witness TEXT,
-    UNIQUE (granule_id, witness)
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_reference_laws(
+    package_id TEXT,
+    law_id TEXT,
+    law_type TEXT,
+    law_number TEXT,
+    order_number INTEGER,
+    congress INTEGER,
+    UNIQUE (package_id, law_id)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_govinfo.treaties(
-    package_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_reference_codes(
+    report_code_id TEXT,
+    package_id TEXT,
+    reference_code TEXT,
+    UNIQUE (report_code_id, package_id, reference_code)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_reference_codes_sections(
+    report_code_id TEXT,
+    code_section TEXT,
+    UNIQUE (report_code_id, code_section)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_reference_statutes(
+    report_statute_id TEXT,
+    package_id TEXT,
+    reference_statute TEXT,
+    UNIQUE (report_statute_id, package_id, reference_statute)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_reference_statutes_pages(
+    report_statute_id TEXT,
+    page TEXT,
+    UNIQUE (report_statute_id, page)
+);
+
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.hearingpackages_witnesses(
+    package_id TEXT,
+    granule_id TEXT,
+    witness TEXT,
+    UNIQUE (package_id, granule_id, witness)
+);
+
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.treatydocs(
+    package_id TEXT,
     treaty_id TEXT,
+    granule_id TEXT,
+    treaty_set_id TEXT,
     title TEXT,
+    subtitle TEXT,
+    treaty_type TEXT,
+    treaty_number INTEGER,
+    part_number INTEGER,
     congress INTEGER,
     session INTEGER,
     chamber TEXT, -- lower
     summary TEXT,
     pages INTEGER,
     issued_at DATE,
+    is_errata BOOLEAN,
     branch TEXT,
     government_author1 TEXT,
     government_author2 TEXT,
@@ -392,23 +530,45 @@ CREATE TABLE IF NOT EXISTS bicam_govinfo.treaties(
     collection_code TEXT,
     migrated_doc_id TEXT,
     su_doc_class_number TEXT,
+    last_modified TIMESTAMP WITH TIME ZONE,
+    UNIQUE (package_id, granule_id)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.treatydocs_ils_system_id(
+    package_id TEXT,
+    ils_system_id TEXT,
+    UNIQUE (package_id, ils_system_id)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.treatydocs_committees(
+    package_id TEXT,
+    granule_id TEXT,
+    committee_code TEXT,
+    committee_name TEXT,
+    UNIQUE (package_id, granule_id, committee_code, committee_name)
+);
+
+CREATE TABLE IF NOT EXISTS bicam_govinfo.treatydocs_serialset(
+    package_id TEXT PRIMARY KEY,
+    bag_id TEXT,
+    doc_id TEXT,
+    serialset_number TEXT,
+    agency TEXT,
+    volume TEXT,
+    parent_serialset_id TEXT,
+    oclc_number TEXT,
+    lccn_number TEXT,
+    issn_number TEXT,
+    isglp BOOLEAN,
     last_modified TIMESTAMP WITH TIME ZONE
 );
 
-CREATE TABLE IF NOT EXISTS bicam_govinfo.treaties_granules(
-    granule_id TEXT,
+CREATE TABLE IF NOT EXISTS bicam_govinfo.treatydocs_serialset_topics(
     package_id TEXT,
-    PRIMARY KEY (granule_id, package_id)
+    topic TEXT,
+    UNIQUE (package_id, topic)
 );
 
-CREATE TABLE IF NOT EXISTS bicam_govinfo.treaties_committees(
-    granule_id TEXT,
-    package_id TEXT,
-    committee_code TEXT,
-    committee_name TEXT,
-    chamber TEXT,
-    UNIQUE (package_id, granule_id, committee_code, committee_name, chamber)
-);
 
 CREATE TABLE IF NOT EXISTS bicam_govinfo.congressionaldirectories(
     package_id TEXT PRIMARY KEY,

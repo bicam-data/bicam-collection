@@ -140,8 +140,9 @@ class StreamlinedCleaner:
 
         try:
             # Get tables to process from custom logic or config
+            related_table = kwargs.get("related_table")
             tables_to_process = self._get_tables_to_process(
-                data_type, custom_logic, config
+                data_type, custom_logic, config, related_table
             )
 
             if not tables_to_process:
@@ -217,7 +218,7 @@ class StreamlinedCleaner:
         return plugin
 
     def _get_tables_to_process(
-        self, data_type: str, custom_logic: Any, config: Any
+        self, data_type: str, custom_logic: Any, config: Any, related_table: str = None
     ) -> list[str]:
         """Get list of tables to process for this data type."""
         tables = []
@@ -243,7 +244,49 @@ class StreamlinedCleaner:
         if not tables:
             tables = [data_type]
 
+        # Filter to only the specific related table if requested
+        if related_table:
+            related_table_name = f"{data_type}_{related_table}"
+            if related_table_name in tables:
+                tables = [related_table_name]
+                logger.info(
+                    f"Filtering to only process related table: {related_table_name}"
+                )
+            else:
+                logger.warning(
+                    f"Related table {related_table_name} not found in available tables: {tables}"
+                )
+                tables = []
+
         return tables
+
+    def _is_related_table(self, table: str, data_type: str, config: Any) -> bool:
+        """Check if a table is a related table (not the main table)."""
+        if (
+            not config
+            or not hasattr(config, "schema")
+            or not hasattr(config.schema, "related_tables")
+        ):
+            return False
+
+        main_table = config.schema.table_name or data_type
+        if table == main_table:
+            return False
+
+        # Check if this table matches the pattern of a related table
+        for related_table in config.schema.related_tables:
+            expected_name = f"{data_type}_{related_table}"
+            if table == expected_name:
+                return True
+
+        return False
+
+    def _get_related_table_name(self, table: str, data_type: str) -> str:
+        """Extract the related table name from a full table name."""
+        # Remove the data_type prefix to get the related table name
+        if table.startswith(f"{data_type}_"):
+            return table[len(f"{data_type}_") :]
+        return table
 
     async def _process_tables(
         self,
@@ -284,7 +327,23 @@ class StreamlinedCleaner:
 
         for table in tables:
             # Skip if already processed (unless rerun)
-            if not rerun and resume and cleaning_checkpoint.should_skip_table(table):
+            # For related tables, check if they have their own checkpoints
+            should_skip = False
+            if not rerun and resume:
+                if self._is_related_table(table, data_type, config):
+                    # Check if this specific related table has been processed
+                    related_data_type = (
+                        f"{data_type}_{self._get_related_table_name(table, data_type)}"
+                    )
+                    related_checkpoint = CleaningCheckpoint(
+                        cleaning_checkpoint.cm, related_data_type
+                    )
+                    should_skip = related_checkpoint.should_skip_table(table)
+                else:
+                    # Use the main data type checkpoint for main tables
+                    should_skip = cleaning_checkpoint.should_skip_table(table)
+
+            if should_skip:
                 logger.info(f"Skipping already processed table {table}")
                 skipped_results[table] = {
                     "success": True,
@@ -388,11 +447,21 @@ class StreamlinedCleaner:
 
                 # Update checkpoint periodically
                 if stats["chunks_processed"] % 10 == 0:
-                    checkpoint = cleaning_checkpoint.cm.get_or_create_checkpoint(
-                        ProcessingStage.CLEANING,
-                        CleaningPhase.APPLY_RULES.value,
-                        data_type,
-                    )
+                    # Use the appropriate checkpoint for this table
+                    if self._is_related_table(table, data_type, config):
+                        related_data_type = f"{data_type}_{self._get_related_table_name(table, data_type)}"
+                        checkpoint = cleaning_checkpoint.cm.get_or_create_checkpoint(
+                            ProcessingStage.CLEANING,
+                            CleaningPhase.APPLY_RULES.value,
+                            related_data_type,
+                        )
+                    else:
+                        checkpoint = cleaning_checkpoint.cm.get_or_create_checkpoint(
+                            ProcessingStage.CLEANING,
+                            CleaningPhase.APPLY_RULES.value,
+                            data_type,
+                        )
+
                     checkpoint.processed_items = stats["records_processed"]
                     checkpoint.current_table = table
                     cleaning_checkpoint.save_checkpoint(checkpoint)
@@ -406,8 +475,21 @@ class StreamlinedCleaner:
 
             # Mark table as processed
             if not rerun and stats["records_processed"] > 0:
-                cleaning_checkpoint.mark_table_cleaned(table)
-                logger.info(f"Marked table {table} as cleaned")
+                # Use the appropriate checkpoint for this table
+                if self._is_related_table(table, data_type, config):
+                    related_data_type = (
+                        f"{data_type}_{self._get_related_table_name(table, data_type)}"
+                    )
+                    related_checkpoint = CleaningCheckpoint(
+                        cleaning_checkpoint.cm, related_data_type
+                    )
+                    related_checkpoint.mark_table_cleaned(table)
+                    logger.info(
+                        f"Marked related table {table} as cleaned using checkpoint {related_data_type}"
+                    )
+                else:
+                    cleaning_checkpoint.mark_table_cleaned(table)
+                    logger.info(f"Marked main table {table} as cleaned")
 
             stats["success"] = True
 
@@ -454,6 +536,32 @@ class StreamlinedCleaner:
                 cleaned_record, target_table = await self._clean_single_record(
                     record, table, data_type, custom_logic
                 )
+
+                # Skip if cleaner returned nothing or an invalid structure
+                if not cleaned_record or not isinstance(cleaned_record, dict):
+                    continue
+
+                # Skip if missing primary key(s); prefer config-defined id_fields, fallback to package_id
+                required_keys = []
+                try:
+                    if (
+                        config
+                        and hasattr(config, "schema")
+                        and getattr(config.schema, "id_fields", None)
+                    ):
+                        required_keys = list(config.schema.id_fields)
+                except Exception:
+                    required_keys = []
+                if not required_keys and "package_id" in cleaned_record:
+                    required_keys = ["package_id"]
+
+                if required_keys:
+                    missing_pk = any(
+                        (cleaned_record.get(k) in (None, "", "ID_ERROR"))
+                        for k in required_keys
+                    )
+                    if missing_pk:
+                        continue
 
                 if target_table not in records_by_table:
                     records_by_table[target_table] = []

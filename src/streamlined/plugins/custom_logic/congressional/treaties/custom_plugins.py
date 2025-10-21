@@ -28,10 +28,10 @@ class TreatiesFetcherLogic(CongressionalBaseFetcherLogic):
         """Extract standardized treaty ID from treaty data."""
         treaty_number = item_data.get("number")
         treaty_suffix = item_data.get("suffix", "")
-        congress_received = item_data.get("congressReceived")
+        congress_received = item_data.get("congressReceived", "")
 
         if all([treaty_number, congress_received]):
-            return f"td{congress_received}-{treaty_number}{treaty_suffix}"
+            return f"tdoc{treaty_number}-{(treaty_suffix + '-') if treaty_suffix else ''}{congress_received}"
         else:
             return "ID_ERROR"
 

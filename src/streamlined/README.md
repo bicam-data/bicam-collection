@@ -7,13 +7,15 @@ A simplified, efficient 4-layer architecture that reduces complexity by 50% whil
 The streamlined architecture transforms the original 8-layer complex pipeline into 4 focused layers:
 
 ### Before (8 Complex Layers)
-```
+
+```bash
 CLI → Pipeline Runner → Generalized Assets → ProcessingResource →
 BaseFetcher → CongressionalBaseFetcher → SpecificFetcher → OptimizedParallelProcessor
 ```
 
 ### After (4 Focused Layers)
-```
+
+```bash
 Enhanced CLI → Direct Asset Executor → Streamlined Components → Integrated Processing
 ```
 
@@ -29,6 +31,7 @@ Enhanced CLI → Direct Asset Executor → Streamlined Components → Integrated
 ## 📦 Architecture Components
 
 ### 1. StreamlinedExecutor
+
 Direct execution coordinator that orchestrates the pipeline.
 
 ```python
@@ -40,6 +43,7 @@ results = await executor.execute_data_type("bills", ["raw", "staging", "producti
 ```
 
 ### 2. StreamlinedFetcher
+
 Integrated fetching with built-in parallel processing.
 
 ```python
@@ -50,6 +54,7 @@ results = await fetcher.fetch_data_type("bills", from_date="2024-01-01", limit=1
 ```
 
 ### 3. StreamlinedCleaner
+
 Focused data cleaning with integrated validation.
 
 ```python
@@ -60,6 +65,7 @@ results = await cleaner.clean_data_type("bills", batch_size=50)
 ```
 
 ### 4. StreamlinedNormalizer
+
 Focused database normalization with batch processing and recursive list extraction.
 
 ```python
@@ -70,13 +76,15 @@ results = await normalizer.normalize_data_type("bills", batch_size=100)
 ```
 
 **Key Features:**
+
 - **Recursive List Extraction**: Automatically extracts nested lists from extracted tables
 - **4-Phase Processing**: Main records → Related records → List extraction → JSON cleanup
 - **Dynamic Schema**: Creates tables with all TEXT columns for maximum flexibility
 - **Bulk Operations**: Uses PostgreSQL COPY for high-performance inserts
 
 **Example Recursive Extraction:**
-```
+
+```bash
 amendments (main table from amendments_raw)
 ├── amendments_sponsors (extracted from amendments.sponsors)
 │   └── amendments_sponsors_links (extracted from amendments_sponsors.links)
@@ -88,6 +96,7 @@ amendments (main table from amendments_raw)
 ```
 
 **Key Features:**
+
 - **Dict Flattening**: Dictionaries like `latestAction` become `latestaction_text`, `latestaction_actiondate`, etc.
 - **Related Table Processing**: Processes all raw tables (amendments_actions_raw, amendments_texts_raw, etc.)
 - **Recursive List Extraction**: Extracts lists from all tables, including those extracted from other tables
@@ -102,6 +111,7 @@ The plugin system automatically preserves all existing custom logic:
 - **Normalizer plugins** wrap existing normalizer classes (BillsDatabaseNormalizer, etc.)
 
 All custom methods are preserved:
+
 - `get_actions`, `get_cosponsors`, `get_texts`, etc. (fetchers)
 - `_clean_bills_singular`, `_clean_bills_actions_singular`, etc. (cleaners)
 - Custom normalization logic (normalizers)
@@ -268,7 +278,7 @@ if validation_errors:
 
 ## 📁 Directory Structure
 
-```
+```bash
 streamlined/
 ├── __init__.py              # Main module exports
 ├── executor.py              # StreamlinedExecutor
@@ -306,16 +316,19 @@ The streamlined architecture coexists with the legacy system:
 ### Migration Steps
 
 1. **Test with single data type**:
+
    ```bash
    python -m bicam_collection.streamlined.cli process bills --phases raw
    ```
 
 2. **Compare performance**:
+
    ```python
    # Time both approaches and compare
    ```
 
 3. **Migrate additional data types**:
+
    ```bash
    python -m bicam_collection.streamlined.cli process nominations --phases raw staging
    ```
@@ -325,16 +338,19 @@ The streamlined architecture coexists with the legacy system:
 ### Common Issues
 
 1. **Plugin not found**: Check if plugins are registered
+
    ```bash
    python -m bicam_collection.streamlined.cli test-plugins
    ```
 
 2. **Configuration errors**: Validate configuration
+
    ```bash
    python -m bicam_collection.streamlined.cli config --validate
    ```
 
 3. **Resource initialization**: Check resource manager setup
+
    ```python
    coordinator = ResourceCoordinator()
    await coordinator.initialize()
@@ -380,6 +396,7 @@ python examples/amendments_normalization_demo.py
 ```
 
 This demo shows how the normalizer:
+
 - Flattens dictionaries (like `latestAction` → `latestaction_*` fields)
 - Processes all raw tables (amendments_raw, amendments_actions_raw, etc.)
 - Extracts lists recursively from all tables
@@ -394,6 +411,7 @@ python examples/fixed_table_processing_demo.py
 ```
 
 This demo shows how the normalizer now properly:
+
 - Checks raw schema first before looking in staging
 - Processes all related tables that have raw data
 - Handles the correct order of operations
@@ -409,4 +427,4 @@ When adding new data types or custom logic:
 
 ## 📄 License
 
-Same as the main bicam-collection project. 
+Same as the main bicam-collection project.

@@ -283,6 +283,30 @@ async def command_process(args) -> int:
     logger.info(f"Processing {args.data_type} with phases: {args.phases}")
 
     try:
+        # Check if this is a related data type (e.g., congressionalreports_members)
+        main_data_type = None
+        related_table = None
+        if "_" in args.data_type:
+            potential_main = args.data_type.split("_")[0]
+            potential_related = "_".join(args.data_type.split("_")[1:])
+
+            # Check if the potential main data type exists and has the related table
+            try:
+                registry = get_consolidated_registry()
+                config_data = registry.get_data_type_config(potential_main)
+                if (
+                    config_data
+                    and hasattr(config_data, "related_tables")
+                    and potential_related in config_data.related_tables
+                ):
+                    main_data_type = potential_main
+                    related_table = potential_related
+                    logger.info(f"Detected related data type: {args.data_type}")
+                    logger.info(
+                        f"Main data type: {main_data_type}, Related table: {related_table}"
+                    )
+            except Exception as e:
+                logger.debug(f"Could not check for related data type: {e}")
         # Create configuration and coordinator
         config = StreamlinedConfig.from_env()
 
@@ -304,7 +328,9 @@ async def command_process(args) -> int:
                     "keys_per_session": len(config.api.keys),  # All keys
                 },
             }
-        data_source = get_consolidated_registry().get_data_source(args.data_type)
+        # Determine the data type to use for pipeline execution
+        pipeline_data_type = main_data_type if main_data_type else args.data_type
+        data_source = get_consolidated_registry().get_data_source(pipeline_data_type)
         coordinator = ResourceCoordinator(config, data_source)
 
         # Build kwargs for processing
@@ -374,6 +400,78 @@ async def command_process(args) -> int:
                 )
                 return
 
+            # Check if there's outstanding data to process before rebuilding schema
+            from .libs.hierarchical_checkpoint_system import (
+                HierarchicalCheckpointManager,
+            )
+
+            checkpoint_manager = HierarchicalCheckpointManager(
+                db_path=config.infrastructure.checkpoint_db_path
+            )
+
+            # Get checkpoint status for the data type
+            checkpoint_stats = checkpoint_manager.get_progress_summary(args.data_type)
+
+            # Check if there are any tables that need processing
+            has_outstanding_data = False
+
+            # If no checkpoint stats exist, assume there's outstanding data to process
+            if not checkpoint_stats:
+                has_outstanding_data = True
+                logger.info(
+                    "No checkpoint records found - assuming outstanding data needs processing"
+                )
+            else:
+                for _stage, phases in checkpoint_stats.items():
+                    for _phase, stats in phases.items():
+                        processed = stats.get("processed", 0)
+                        total = stats.get("total", 0)
+                        # If we have a total > 0 and processed < total, there's outstanding data
+                        if total > 0 and processed < total:
+                            has_outstanding_data = True
+                            break
+                    if has_outstanding_data:
+                        break
+
+            # Also check related tables for outstanding data
+            if not has_outstanding_data:
+                try:
+                    registry = get_consolidated_registry()
+                    config_data = registry.get_data_type_config(args.data_type)
+                    if config_data and hasattr(config_data, "related_tables"):
+                        for related_table in config_data.related_tables:
+                            related_data_type = f"{args.data_type}_{related_table}"
+                            related_stats = checkpoint_manager.get_progress_summary(
+                                related_data_type
+                            )
+                            # If no checkpoint stats exist for related table, assume outstanding data
+                            if not related_stats:
+                                has_outstanding_data = True
+                                logger.info(
+                                    f"No checkpoint records found for related table {related_data_type} - assuming outstanding data needs processing"
+                                )
+                                break
+                            else:
+                                for _stage, phases in related_stats.items():
+                                    for _phase, stats in phases.items():
+                                        processed = stats.get("processed", 0)
+                                        total = stats.get("total", 0)
+                                        if total > 0 and processed < total:
+                                            has_outstanding_data = True
+                                            break
+                                    if has_outstanding_data:
+                                        break
+                            if has_outstanding_data:
+                                break
+                except Exception as e:
+                    logger.debug(f"Could not check related table checkpoints: {e}")
+
+            if not has_outstanding_data:
+                logger.info(
+                    "No outstanding data to process - skipping production schema rebuild"
+                )
+                return
+
             from pathlib import Path
 
             # Resolve SQL file path based on data source
@@ -395,7 +493,9 @@ async def command_process(args) -> int:
                 )
                 return
 
-            logger.info(f"Rebuilding production schema using: {sql_path}")
+            logger.info(
+                f"Found outstanding data to process - rebuilding production schema using: {sql_path}"
+            )
             db_pool = await coordinator.db_manager.get_pool()
             async with db_pool.acquire() as conn:
                 sql_text = sql_path.read_text()
@@ -404,9 +504,17 @@ async def command_process(args) -> int:
 
         # Execute pipeline
         await _maybe_rebuild_prod_schema()
+
+        # For related data types, pass related table info
+        if main_data_type and related_table:
+            kwargs["related_table"] = related_table
+            logger.info(
+                f"Processing only related table '{related_table}' for data type '{main_data_type}'"
+            )
+
         results = await execute_streamlined_pipeline(
             coordinator=coordinator,
-            data_type=args.data_type,
+            data_type=pipeline_data_type,
             phases=args.phases,
             from_date=args.from_date,
             to_date=args.to_date,
@@ -854,16 +962,43 @@ async def command_clear_checkpoints(args) -> int:
             db_path=config.infrastructure.checkpoint_db_path
         )
 
+        # Check if this is a related data type (e.g., congressionalreports_members)
+        main_data_type = None
+        related_table = None
+        if "_" in args.data_type:
+            parts = args.data_type.split("_", 1)
+            if len(parts) == 2:
+                potential_main, potential_related = parts
+                # Check if this matches the pattern of main_data_type_related_table
+                registry = ConsolidatedRegistry()
+                try:
+                    config_data = registry.get_data_type_config(potential_main)
+                    if (
+                        config_data
+                        and hasattr(config_data, "related_tables")
+                        and potential_related in config_data.related_tables
+                    ):
+                        main_data_type = potential_main
+                        related_table = potential_related
+                        logger.info(
+                            f"Detected related data type: {main_data_type} -> {related_table}"
+                        )
+                except Exception as e:
+                    logger.debug(
+                        f"Could not determine if {args.data_type} is a related data type: {e}"
+                    )
+
         # Show what will be cleared
         logger.info(f"\n{'=' * 60}")
         logger.info(f"CLEAR CHECKPOINTS for {args.data_type}")
         logger.info(f"{'=' * 60}")
 
-        # Get current checkpoint status for main data type
-        current_stats = checkpoint_manager.get_progress_summary(args.data_type)
+        # Get current checkpoint status for the data type we're clearing
+        data_type_to_check = main_data_type if main_data_type else args.data_type
+        current_stats = checkpoint_manager.get_progress_summary(data_type_to_check)
 
         if current_stats:
-            logger.info("\nCurrent checkpoint status for main data type:")
+            logger.info(f"\nCurrent checkpoint status for {data_type_to_check}:")
             for stage, phases in current_stats.items():
                 for phase, stats in phases.items():
                     processed = stats.get("processed", 0)
@@ -876,12 +1011,12 @@ async def command_clear_checkpoints(args) -> int:
         related_data_types = []
         try:
             registry = ConsolidatedRegistry()
-            config_data = registry.get_data_type_config(args.data_type)
+            config_data = registry.get_data_type_config(data_type_to_check)
 
             # Check for related tables from config
             if config_data and hasattr(config_data, "related_tables"):
-                for related_table in config_data.related_tables:
-                    related_data_type = f"{args.data_type}_{related_table}"
+                for related_table_name in config_data.related_tables:
+                    related_data_type = f"{data_type_to_check}_{related_table_name}"
                     related_data_types.append(related_data_type)
 
                     # Check if this related table has checkpoints
@@ -901,7 +1036,7 @@ async def command_clear_checkpoints(args) -> int:
                                 )
 
                     # Also check for granule data
-                    prefixed_granule = f"{args.data_type}_granules"
+                    prefixed_granule = f"{data_type_to_check}_granules"
                     prefixed_stats = checkpoint_manager.get_progress_summary(
                         prefixed_granule
                     )
@@ -981,7 +1116,129 @@ async def command_clear_checkpoints(args) -> int:
         else:
             logger.info("All phases will be cleared")
 
-        # Confirmation prompt
+        # Handle related data type clearing first
+        if main_data_type and related_table:
+            logger.info(f"Clearing checkpoints for related data type: {args.data_type}")
+            logger.info(
+                f"Main data type: {main_data_type}, Related table: {related_table}"
+            )
+
+            # Confirmation prompt for related data type
+            if not args.confirm:
+                response = input(
+                    f"\nAre you sure you want to clear checkpoints for {args.data_type}? (y/N): "
+                )
+                if response.lower() not in ["y", "yes"]:
+                    logger.info("Operation cancelled")
+                    return 0
+
+            # Convert phases to the format expected by the checkpoint manager
+            phases_to_clear = []
+            if args.phases:
+                phase_map = {
+                    "list_items": (
+                        ProcessingStage.FETCHING,
+                        FetchingPhase.LIST_ITEMS.value,
+                    ),
+                    "full_data": (
+                        ProcessingStage.FETCHING,
+                        FetchingPhase.FULL_DATA.value,
+                    ),
+                    "related_data": (
+                        ProcessingStage.FETCHING,
+                        FetchingPhase.RELATED_DATA.value,
+                    ),
+                    "full_related_data": (
+                        ProcessingStage.FETCHING,
+                        FetchingPhase.FULL_RELATED_DATA.value,
+                    ),
+                    "jsonb_to_staging": (
+                        ProcessingStage.STAGING,
+                        StagingPhase.JSONB_TO_STAGING.value,
+                    ),
+                    "extract_lists": (
+                        ProcessingStage.STAGING,
+                        StagingPhase.EXTRACT_LISTS.value,
+                    ),
+                    "validate_staging": (
+                        ProcessingStage.STAGING,
+                        StagingPhase.VALIDATE_STAGING.value,
+                    ),
+                    "apply_rules": (
+                        ProcessingStage.CLEANING,
+                        CleaningPhase.APPLY_RULES.value,
+                    ),
+                    "fetching": "fetching_all",
+                    "staging": "staging_all",
+                    "cleaning": "cleaning_all",
+                }
+
+                for phase_name in args.phases:
+                    if phase_name in phase_map:
+                        phase_info = phase_map[phase_name]
+                        if isinstance(phase_info, tuple):
+                            phases_to_clear.append(phase_info)
+                        elif phase_info == "fetching_all":
+                            phases_to_clear.extend(
+                                [
+                                    (
+                                        ProcessingStage.FETCHING,
+                                        FetchingPhase.LIST_ITEMS.value,
+                                    ),
+                                    (
+                                        ProcessingStage.FETCHING,
+                                        FetchingPhase.FULL_DATA.value,
+                                    ),
+                                    (
+                                        ProcessingStage.FETCHING,
+                                        FetchingPhase.RELATED_DATA.value,
+                                    ),
+                                    (
+                                        ProcessingStage.FETCHING,
+                                        FetchingPhase.FULL_RELATED_DATA.value,
+                                    ),
+                                ]
+                            )
+                        elif phase_info == "staging_all":
+                            phases_to_clear.extend(
+                                [
+                                    (
+                                        ProcessingStage.STAGING,
+                                        StagingPhase.JSONB_TO_STAGING.value,
+                                    ),
+                                    (
+                                        ProcessingStage.STAGING,
+                                        StagingPhase.EXTRACT_LISTS.value,
+                                    ),
+                                    (
+                                        ProcessingStage.STAGING,
+                                        StagingPhase.VALIDATE_STAGING.value,
+                                    ),
+                                ]
+                            )
+                        elif phase_info == "cleaning_all":
+                            phases_to_clear.extend(
+                                [
+                                    (
+                                        ProcessingStage.CLEANING,
+                                        CleaningPhase.APPLY_RULES.value,
+                                    ),
+                                ]
+                            )
+
+            # Clear the related data type checkpoints
+            cleared_count = checkpoint_manager.clear_related_data_type_checkpoints(
+                main_data_type,
+                args.data_type,
+                phases_to_clear if phases_to_clear else None,
+            )
+
+            logger.info(
+                f"✓ Cleared {cleared_count} checkpoints for related data type {args.data_type}"
+            )
+            return 0
+
+        # Confirmation prompt for main data type
         if not args.confirm:
             if related_data_types:
                 logger.info(
@@ -994,9 +1251,6 @@ async def command_clear_checkpoints(args) -> int:
             if response.lower() not in ["y", "yes"]:
                 logger.info("Operation cancelled")
                 return 0
-
-        # Clear checkpoints
-        cleared_count = 0
 
         # Function to clear checkpoints for a data type
         def clear_data_type_checkpoints(data_type: str) -> int:
@@ -1074,7 +1328,7 @@ async def command_clear_checkpoints(args) -> int:
             return local_cleared
 
         # Clear main data type checkpoints
-        cleared_count += clear_data_type_checkpoints(args.data_type)
+        cleared_count = clear_data_type_checkpoints(args.data_type)
 
         # Clear related table checkpoints
         for related_data_type in related_data_types:

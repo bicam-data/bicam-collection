@@ -22,6 +22,14 @@ from .hierarchical_checkpoint_system import (
     StagingCheckpoint,
     StagingPhase,
 )
+from .manual_fixes import (
+    COMMITTEE_FIXES,
+    CONGRESSIONALREPORT_BIOGUIDE_FIXES,
+    HEARING_BIOGUIDE_FIXES,
+    HEARING_PACKAGE_JACKETNUMBERS,
+    PRINT_PACKAGE_JACKETNUMBERS,
+    PRINT_PACKAGE_PART_FIXES,
+)
 from .run_tracking import RunContext, RunManager, get_run_manager, init_run_manager
 from .schema import DataTypeSchema, SchemaManager, ScrapingSchema, get_schema
 
@@ -54,4 +62,11 @@ __all__ = [
     "DataTypeConfig",
     "ProcessingConfig",
     "SchemaConfig",
+    # Manual fixes
+    "CONGRESSIONALREPORT_BIOGUIDE_FIXES",
+    "HEARING_BIOGUIDE_FIXES",
+    "COMMITTEE_FIXES",
+    "HEARING_PACKAGE_JACKETNUMBERS",
+    "PRINT_PACKAGE_JACKETNUMBERS",
+    "PRINT_PACKAGE_PART_FIXES",
 ]

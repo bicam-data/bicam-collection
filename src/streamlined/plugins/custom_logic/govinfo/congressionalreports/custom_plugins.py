@@ -23,6 +23,10 @@ import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from streamlined.libs import (
+    CONGRESSIONALREPORT_BIOGUIDE_FIXES,
+)
+from streamlined.libs.manual_fixes import CONGRESSIONALREPORT_ID_FIXES
 from streamlined.plugins.base import BaseCleanerLogic
 
 logger = logging.getLogger(__name__)
@@ -113,13 +117,13 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
     def _build_report_identity(
         self, cleaned: dict[str, Any]
-    ) -> tuple[str, str | None, str | None, int, str, str, str]:
+    ) -> tuple[str, str | None, str | None, int, str, str, str, str]:
         """
         Build canonical identity for congressional report rows (packages or granules).
 
         Returns tuple:
         - report_id
-        - parent_report_id (nullable)
+        - report_set_id (nullable)
         - granule_id (nullable)
         - part_number (int)
         - report_type (str)
@@ -132,80 +136,55 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         Parent part for granules is derived from documentpart or packageid; else 1.
         """
         # Support multiple inbound shapes for ids
-        packageid = str(cleaned.get("packageid") or cleaned.get("package_id"))
-        granuleid = cleaned.get("granuleid") or cleaned.get("granule_id")
+        raw_id = str(
+            cleaned.get("packageid")
+            or cleaned.get("package_id")
+            or cleaned.get("granuleid")
+            or cleaned.get("granule_id")
+        )
+        # A row is a package if:
+        # 1. No granuleid field exists, OR
+        # 2. granuleid equals the packageid (same record)
+        # 3. But if we have a partnumber field, it's likely a granule even if granuleid is missing
+        is_package_row = (
+            not cleaned.get("granuleid") and not cleaned.get("partnumber")
+        ) or cleaned.get("granuleid") == raw_id
 
-        report_type = cleaned.get("documenttype")
-        report_type = report_type.lower() if isinstance(report_type, str) else None
-        report_number = cleaned.get("documentnumber") or None
-        congress = str(cleaned.get("congress") or "") or None
+        if raw_id in CONGRESSIONALREPORT_ID_FIXES:
+            manual_val = CONGRESSIONALREPORT_ID_FIXES.get(raw_id)
+            report_type = manual_val.get("report_type")
+            report_number = manual_val.get("report_number")
+            congress = manual_val.get("congress")
+            part_number = manual_val.get("part_number")
+        else:
+            report_type = cleaned.get("documenttype")
+            report_type = report_type.lower() if isinstance(report_type, str) else None
+            part_number = cleaned.get("documentpart") or 0
+            report_number = cleaned.get("documentnumber") or None
+            congress = str(cleaned.get("congress") or "") or None
 
         if not all([report_type, report_number, congress]):
-            # Rare fallback: J6 package-only
-            if "J6" in (packageid or ""):
-                report_type = "hrpt"
-                report_number = "663"
-                congress = "117"
-            else:
-                raise ValueError(
-                    f"Invalid report_id inputs: report_type={report_type}, report_number={report_number}, congress={congress}. Record is {cleaned}"
-                )
+            raise ValueError(
+                f"Invalid report_id inputs: report_type={report_type}, report_number={report_number}, congress={congress}. Record is {cleaned}"
+            )
 
-        if granuleid:
-            part_field = cleaned.get("partnumber")
+        if not is_package_row:
+            part_field = cleaned.get("partnumber") or cleaned.get("documentpart")
             if part_field is None:
-                part_number = self.parse_part_from_fields(cleaned) or 1
+                # Parse from package ID or other fields
+                parsed_part = self.parse_part_from_fields(cleaned)
+                part_number = parsed_part if parsed_part is not None else part_number
+            elif cleaned.get("packageid") == cleaned.get("granuleid"):
+                part_number = 0
             else:
                 part_str = str(part_field).strip()
                 part_number = (
                     int(part_str)
                     if part_str.isdigit()
-                    else (self.roman_to_int(part_str) or 1)
+                    else (self.roman_to_int(part_str) or 0)
                 )
 
-            # Parent part number from documentpart or packageid; else default 1
-            parent_part_number: int | None = None
-            doc_part_field = cleaned.get("documentpart")
-            if doc_part_field:
-                doc_part_str = str(doc_part_field).strip()
-                if doc_part_str.isdigit():
-                    doc_part_val = int(doc_part_str)
-                else:
-                    doc_part_val = self.roman_to_int(doc_part_str) or None
-                if doc_part_val is not None and doc_part_val != part_number:
-                    parent_part_number = doc_part_val
-            if parent_part_number is None:
-                pkg_lower = (packageid or "").lower()
-                m = re.search(
-                    r"(?:^|[-_.])pt([ivx]+|\d+)(?:$|[-_.])", pkg_lower, re.IGNORECASE
-                )
-                if m:
-                    tok = m.group(1)
-                    parent_part_number = (
-                        int(tok) if tok.isdigit() else (self.roman_to_int(tok) or None)
-                    )
-                if parent_part_number is None:
-                    m = re.search(
-                        r"(?:^|[-_.])vol(?:ume)?([ivx]+|\d+)(?:$|[-_.])",
-                        pkg_lower,
-                        re.IGNORECASE,
-                    )
-                    if m:
-                        tok = m.group(1)
-                        parent_part_number = (
-                            int(tok)
-                            if tok.isdigit()
-                            else (self.roman_to_int(tok) or None)
-                        )
-            if parent_part_number is None:
-                parent_part_number = 1
-
-            parent_report_id = (
-                f"{report_type}{report_number}-{parent_part_number}-{congress}"
-            )
-        else:
-            part_number = self.parse_part_from_fields(cleaned) or 1
-            parent_report_id = None
+        report_set_id = f"{report_type}{report_number}-{congress}"
 
         # Append errata suffix to the part token when applicable so errata sorts
         # immediately after the main part (e.g., "2" < "2e" < "3").
@@ -213,17 +192,21 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         # Use placeholder 'x' when package shows trailing numeric tokens but no explicit part in fields
         part_token_base: str
-        if self._should_use_placeholder_part(cleaned, packageid):
+        if self._should_use_placeholder_part(cleaned):
             part_token_base = "x"
         else:
             part_token_base = str(part_number)
 
         part_token = f"{part_token_base}{'e' if is_errata else ''}"
         report_id = f"{report_type}{report_number}-{part_token}-{congress}"
-        granule_id = str(granuleid) if granuleid else None
+        granule_id = (
+            str(cleaned.get("granuleid") or cleaned.get("granule_id"))
+            if not is_package_row
+            else None
+        )
         return (
             report_id,
-            parent_report_id,
+            report_set_id,
             granule_id,
             part_number,
             report_type,
@@ -231,18 +214,30 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             congress,
         )
 
-    def _should_use_placeholder_part(
-        self, cleaned: dict[str, Any], packageid: str | None
-    ) -> bool:
-        """Generalized check for when to emit placeholder part 'x'.
+    def _should_use_placeholder_part(self, cleaned: dict[str, Any]) -> bool:
+        """Check for when to emit placeholder part 'x'.
 
-        True when there are no explicit part indicators (heading, partnumber/documentpart, volumenumber)
-        and the package id ends with numeric token(s) like "...-4" or "...-4-3".
+        Only use placeholder when we have a hierarchical part structure where we don't know
+        the total number of parts. This happens when:
+        1. We have multiple numeric tokens in the package ID (indicating hierarchical structure)
+        2. We don't have explicit part indicators in the fields
+        3. The granule_id is different from package_id (indicating this is a granule, not a package)
+
+        If granule_id equals package_id, we should use the documentpart value, parsed part, or 0.
         """
         try:
-            pkg = str(
-                packageid or cleaned.get("packageid") or cleaned.get("package_id") or ""
-            )
+            pkg = str(cleaned.get("packageid") or cleaned.get("package_id") or "")
+            granule_id = cleaned.get("granuleid") or cleaned.get("granule_id")
+            package_id = cleaned.get("packageid") or cleaned.get("package_id")
+
+            # If granule_id equals package_id, this is a package-level record, don't use placeholder
+            if granule_id and package_id and str(granule_id) == str(package_id):
+                return False
+
+            # If we have a partnumber field but no granule_id, this is likely a granule
+            # that should use its actual part number, not a placeholder
+            if not granule_id and cleaned.get("partnumber"):
+                return False
             heading = cleaned.get("heading")
             partnumber = cleaned.get("partnumber") or cleaned.get("documentpart")
             volumenumber = cleaned.get("volumenumber")
@@ -256,7 +251,9 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             if parsed_part > 1:
                 return False
 
-            return bool(re.search(r"\d+(?:-\d+)?$", pkg))
+            # Only use placeholder for hierarchical structures (multiple numeric tokens)
+            # Pattern matches things like "...-4-3" but not "...-4" (single token)
+            return bool(re.search(r"\d+-\d+(?:-\d+)*$", pkg))
         except Exception:
             return False
 
@@ -1035,12 +1032,12 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
 
         (
             report_id,
-            parent_report_id,
-            _,
-            _,
-            _,
-            _,
-            _,
+            report_set_id,
+            granule_id,
+            part_number,
+            report_type,
+            report_number,
+            congress,
         ) = self._build_report_identity(cleaned)
 
         # Compute errata flag using shared heuristics
@@ -1050,14 +1047,17 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         filtered_cleaned = {
             "package_id": str(cleaned.get("packageid", "ID_ERROR")),
             "report_id": str(report_id),
-            "granule_id": str(cleaned.get("granuleid"))
+            "granule_id": str(cleaned.get("granuleid", granule_id))
             if cleaned.get("granuleid")
             else None,
-            "parent_report_id": parent_report_id,
+            "report_set_id": report_set_id,
+            "report_type": report_type,
+            "report_number": self.safe_int(report_number),
+            "part_number": self.safe_int(part_number),
             "title": cleaned.get("title", None),
             "subtitle": cleaned.get("subtitle", None),
             "chamber": self.standardize_chamber(cleaned.get("chamber", None)),
-            "congress": self.safe_int(cleaned.get("congress", None)),
+            "congress": self.safe_int(cleaned.get("congress", congress)),
             "session": self.safe_int(cleaned.get("session", None)),
             "pages": self.safe_int(cleaned.get("pages", None)),
             "is_errata": errata_detected,
@@ -1179,229 +1179,19 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         """
 
         cleaned = record_data.copy()
-
-        incorrect_granules = [
-            "CRPT-104hrpt201",
-            "CRPT-104hrpt424",
-            "CRPT-104hrpt553",
-            "CRPT-104hrpt565",
-            "CRPT-104hrpt628",
-            "CRPT-104hrpt633",
-            "CRPT-104hrpt704",
-            "CRPT-104hrpt744",
-            "CRPT-104hrpt803",
-            "CRPT-104hrpt842",
-            "CRPT-104hrpt874",
-            "CRPT-104hrpt876",
-            "CRPT-104hrpt886",
-            "CRPT-104hrpt887",
-            "CRPT-105hrpt169",
-            "CRPT-105hrpt19",
-            "CRPT-105hrpt622",
-            "CRPT-105hrpt637",
-            "CRPT-105hrpt743",
-            "CRPT-105hrpt840",
-            "CRPT-106hrpt1040",
-            "CRPT-106hrpt1047",
-            "CRPT-106hrpt1055",
-            "CRPT-106hrpt198-pt1",
-            "CRPT-106hrpt407",
-            "CRPT-106hrpt482",
-            "CRPT-106srpt362",
-            "CRPT-106srpt363",
-            "CRPT-106srpt426",
-            "CRPT-107hrpt486",
-            "CRPT-107hrpt793",
-            "CRPT-107hrpt800",
-            "CRPT-107srpt2",
-            "CRPT-108hrpt799",
-            "CRPT-108hrpt806",
-            "CRPT-108hrpt815",
-            "CRPT-109hrpt163",
-            "CRPT-109hrpt352",
-            "CRPT-109hrpt469",
-            "CRPT-109hrpt733",
-            "CRPT-109hrpt734",
-            "CRPT-109hrpt739",
-            "CRPT-109hrpt747",
-            "CRPT-109hrpt748",
-            "CRPT-110hrpt144",
-            "CRPT-110hrpt186",
-            "CRPT-110hrpt355",
-            "CRPT-110hrpt573",
-            "CRPT-110hrpt73",
-            "CRPT-110hrpt924",
-            "CRPT-110hrpt938",
-            "CRPT-110hrpt940",
-            "CRPT-111hrpt143",
-            "CRPT-111hrpt161",
-            "CRPT-111hrpt194",
-            "CRPT-111hrpt222",
-            "CRPT-111hrpt577",
-            "CRPT-111hrpt63",
-            "CRPT-111hrpt696",
-            "CRPT-111hrpt699",
-            "CRPT-111hrpt700",
-            "CRPT-111hrpt704",
-            "CRPT-111hrpt707",
-            "CRPT-111hrpt710",
-            "CRPT-111hrpt711",
-            "CRPT-111hrpt715",
-            "CRPT-112hrpt104",
-            "CRPT-112hrpt119",
-            "CRPT-112hrpt12",
-            "CRPT-112hrpt120",
-            "CRPT-112hrpt132",
-            "CRPT-112hrpt145",
-            "CRPT-112hrpt259",
-            "CRPT-112hrpt341",
-            "CRPT-112hrpt354",
-            "CRPT-112hrpt470",
-            "CRPT-112hrpt489",
-            "CRPT-112hrpt570",
-            "CRPT-112hrpt631",
-            "CRPT-112hrpt662",
-            "CRPT-112hrpt706",
-            "CRPT-112hrpt739",
-            "CRPT-112hrpt741",
-            "CRPT-112hrpt748",
-            "CRPT-112hrpt751",
-            "CRPT-112hrpt96",
-            "CRPT-113hrpt143",
-            "CRPT-113hrpt302",
-            "CRPT-113hrpt315",
-            "CRPT-113hrpt323",
-            "CRPT-113hrpt425",
-            "CRPT-113hrpt454",
-            "CRPT-113hrpt474",
-            "CRPT-113hrpt681",
-            "CRPT-113hrpt723",
-            "CRPT-113hrpt724",
-            "CRPT-113hrpt96",
-            "CRPT-114hrpt118",
-            "CRPT-114hrpt155",
-            "CRPT-114hrpt198",
-            "CRPT-114hrpt223",
-            "CRPT-114hrpt230",
-            "CRPT-114hrpt884",
-            "CRPT-114hrpt887",
-            "CRPT-114hrpt902",
-            "CRPT-114hrpt904",
-            "CRPT-114hrpt910",
-            "CRPT-114hrpt97",
-            "CRPT-115hrpt1041",
-            "CRPT-115hrpt1042",
-            "CRPT-115hrpt1080",
-            "CRPT-115hrpt1114",
-            "CRPT-115hrpt1116-pt1",
-            "CRPT-115hrpt1117",
-            "CRPT-115hrpt1118",
-            "CRPT-115hrpt1119",
-            "CRPT-115hrpt1121",
-            "CRPT-115hrpt1122",
-            "CRPT-115hrpt1129-pt1",
-            "CRPT-115hrpt626-pt1",
-            "CRPT-115hrpt847",
-            "CRPT-115hrpt851",
-            "CRPT-115hrpt898",
-            "CRPT-116hrpt107",
-            "CRPT-116hrpt446",
-            "CRPT-116hrpt703",
-            "CRPT-116hrpt709",
-            "CRPT-116hrpt711",
-            "CRPT-116hrpt714",
-            "CRPT-116hrpt716",
-            "CRPT-116hrpt719",
-            "CRPT-116hrpt720",
-            "CRPT-117hrpt691",
-            "CRPT-117hrpt700",
-            "CRPT-117hrpt705",
-            "CRPT-117hrpt706",
-            "CRPT-117hrpt707",
-            "CRPT-118hrpt551",
-            "CRPT-118hrpt965",
-            "CRPT-118hrpt969",
-            "CRPT-118hrpt979",
-            "CRPT-111hrpt715",
-            "CRPT-117hrpt117"
-        ]
-
-        bioguide_id_fixes = {
-            "Mr. Bishop": "B001250",  # found via membership in committee on rules in 109th congress
-            "Mr. Bliley": "B000556",
-            "Mr. Boehlert": "B000586",
-            "Mr. Bonner": "B001244",
-            "Ms. Sanchez": "S001156",  # found via membership in committee on ethics in 112th congress
-            "Mr. Brady": "B000755",
-            "Mr. Burgess": "B001248",
-            "Mr. Camp": "C000071",
-            "Mr. Clinger": "C000523",
-            "Mr. Collins": "C001093",
-            "Mr. Conaway": "C001062",
-            "Mr. Davis": "D000136",
-            "Mr. Davis of Virginia": "D000136",
-            "Mr. DeFazio": "D000191",
-            "Mr. Delahunt": "D000210",
-            "Mr. Dent": "D000604",
-            "Mr. Deutch": "D000610",
-            "Mr. Marchant": "M001158",
-            "Mr. Dreier": "D000492",
-            "Mr. Edwards": "E000063",
-            "Mr. Frelinghuysen": "F000372",
-            "Mr. Goodling": "G000291",
-            "Mr. Gowdy": "G000566",
-            "Mr. Green": "G000410",
-            "Mr. Hastings": "H000329",
-            "Mr. Gross": "G000495",
-            "Mr. Hansen": "H000172",
-            "Mr. Hefley": "H000444",
-            "Mr. Mollohan": "M000844",
-            "Mr. Hensarling": "H001036",
-            "Mr. Hyde": "H001022",
-            "Mr. Johnson": "J000126",
-            "Mr. Kasich of Ohio": "K000016",
-            "Mr. Kline": "K000363",
-            "Mr. Lewis": "L000274",
-            "Mr. McHenry": "M001156",
-            "Mr. Miller": "M001144",
-            "Mr. Oberstar": "O000006",
-            "Mr. Obey": "O000007",
-            "Mr. Peterson": "P000258",
-            "Mr. Rogers": "R000395",
-            "Mr. Ryan": "R000570",
-            "Mr. Scott": "S000185",
-            "Mr. Scott of Georgia": "S001157",
-            "Mrs. Johnson": "J000163",
-            "Mr. Skelton": "S000465",
-            "Mrs. Lowey": "L000480",
-            "Mr. Smith": "S000606",
-            "Mr. Smith of Texas": "S000583",
-            "Mr. Solomon": "S000675",
-            "Mr. Spratt of South Carolina": "S000749",
-            "Mrs. Rodgers of Washington": "M001159",
-            "Mr. Thompson": "T000193",
-            "Mr. Walker": "W000068",
-            "Mr. Young": "Y000031",
-            "Mr. Young of Florida": "Y000031",
-            "Ms. Brooks": "B001284",
-            "Ms. Greene of Utah": "G000408",
-            "Ms. Lofgren": "L000397",
-            "Ms. Wild": "W000826",
-            "Mr. Guest": "G000591",
-            "Brady, Robert A.": "B001227",
-            "Neguse, Joe": "N000191",
-        }
-
-        if cleaned.get("granuleid") in incorrect_granules:
+        if cleaned.get("bioguideid") is None or cleaned.get("bioguideid") == "":
             if (
-                cleaned.get("parsed", "") in bioguide_id_fixes
+                cleaned.get("parsed", "") in CONGRESSIONALREPORT_BIOGUIDE_FIXES
                 and cleaned.get("bioguideid", None) is None
-            ):
-                cleaned["bioguideid"] = bioguide_id_fixes[cleaned.get("parsed", "")]
-                logger.info(
-                    f"Bioguide ID fixed: {cleaned.get('parsed', '')} -> {cleaned.get('bioguideid', 'ID_ERROR')}"
-                )
-            elif cleaned.get("bioguideid", None) is None:
+                or cleaned.get("bioguideid") == ""
+                ):
+                    cleaned["bioguideid"] = CONGRESSIONALREPORT_BIOGUIDE_FIXES.get(
+                        cleaned.get("parsed", "")
+                    )
+                    logger.info(
+                        f"Bioguide ID fixed: {cleaned.get('parsed', '')} -> {cleaned.get('bioguideid', 'ID_ERROR')}"
+                    )
+            else:
                 cleaned["bioguideid"] = "ID_ERROR"
                 raise ValueError(
                     f"Bioguide ID not found for {cleaned.get('package_id', 'ID_ERROR')}"
@@ -1422,9 +1212,7 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                 else None
             ),
             "gpoid": (
-                cleaned.get("gpoid")
-                if cleaned.get("gpoid", None) != ""
-                else None
+                cleaned.get("gpoid") if cleaned.get("gpoid", None) != "" else None
             ),
         }
 
@@ -1946,11 +1734,18 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         try:
             async with self.db_pool.acquire() as conn, conn.transaction():
                 # Fetch all production rows with placeholder 'x' (including errata 'xe')
+                # Only process records where granule_id != package_id (hierarchical structures)
+                # or where granule_id is NULL but we have part numbers (indicating granules)
                 prod_rows = await conn.fetch(
                     f"""
-                    SELECT package_id, report_id, is_errata
-                    FROM {self.production_schema}.congressionalreports
-                    WHERE report_id LIKE '%-x-%' OR report_id LIKE '%-xe-%'
+                    SELECT cr.package_id, cr.report_id, cr.is_errata, cr.granule_id, cr.part_number
+                    FROM {self.production_schema}.congressionalreports cr
+                    WHERE (cr.report_id LIKE '%-x-%' OR cr.report_id LIKE '%-xe-%')
+                    AND (
+                        cr.granule_id IS NULL
+                        OR cr.granule_id != cr.package_id
+                        OR (cr.granule_id IS NULL AND cr.part_number > 0)
+                    )
                     """
                 )
 
@@ -2027,7 +1822,64 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                                 rows_with_order.append((parse_order(str(pkg)), r))
                             rows_with_order.sort(key=lambda x: x[0])
 
-                            # Assign parts sequentially starting at 1
+                            # Check if this is a single-row group with existing part number
+                            if len(rows_with_order) == 1:
+                                (_ord, r) = rows_with_order[0]
+                                package_id = r["package_id"]
+                                old_report_id = r["report_id"]
+                                existing_part_number = r.get("part_number", 0)
+
+                                # If we have a valid existing part number (including 0), use it
+                                if (
+                                    existing_part_number is not None
+                                    and existing_part_number >= 0
+                                ):
+                                    m = re.match(
+                                        r"^([a-z]+)(\d+)-([^-]+)-(\d+)$",
+                                        str(old_report_id),
+                                        re.IGNORECASE,
+                                    )
+                                    if m:
+                                        rtype, rnum, part_comp, cong = (
+                                            m.group(1).lower(),
+                                            m.group(2),
+                                            m.group(3),
+                                            m.group(4),
+                                        )
+
+                                        is_errata_flag = (
+                                            bool(r.get("is_errata"))
+                                            if r.get("is_errata") is not None
+                                            else False
+                                        )
+                                        has_errata_suffix = (
+                                            part_comp.endswith("e") or is_errata_flag
+                                        )
+                                        new_part_token = f"{existing_part_number}{'e' if has_errata_suffix else ''}"
+                                        new_report_id = (
+                                            f"{rtype}{rnum}-{new_part_token}-{cong}"
+                                        )
+
+                                        if new_report_id != old_report_id:
+                                            main_table_updates.append(
+                                                (
+                                                    new_report_id,
+                                                    existing_part_number,
+                                                    package_id,
+                                                )
+                                            )
+                                            committees_updates.append(
+                                                (new_report_id, package_id)
+                                            )
+                                            members_updates.append(
+                                                (new_report_id, package_id)
+                                            )
+                                            serialset_updates.append(
+                                                (new_report_id, package_id)
+                                            )
+                                    continue
+
+                            # Assign parts sequentially starting at 1 for multi-row groups or single rows with no valid part number
                             for idx, (_ord, r) in enumerate(rows_with_order, start=1):
                                 package_id = r["package_id"]
                                 old_report_id = r["report_id"]
@@ -2062,8 +1914,13 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                                 if new_report_id == old_report_id:
                                     continue
 
+                                # Use the new part number (idx) for the part_number field
+                                new_part_number = idx
+
                                 # Collect updates for batch processing
-                                main_table_updates.append((new_report_id, package_id))
+                                main_table_updates.append(
+                                    (new_report_id, new_part_number, package_id)
+                                )
                                 committees_updates.append((new_report_id, package_id))
                                 members_updates.append((new_report_id, package_id))
                                 serialset_updates.append((new_report_id, package_id))
@@ -2083,8 +1940,8 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
                                 await conn.executemany(
                                     f"""
                                     UPDATE {self.production_schema}.congressionalreports
-                                    SET report_id = $1
-                                    WHERE package_id = $2
+                                    SET report_id = $1, part_number = $2
+                                    WHERE package_id = $3
                                     """,
                                     batch,
                                 )
@@ -2206,5 +2063,65 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             )
             results["status"] = "partial_failure"
         logger.info("Completed serialset committees post-processing")
+
+
+        # ? Operation 7: errata backfill for congressional reports
+        logger.info(
+            "Starting errata flag backfill for congressional reports from title/granule tokens"
+        )
+        try:
+            async with self.db_pool.acquire() as conn, conn.transaction():
+                update_sql = f"""
+                    WITH marks AS (
+                        SELECT cr.report_id
+                        FROM {self.production_schema}.congressionalreports cr
+                        WHERE COALESCE(cr.is_errata, FALSE) = FALSE
+                            AND (
+                                cr.title ILIKE '%errata%'
+                            AND COALESCE(cr.title, '') NOT ILIKE '%addendum%'
+                            )
+                    )
+                    UPDATE {self.production_schema}.congressionalreports cr
+                    SET is_errata = TRUE,
+                        report_id = (
+                            split_part(cr.report_id, '-', 1) || '-' ||
+                            CASE
+                                WHEN split_part(cr.report_id, '-', 2) LIKE '%e' THEN split_part(cr.report_id, '-', 2)
+                                ELSE split_part(cr.report_id, '-', 2) || 'e'
+                            END || '-' ||
+                            split_part(cr.report_id, '-', 3)
+                        )
+                    FROM marks m
+                    WHERE cr.report_id = m.report_id
+                """
+                result = await conn.execute(update_sql)
+                affected = 0
+                try:
+                    parts = result.split()
+                    if len(parts) == 2:
+                        affected = int(parts[1])
+                except Exception:
+                    affected = 0
+                logger.info(f"Congressional reports errata backfill updated {affected} rows")
+                results["operations"].append(
+                    {
+                        "name": "mark_errata_from_tokens",
+                        "status": "success",
+                        "rows_affected": affected,
+                    }
+                )
+                results["rows_affected"] += affected
+        except Exception as e:
+            logger.error(f"Error backfilling congressional reports errata: {e}", exc_info=True)
+            results["operations"].append(
+                {
+                    "name": "mark_congressionalreports_errata_from_tokens",
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+            results["status"] = "partial_failure"
+
+
 
         return results

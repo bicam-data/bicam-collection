@@ -4,13 +4,15 @@ import re
 from collections import defaultdict
 
 import asyncpg
+from tqdm import tqdm
+
 from streamlined.lobbyist_matching.matcher import (
     ReferenceMatcher,
     calculate_title_similarity,
     load_corpus_bills,
 )
 from streamlined.lobbyist_matching.paragraph_processor import process_paragraphs
-from tqdm import tqdm
+from streamlined.lobbyist_matching.utils.constants import APPROPRIATIONS_KEY_WORDS
 
 """
 This module handles post-processing of bill reference matches to improve accuracy and handle edge cases.
@@ -31,41 +33,7 @@ BILL_TYPE_VARIATIONS = {
     "senate": ["s", "sres", "sconres", "sjres"],
 }
 
-# Key words for appropriations matching
-APPROPRIATIONS_KEY_WORDS = {
-    "transportation",
-    "energy",
-    "defense",
-    "health",
-    "education",
-    "labor",
-    "agriculture",
-    "commerce",
-    "justice",
-    "science",
-    "homeland",
-    "security",
-    "interior",
-    "environment",
-    "veterans",
-    "affairs",
-    "state",
-    "foreign",
-    "operations",
-    "urban",
-    "development",
-    "housing",
-    "food",
-    "drug",
-    "administration",
-    "financial",
-    "services",
-    "government",
-    "military",
-    "construction",
-    "legislative",
-    "branch",
-}
+# Using shared APPROPRIATIONS_KEY_WORDS from utils.constants
 
 
 async def insert_or_update_reference_match(

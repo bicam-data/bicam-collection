@@ -5,7 +5,7 @@ import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -95,8 +95,8 @@ class RunRecord:
         default_factory=list
     )  # Other run_ids this depends on
     blocked_by: list[str] = field(default_factory=list)  # Run_ids blocking this
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class RunManager:
@@ -474,7 +474,7 @@ class RunManager:
     async def start_run(self, run_id: str) -> bool:
         """Mark a run as started"""
         return await self.update_run_status(
-            run_id, RunStatus.RUNNING, started_at=datetime.now(timezone.utc)
+            run_id, RunStatus.RUNNING, started_at=datetime.now(UTC)
         )
 
     async def complete_run(
@@ -484,7 +484,7 @@ class RunManager:
         return await self.update_run_status(
             run_id,
             RunStatus.COMPLETED,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             output_summary=output_summary or {},
         )
 
@@ -493,7 +493,7 @@ class RunManager:
         return await self.update_run_status(
             run_id,
             RunStatus.FAILED,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error_message=error_message,
         )
 
@@ -519,7 +519,7 @@ class RunManager:
     def _update_run_sqlite(self, run_id: str, status: RunStatus, **kwargs) -> bool:
         """Update run in SQLite"""
         updates = ["status = ?", "updated_at = ?"]
-        values = [status.value, datetime.now(timezone.utc).isoformat()]
+        values = [status.value, datetime.now(UTC).isoformat()]
 
         for key, value in kwargs.items():
             if key in ["started_at", "completed_at"] and value:
@@ -548,7 +548,7 @@ class RunManager:
     ) -> bool:
         """Update run in PostgreSQL with robust retry logic"""
         updates = ["status = $2", "updated_at = $3"]
-        values = [run_id, status.value, datetime.now(timezone.utc)]
+        values = [run_id, status.value, datetime.now(UTC)]
         param_count = 3
 
         for key, value in kwargs.items():
@@ -644,7 +644,7 @@ class RunManager:
             """,
                 (
                     run_id,
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                     level,
                     message,
                     component,
@@ -670,7 +670,7 @@ class RunManager:
                     VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
                 run_id,
-                datetime.now(timezone.utc),
+                datetime.now(UTC),
                 level,
                 message,
                 component,
@@ -761,8 +761,8 @@ class RunManager:
         # Parse datetime fields
         started_at = None
         completed_at = None
-        created_at = datetime.now(timezone.utc)
-        updated_at = datetime.now(timezone.utc)
+        created_at = datetime.now(UTC)
+        updated_at = datetime.now(UTC)
 
         if row["started_at"]:
             started_at = (
@@ -831,7 +831,7 @@ class RunManager:
         """Acquire a named lock for coordination"""
         expires_at = None
         if expires_minutes:
-            expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+            expires_at = datetime.now(UTC) + timedelta(minutes=expires_minutes)
 
         try:
             if self.use_postgres:
@@ -843,7 +843,7 @@ class RunManager:
                     """,
                         lock_name,
                         run_id,
-                        datetime.now(timezone.utc),
+                        datetime.now(UTC),
                         expires_at,
                     )
             else:
@@ -856,7 +856,7 @@ class RunManager:
                         (
                             lock_name,
                             run_id,
-                            datetime.now(timezone.utc).isoformat(),
+                            datetime.now(UTC).isoformat(),
                             expires_at.isoformat() if expires_at else None,
                         ),
                     )

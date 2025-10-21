@@ -51,6 +51,7 @@ class CleaningPhase(str, Enum):
 
     APPLY_RULES = "apply_rules"
     VALIDATE_PRODUCTION = "validate_production"
+    POST_PROCESSING = "post_processing"
 
 
 @dataclass
@@ -556,6 +557,42 @@ class HierarchicalCheckpointManager:
         finally:
             conn.close()
 
+    def clear_related_data_type_checkpoints(
+        self,
+        main_data_type: str,
+        related_data_type: str,
+        phases_to_clear: list[tuple[str, str]] = None,
+    ) -> int:
+        """Clear checkpoints for a related data type."""
+        cleared_count = 0
+
+        # If no specific phases, clear all phases
+        if not phases_to_clear:
+            all_phases = [
+                (ProcessingStage.FETCHING, FetchingPhase.LIST_ITEMS.value),
+                (ProcessingStage.FETCHING, FetchingPhase.FULL_DATA.value),
+                (ProcessingStage.FETCHING, FetchingPhase.RELATED_DATA.value),
+                (ProcessingStage.STAGING, StagingPhase.JSONB_TO_STAGING.value),
+                (ProcessingStage.STAGING, StagingPhase.EXTRACT_LISTS.value),
+                (ProcessingStage.STAGING, StagingPhase.VALIDATE_STAGING.value),
+                (ProcessingStage.CLEANING, CleaningPhase.APPLY_RULES.value),
+                (ProcessingStage.CLEANING, CleaningPhase.VALIDATE_PRODUCTION.value),
+                (ProcessingStage.CLEANING, CleaningPhase.POST_PROCESSING.value),
+            ]
+            phases_to_clear = all_phases
+
+        for stage, phase in phases_to_clear:
+            self.reset_checkpoint(stage, phase, related_data_type, clear_processed=True)
+            cleared_count += 1
+
+        return cleared_count
+
+    def get_related_data_types(self, main_data_type: str) -> list[str]:
+        """Get list of related data types for a main data type."""
+        # This will be populated by the CLI when it reads config files
+        # For now, return empty list - the CLI will handle the logic
+        return []
+
 
 # Convenience classes for specific stages
 
@@ -732,6 +769,22 @@ class CleaningCheckpoint:
         return self.cm.is_item_processed(
             self.stage, CleaningPhase.APPLY_RULES.value, self.data_type, table_name
         )
+
+    def mark_post_processing_completed(self, run_id: str):
+        """Mark post-processing as completed."""
+        self.cm.mark_item_processed(
+            self.stage, "post_processing", self.data_type, run_id
+        )
+
+    def should_skip_post_processing(self, run_id: str) -> bool:
+        """Check if post-processing was already completed."""
+        return self.cm.is_item_processed(
+            self.stage, "post_processing", self.data_type, run_id
+        )
+
+    def get_checkpoint(self, phase: CleaningPhase) -> CheckpointState:
+        """Get checkpoint for specific phase."""
+        return self.cm.get_or_create_checkpoint(self.stage, phase.value, self.data_type)
 
     def save_checkpoint(self, checkpoint: CheckpointState):
         """Save checkpoint state."""
