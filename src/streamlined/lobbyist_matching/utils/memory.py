@@ -20,6 +20,4 @@ class MemoryMonitor:
             return True
         return False
 
-    # Backward-compatibility with existing callers
-    def check_memory(self) -> bool:
-        return self.check()
+    # Remove legacy alias; prefer check()

@@ -17,7 +17,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from streamlined.lobbyist_matching.utils.chunking import (
-    create_progressive_chunks as _create_progressive_chunks,
+    create_progressive_chunks,
 )
 from streamlined.lobbyist_matching.utils.config import resolve_db_config
 
@@ -58,11 +58,6 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
-
-
-def create_progressive_chunks(*args, **kwargs):
-    # Backward-compatibility shim delegating to shared utils
-    return _create_progressive_chunks(*args, **kwargs)
 
 
 def process_single_section_with_shorter_timeout(

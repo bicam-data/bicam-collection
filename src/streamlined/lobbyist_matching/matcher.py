@@ -27,17 +27,18 @@ from typing import NamedTuple
 import asyncpg
 import polars as pl
 from rapidfuzz import fuzz
+from tqdm import tqdm
+
 from streamlined.lobbyist_matching.section_processor import TITLE_ENDING_WORDS
 from streamlined.lobbyist_matching.utils.bill_utils import (
     standardize_law_number as _std_law_num,
 )
-from streamlined.lobbyist_matching.utils.memory import (
-    MemoryMonitor as _SharedMemoryMonitor,
-)
 from streamlined.lobbyist_matching.utils.constants import (
     APPROPRIATIONS_KEY_WORDS as _APPROPS,
 )
-from tqdm import tqdm
+from streamlined.lobbyist_matching.utils.memory import (
+    MemoryMonitor as _SharedMemoryMonitor,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -408,7 +409,7 @@ class BillTrie:
         Args:
             bill: BillInfo object to add
         """
-        if self.memory_monitor.check_memory():
+        if self.memory_monitor.check():
             logging.info("Memory threshold reached, performed cleanup")
 
         if bill.congress not in self.congress_nodes:

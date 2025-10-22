@@ -39,7 +39,8 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from streamlined.lobbyist_matching.batch_processor import BatchProcessor
-from streamlined.lobbyist_matching.db_utils import DatabaseInterface, FilingSection
+from streamlined.lobbyist_matching.db_utils import DatabaseInterface
+from streamlined.lobbyist_matching.infra.timeouts import rerun_timeouts_fixed
 from streamlined.lobbyist_matching.matcher import MatchingManager
 from streamlined.lobbyist_matching.post_processor import post_process_all
 from streamlined.lobbyist_matching.schema_setup import (
@@ -47,7 +48,6 @@ from streamlined.lobbyist_matching.schema_setup import (
     initialize_run,
 )
 from streamlined.lobbyist_matching.timeout_handler import TimeoutTracker
-from streamlined.lobbyist_matching.utils.chunking import create_progressive_chunks
 from streamlined.lobbyist_matching.utils.config import resolve_db_config
 
 matching_manager = MatchingManager()
@@ -92,7 +92,7 @@ class ResourceManager:
             yield conn
         finally:
             await pool.release(conn)
-            if self.memory_monitor.check_memory():
+            if self.memory_monitor.check():
                 gc.collect()
 
 
@@ -829,74 +829,14 @@ async def main():
                 logging.error(f"Error during matching: {str(e)}")
                 raise
         elif args.rerun_timeouts is not None:
-            # Rerun timed-out sections in chunks
             run_id = args.rerun_timeouts
-            chunk_size = args.timeout_chunk_size
-            try:
-                async with db.pool.acquire() as conn:
-                    rows = await conn.fetch(
-                        """
-                        SELECT DISTINCT filing_uuid, section_id
-                        FROM lobbied_bill_matching.timeout_sections
-                        WHERE run_id = $1
-                        ORDER BY section_id
-                        """,
-                        run_id,
-                    )
-                sections = []
-                for row in rows:
-                    # Fetch the text for each section
-                    async with db.pool.acquire() as conn:
-                        rec = await conn.fetchrow(
-                            """
-                            SELECT fs.filing_uuid, fs.section_id, fst.issue_text AS text, f.filing_year
-                            FROM relational___lda.filing_sections fs
-                            JOIN relational___lda.filing_sections_text fst ON fs.section_id = fst.section_id
-                            JOIN relational___lda.filings f ON fs.filing_uuid = f.filing_uuid
-                            WHERE fs.filing_uuid = $1 AND fs.section_id = $2
-                            """,
-                            row["filing_uuid"],
-                            row["section_id"],
-                        )
-                    if rec and rec["text"]:
-                        text = rec["text"]
-                        # Split text into chunks (shared util)
-                        for idx, chunk_text in enumerate(
-                            create_progressive_chunks(
-                                text,
-                                reprocessing_attempts=0,
-                                base_max_chunk_size=max(
-                                    1000, len(text) // max(1, chunk_size)
-                                ),
-                            )
-                        ):
-                            sections.append(
-                                FilingSection(
-                                    filing_uuid=str(rec["filing_uuid"]),
-                                    section_id=f"{rec['section_id']}-chunk-{idx}",
-                                    text=chunk_text,
-                                    filing_year=rec["filing_year"],
-                                )
-                            )
-                if not sections:
-                    logging.info("No timed-out sections found to rerun.")
-                else:
-                    timeout_tracker = TimeoutTracker(db.pool)
-                    await timeout_tracker.initialize_tracking(run_id)
-                    processor = BatchProcessor(
-                        db=db,
-                        batch_size=50,
-                        max_concurrent_batches=2,
-                        max_workers_per_batch=max(2, mp.cpu_count() // 4),
-                        timeout_tracker=timeout_tracker,
-                    )
-                    await processor.process_all_sections(run_id, sections)
-                    logging.info(
-                        f"Reprocessed {len(sections)} chunks from timed-out sections for run ID: {run_id}"
-                    )
-            except Exception as e:
-                logging.error(f"Error during rerun of timeouts: {str(e)}")
-                raise
+            await rerun_timeouts_fixed(
+                db=db,
+                run_id=run_id,
+                chunk_count=args.timeout_chunk_size,
+                batch_size=50,
+                max_concurrent_batches=2,
+            )
         else:
             year_range = None
             if args.year_start is not None and args.year_end is not None:
