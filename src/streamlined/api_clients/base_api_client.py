@@ -13,6 +13,7 @@ from typing import Any
 
 import aiohttp
 import asyncpg
+from rotisserie import AsyncKeyPool, KeyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,9 @@ class BaseAPIClient(ABC):
         base_url: str = "",
         rate_limit_per_second: float = 2.0,
         db_pool: asyncpg.Pool | None = None,
+        key_pool: AsyncKeyPool | None = None,
     ):
         self.api_keys = api_keys
-        self.current_key_index = 0
         self.session = session
         self.base_url = base_url.rstrip("/")
         self.rate_limit_per_second = rate_limit_per_second
@@ -52,7 +53,14 @@ class BaseAPIClient(ABC):
         # Session management
         self._own_session = session is None
 
-        # Rate limiting tracking for adaptive behavior
+        # Initialize rotisserie key pool if not provided
+        if key_pool is None and api_keys:
+            key_configs = [KeyConfig(f"key_{i}", key) for i, key in enumerate(api_keys)]
+            self.key_pool = AsyncKeyPool(key_configs, distribute=True)
+        else:
+            self.key_pool = key_pool
+
+        # Rate limiting tracking for adaptive behavior (kept for compatibility)
         self._recent_rate_limits = 0
         self._last_rate_limit_time = 0
 
@@ -66,14 +74,16 @@ class BaseAPIClient(ABC):
             await self.session.close()
 
     def _get_current_api_key(self) -> str:
-        """Get the current API key, rotating if needed."""
+        """Get the current API key (deprecated - use rotisserie auth context instead)."""
         if not self.api_keys:
             raise BaseAPIError("No API keys available")
-        return self.api_keys[self.current_key_index % len(self.api_keys)]
+        # Return first key as fallback - actual key rotation handled by rotisserie
+        return self.api_keys[0]
 
     def _rotate_api_key(self):
-        """Rotate to the next API key."""
-        self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+        """Rotate to the next API key (deprecated - rotisserie handles this automatically)."""
+        # No-op - rotisserie handles key rotation automatically
+        pass
 
     @abstractmethod
     def _get_error_table_name(self) -> str:
@@ -162,56 +172,23 @@ class BaseAPIClient(ABC):
             self.session = aiohttp.ClientSession()
 
     async def _handle_rate_limit_response(self, response: aiohttp.ClientResponse):
-        """Handle rate limit response and update tracking."""
+        """Handle rate limit response and update tracking (deprecated - rotisserie handles this)."""
+        # Rotisserie handles 429 responses automatically via Retry-After header
+        # This method is kept for backward compatibility but is a no-op
         if response.status == 429:
-            # Track rate limit occurrence
+            # Track rate limit occurrence for logging
             self._recent_rate_limits += 1
             self._last_rate_limit_time = asyncio.get_event_loop().time()
             logger.warning(f"Rate limit hit (recent count: {self._recent_rate_limits})")
-
-            # Rotate API key on rate limit
-            self._rotate_api_key()
-
-            # Check for Retry-After header
-            retry_after = response.headers.get("Retry-After")
-            if retry_after:
-                try:
-                    # Retry-After can be either seconds or HTTP date
-                    if retry_after.isdigit():
-                        wait_seconds = int(retry_after)
-                    else:
-                        # Parse HTTP date format
-                        from email.utils import parsedate_to_datetime
-
-                        retry_time = parsedate_to_datetime(retry_after)
-                        wait_seconds = max(
-                            0, (retry_time - datetime.now(UTC)).total_seconds()
-                        )
-
-                    logger.info(f"API requested wait time: {wait_seconds} seconds")
-                    await asyncio.sleep(wait_seconds)
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Failed to parse Retry-After header '{retry_after}': {e}"
-                    )
-                    # Fall back to exponential backoff
-                    await asyncio.sleep(min(2**self._recent_rate_limits, 60))
-            else:
-                # No Retry-After header, use exponential backoff
-                wait_time = min(2**self._recent_rate_limits, 60)
-                logger.info(
-                    f"No Retry-After header, using exponential backoff: {wait_time} seconds"
-                )
-                await asyncio.sleep(wait_time)
-
+            # Rotisserie will handle retry automatically
             return True
         return False
 
     async def _handle_auth_error(self, response: aiohttp.ClientResponse):
-        """Handle authentication errors."""
+        """Handle authentication errors (deprecated - rotisserie handles this)."""
+        # Rotisserie handles auth errors automatically
         if response.status == 401:
-            logger.warning("Authentication failed, rotating API key")
-            self._rotate_api_key()
+            logger.warning("Authentication failed - rotisserie will handle key rotation")
             return True
         return False
 

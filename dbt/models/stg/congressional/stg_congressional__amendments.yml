@@ -1,0 +1,13 @@
+version: 2
+
+models:
+  - name: stg_congressional__amendments
+    description: "Light standardization for congressional amendments"
+    columns:
+      - name: amendment_id
+        tests:
+          - not_null
+          - unique
+      - name: processed_at_ts
+        description: "Parsed timestamp for incremental logic"
+

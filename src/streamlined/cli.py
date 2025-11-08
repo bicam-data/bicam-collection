@@ -11,9 +11,9 @@ import asyncio
 import logging
 import sys
 
-from .executor import StreamlinedExecutor, execute_streamlined_pipeline
-from .plugins.consolidated_registry import get_consolidated_registry
-from .resources.config import StreamlinedConfig
+from .executor import Executor, execute_pipeline
+from .plugins.registry import get_registry
+from .resources.config import Config
 from .resources.coordinator import ResourceCoordinator
 
 # Configure logging
@@ -292,7 +292,7 @@ async def command_process(args) -> int:
 
             # Check if the potential main data type exists and has the related table
             try:
-                registry = get_consolidated_registry()
+                registry = get_registry()
                 config_data = registry.get_data_type_config(potential_main)
                 if (
                     config_data
@@ -308,29 +308,29 @@ async def command_process(args) -> int:
             except Exception as e:
                 logger.debug(f"Could not check for related data type: {e}")
         # Create configuration and coordinator
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
 
         # Enable parallelization if we have multiple API keys
-        # OptimizedParallelProcessor works best with ALL keys in a dynamic pool
+        # ParallelProcessor works best with ALL keys in a dynamic pool
         if len(config.api.keys) > 2:
             logger.info(
-                f"Enabling parallelization with {len(config.api.keys)} API keys for OptimizedParallelProcessor"
+                f"Enabling parallelization with {len(config.api.keys)} API keys for ParallelProcessor"
             )
-            # Enable parallelization with minimal config (OptimizedParallelProcessor ignores sessions)
+            # Enable parallelization with minimal config (ParallelProcessor ignores sessions)
             config.parallelization.enabled = True
             config.parallelization.fetcher = {
                 "congressional": {
-                    "num_sessions": 1,  # Ignored by OptimizedParallelProcessor
+                    "num_sessions": 1,  # Ignored by ParallelProcessor
                     "keys_per_session": len(config.api.keys),  # All keys
                 },
                 "govinfo": {
-                    "num_sessions": 1,  # Ignored by OptimizedParallelProcessor
+                    "num_sessions": 1,  # Ignored by ParallelProcessor
                     "keys_per_session": len(config.api.keys),  # All keys
                 },
             }
         # Determine the data type to use for pipeline execution
         pipeline_data_type = main_data_type if main_data_type else args.data_type
-        data_source = get_consolidated_registry().get_data_source(pipeline_data_type)
+        data_source = get_registry().get_data_source(pipeline_data_type)
         coordinator = ResourceCoordinator(config, data_source)
 
         # Build kwargs for processing
@@ -436,7 +436,7 @@ async def command_process(args) -> int:
             # Also check related tables for outstanding data
             if not has_outstanding_data:
                 try:
-                    registry = get_consolidated_registry()
+                    registry = get_registry()
                     config_data = registry.get_data_type_config(args.data_type)
                     if config_data and hasattr(config_data, "related_tables"):
                         for related_table in config_data.related_tables:
@@ -512,7 +512,7 @@ async def command_process(args) -> int:
                 f"Processing only related table '{related_table}' for data type '{main_data_type}'"
             )
 
-        results = await execute_streamlined_pipeline(
+        results = await execute_pipeline(
             coordinator=coordinator,
             data_type=pipeline_data_type,
             phases=args.phases,
@@ -553,7 +553,7 @@ async def command_process(args) -> int:
 async def command_list_types(args) -> int:
     """List supported data types."""
     try:
-        registry = get_consolidated_registry()
+        registry = get_registry()
         # No need to call auto_register_plugins() as consolidated registry auto-initializes
 
         supported_types = registry.list_data_types()
@@ -591,22 +591,22 @@ async def command_list_types(args) -> int:
 async def command_test_plugins(args) -> int:
     """Test plugin integration."""
     try:
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
         coordinator = ResourceCoordinator(config)
 
-        from .cleaner import StreamlinedCleaner
-        from .fetcher import StreamlinedFetcher
-        from .normalizer import StreamlinedNormalizer
+        from .cleaner import Cleaner
+        from .fetcher import Fetcher
+        from .normalizer import Normalizer
 
-        fetcher = await StreamlinedFetcher.from_coordinator(coordinator)
-        cleaner = StreamlinedCleaner(coordinator)
-        normalizer = StreamlinedNormalizer(coordinator)
+        fetcher = await Fetcher.from_coordinator(coordinator)
+        cleaner = Cleaner(coordinator)
+        normalizer = Normalizer(coordinator)
 
         # Test specific data type or all
         if args.data_type:
             data_types = [args.data_type]
         else:
-            registry = get_consolidated_registry()
+            registry = get_registry()
             # No need to call auto_register_plugins() as consolidated registry auto-initializes
             data_types = registry.get_supported_data_types()
 
@@ -651,9 +651,9 @@ async def command_test_plugins(args) -> int:
 async def command_status(args) -> int:
     """Get execution status."""
     try:
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
         coordinator = ResourceCoordinator(config)
-        executor = StreamlinedExecutor(coordinator)
+        executor = Executor(coordinator)
 
         status = await executor.get_execution_status(args.data_type)
         plugin_info = executor.get_plugin_info(args.data_type)
@@ -687,9 +687,9 @@ async def command_status(args) -> int:
 async def command_plugin_info(args) -> int:
     """Get plugin information."""
     try:
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
         coordinator = ResourceCoordinator(config)
-        executor = StreamlinedExecutor(coordinator)
+        executor = Executor(coordinator)
 
         plugin_info = executor.get_plugin_info(args.data_type)
 
@@ -717,7 +717,7 @@ async def command_plugin_info(args) -> int:
 async def command_config(args) -> int:
     """Show configuration."""
     try:
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
 
         logger.info(f"\n{'=' * 60}")
         logger.info("CONFIGURATION")
@@ -766,7 +766,7 @@ async def command_diagnostics(args) -> int:
         import os
         from pathlib import Path
 
-        from .resources.config import StreamlinedConfig
+        from .resources.config import Config
 
         logger.info(f"\n{'=' * 60}")
         logger.info("DIAGNOSTICS")
@@ -831,7 +831,7 @@ async def command_diagnostics(args) -> int:
         # Test configuration loading
         logger.info("\nConfiguration Loading Test:")
         try:
-            config = StreamlinedConfig.from_env()
+            config = Config.from_env()
             logger.info(f"  Database Host: {config.database.host}")
             logger.info(f"  Database Port: {config.database.port}")
             logger.info(f"  Database Name: {config.database.database}")
@@ -888,7 +888,7 @@ async def command_list_checkpoints(args) -> int:
             HierarchicalCheckpointManager,
         )
 
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
 
         # Create checkpoint manager with proper path
         checkpoint_manager = HierarchicalCheckpointManager(
@@ -952,10 +952,10 @@ async def command_clear_checkpoints(args) -> int:
             ProcessingStage,
             StagingPhase,
         )
-        from .plugins.consolidated_registry import ConsolidatedRegistry
-        from .resources.config import StreamlinedConfig
+        from .plugins.registry import Registry
+        from .resources.config import Config
 
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
 
         # Create checkpoint manager with proper path
         checkpoint_manager = HierarchicalCheckpointManager(
@@ -970,7 +970,7 @@ async def command_clear_checkpoints(args) -> int:
             if len(parts) == 2:
                 potential_main, potential_related = parts
                 # Check if this matches the pattern of main_data_type_related_table
-                registry = ConsolidatedRegistry()
+                registry = Registry()
                 try:
                     config_data = registry.get_data_type_config(potential_main)
                     if (
@@ -1010,7 +1010,7 @@ async def command_clear_checkpoints(args) -> int:
         # Get related table data types that need to be cleared
         related_data_types = []
         try:
-            registry = ConsolidatedRegistry()
+            registry = Registry()
             config_data = registry.get_data_type_config(data_type_to_check)
 
             # Check for related tables from config
@@ -1353,7 +1353,7 @@ async def command_clear_checkpoints(args) -> int:
 async def command_resume_from_checkpoint(args) -> int:
     """Resume processing from checkpoint."""
     try:
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
         coordinator = ResourceCoordinator(config)
 
         logger.info(f"\n{'=' * 60}")
@@ -1368,7 +1368,7 @@ async def command_resume_from_checkpoint(args) -> int:
         }
 
         # Execute only the raw phase (fetching) from checkpoint
-        results = await execute_streamlined_pipeline(
+        results = await execute_pipeline(
             coordinator=coordinator,
             data_type=args.data_type,
             phases=["raw"],  # Only fetching phase
@@ -1407,12 +1407,12 @@ async def command_resume_from_checkpoint(args) -> int:
 async def command_checkpoint_stats(args) -> int:
     """Show checkpoint statistics."""
     try:
-        from .processing.optimized_processor import OptimizedParallelProcessor
+        from .processing.processor import ParallelProcessor
 
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
 
         # Create processor to access checkpoint manager
-        processor = OptimizedParallelProcessor(
+        processor = ParallelProcessor(
             api_keys=config.api.keys,
             client_class=None,  # Not needed for checkpoint operations
         )
@@ -1478,12 +1478,12 @@ async def command_checkpoint_stats(args) -> int:
 async def command_retry_failed(args) -> int:
     """Retry failed items from checkpoints."""
     try:
-        from .processing.optimized_processor import OptimizedParallelProcessor
+        from .processing.processor import ParallelProcessor
 
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
 
         # Create processor to access checkpoint manager
-        processor = OptimizedParallelProcessor(
+        processor = ParallelProcessor(
             api_keys=config.api.keys,
             client_class=None,  # Not needed for checkpoint operations
         )
@@ -1516,9 +1516,9 @@ async def command_retry_failed(args) -> int:
 async def command_fetch_related(args) -> int:
     """Fetch related tables from existing Phase 2 data."""
     try:
-        from .executor import StreamlinedExecutor
-        from .plugins.consolidated_registry import get_consolidated_registry
-        from .resources.config import StreamlinedConfig
+        from .executor import Executor
+        from .plugins.registry import get_registry
+        from .resources.config import Config
         from .resources.coordinator import ResourceCoordinator
 
         logger.info(f"\n{'=' * 60}")
@@ -1527,10 +1527,10 @@ async def command_fetch_related(args) -> int:
 
         # Load configuration with API keys
         logger.info("Loading configuration...")
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
 
         # Get the data source for this data type
-        registry = get_consolidated_registry()
+        registry = get_registry()
         data_source = registry.get_data_source(args.data_type)
         logger.info(f"Data source for {args.data_type}: {data_source}")
 
@@ -1538,7 +1538,7 @@ async def command_fetch_related(args) -> int:
         coordinator = ResourceCoordinator(source=data_source, config=config)
         await coordinator.initialize()
 
-        executor = StreamlinedExecutor(coordinator)
+        executor = Executor(coordinator)
 
         # Use the executor's method to fetch related tables
         results = await executor.fetch_related_tables_from_existing_data(

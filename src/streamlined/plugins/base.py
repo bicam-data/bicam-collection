@@ -9,7 +9,7 @@ different data sources while allowing for custom implementations.
 import html
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 import asyncpg
@@ -159,9 +159,9 @@ class CongressionalBaseFetcherLogic:
             else:
                 # Try to load related table config to determine correct list_key
                 try:
-                    from .consolidated_registry import get_consolidated_registry
+                    from .registry import get_registry
 
-                    registry = get_consolidated_registry()
+                    registry = get_registry()
 
                     # Related table configs are in the main data type config file
                     # as separate entries, not separate data types
@@ -449,6 +449,8 @@ class CongressionalBaseFetcherLogic:
             return await self.get_generic_related_data(
                 full_data, related_table_name, client, list_key
             )
+
+
 class BaseCleanerLogic:
     """
     Base cleaner logic for congressional data with table override registration.
@@ -500,7 +502,7 @@ class BaseCleanerLogic:
             # Ensure existing datetime objects are timezone-aware
             if date_value.tzinfo is None:
                 # Assume timezone-naive datetime is in UTC
-                return date_value.replace(tzinfo=timezone.utc)
+                return date_value.replace(tzinfo=UTC)
             return date_value
 
         if isinstance(date_value, str):
@@ -509,7 +511,7 @@ class BaseCleanerLogic:
                 # Ensure parsed datetime is timezone-aware
                 if parsed_date.tzinfo is None:
                     # Assume timezone-naive datetime is in UTC
-                    return parsed_date.replace(tzinfo=timezone.utc)
+                    return parsed_date.replace(tzinfo=UTC)
                 return parsed_date
             except Exception:
                 logger.warning(f"Could not parse date: {date_value}")
@@ -704,8 +706,8 @@ class BaseCleanerLogic:
         Move columns from *source_table* → *dest_table* using optimized storage managers.
 
         This is a modernized version of split_columns_to_new_table that works with:
-        - OptimizedStorageManager for efficient data transfer
-        - OptimizedCleanerStorage for staging table operations
+        - StorageManager for efficient data transfer
+        - StorageAdapter for staging table operations
         - New configuration structure
         - Batch processing for large datasets
 
@@ -719,8 +721,8 @@ class BaseCleanerLogic:
             create_if_missing: Whether to create destination table if missing
             drop_from_source: Whether to drop columns from source after copy
             batch_size: Batch size for processing
-            storage_manager: OptimizedStorageManager instance
-            cleaner_storage: OptimizedCleanerStorage instance
+            storage_manager: StorageManager instance
+            cleaner_storage: StorageAdapter instance (CLEANING phase)
 
         Returns:
             Number of records inserted

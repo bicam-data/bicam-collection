@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Any
 
-from .config import StreamlinedConfig
+from .config import Config
 from .managers import (
     APIKeyManager,
     CheckpointManager,
@@ -27,7 +27,7 @@ class ResourceCoordinator:
 
     def __init__(
         self,
-        config: StreamlinedConfig | None = None,
+        config: Config | None = None,
         source: str = None,
         db_config: dict[str, Any] | None = None,
         api_keys: list[str] | None = None,
@@ -38,13 +38,13 @@ class ResourceCoordinator:
         """
         Initialize resource coordinator.
 
-        Can be initialized with either a StreamlinedConfig or individual parameters.
+        Can be initialized with either a Config or individual parameters.
         """
         # Use config if provided, otherwise create from parameters
         if config:
             self.config = config
         else:
-            self.config = StreamlinedConfig()
+            self.config = Config()
             if db_config:
                 self.config.database.host = db_config.get(
                     "host", self.config.database.host
@@ -124,14 +124,14 @@ class ResourceCoordinator:
         self._cleanup_completed = False
 
     @classmethod
-    def from_config(cls, config: StreamlinedConfig) -> "ResourceCoordinator":
+    def from_config(cls, config: Config) -> "ResourceCoordinator":
         """Create coordinator from streamlined config."""
         return cls(config=config)
 
     @classmethod
     def from_env(cls, env_file: str | None = None) -> "ResourceCoordinator":
         """Create coordinator from environment configuration."""
-        config = StreamlinedConfig.from_env(env_file)
+        config = Config.from_env(env_file)
         return cls(config=config)
 
     async def initialize(self):

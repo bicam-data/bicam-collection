@@ -1,0 +1,73 @@
+version: 2
+
+sources:
+  - name: congressional_staging
+    database: "{{ target.database }}"
+    schema: "{{ var('congressional_staging_schema', 'bicam_staging_congressional') }}"
+    loader: 'python-normalizer'
+    description: 'Normalized staging tables for congressional data'
+    tables:
+      - name: amendments
+      - name: bills
+      - name: committeemeetings
+      - name: committeeprints
+      - name: committeereports
+      - name: committeereports_texts
+      - name: committeereports_associatedbill
+      - name: committeereports_associatedtreaties
+      - name: committeereports_committees
+      - name: committees
+      - name: congresses
+      - name: hearings
+      - name: members
+      - name: nominations
+      - name: treaties
+
+  - name: govinfo_staging
+    database: "{{ target.database }}"
+    schema: "{{ var('govinfo_staging_schema', 'bicam_staging_govinfo') }}"
+    loader: 'python-normalizer'
+    description: 'Normalized staging tables for govinfo data'
+    tables:
+      - name: billcollections
+      - name: congressionaldirectories
+      - name: congressionalreports
+      - name: congressionalreports_committees
+      - name: congressionalreports_members
+      - name: congressionalreports_reference_bills
+      - name: congressionalreports_serialset
+      - name: congressionalreports_serialset_topics
+      - name: congressionalreports_ils_system_id
+      - name: congressionalreports_reference_codes
+      - name: congressionalreports_reference_codes_sections
+      - name: congressionalreports_reference_laws
+      - name: congressionalreports_reference_statutes
+      - name: congressionalreports_reference_statutes_pages
+      - name: hearingpackages
+      - name: printpackages
+      - name: treatydocs
+      # granule tables are created by the normalizer with parent prefix
+      - name: congressionalreports_granules
+      - name: hearingpackages_granules
+      - name: printpackages_granules
+      - name: congressionaldirectories_granules
+      - name: treatydocs_granules
+
+  # RAW inputs used by stg models in this subset test
+  - name: congressional_raw
+    database: "{{ target.database }}"
+    schema: "{{ var('congressional_raw_schema', 'bicam_raw_congressional') }}"
+    loader: 'api-raw'
+    description: 'Raw JSONB tables for congressional API payloads'
+    tables:
+      - name: committeereports_raw
+      - name: committeereports_texts_raw
+
+  - name: govinfo_raw
+    database: "{{ target.database }}"
+    schema: "{{ var('govinfo_raw_schema', 'bicam_raw_govinfo') }}"
+    loader: 'api-raw'
+    description: 'Raw JSONB tables for govinfo payloads'
+    tables:
+      - name: congressionalreports_raw
+      - name: congressionalreports_granules_raw

@@ -41,6 +41,7 @@ dependencies = [
     "aiohttp>=3.9.0",
     "httpx>=0.24.0",
     "ujson>=5.8.0",
+    "rotisserie>=0.1.0",
     # AWS & Cloud
     "boto3>=1.37.34",
     "botocore>=1.37.34",
@@ -54,9 +55,15 @@ dependencies = [
     "python-json-logger>=2.0.0",
     "aiofiles>=24.1.0",
     "pymupdf>=1.26.4",
+    "dbt>=1.0.0.40.7",
+    "dbt-core>=1.0.0",
+    "dbt-postgres>=1.0.0",
 ]
 
 [project.optional-dependencies]
+rotisserie = [
+    "rotisserie[aiohttp]>=0.1.0",
+]
 dev = [
     # Testing
     "pytest>=7.4.0",

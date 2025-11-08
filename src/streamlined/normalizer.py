@@ -19,14 +19,14 @@ from .libs.hierarchical_checkpoint_system import (
     StagingPhase,
 )
 from .libs.run_tracking import RunMetadata, RunType
-from .plugins.consolidated_registry import get_consolidated_registry
-from .processing.optimized_storage_manager import OptimizedNormalizerStorage
+from .plugins.registry import get_registry
+from .processing.storage_adapter import StorageAdapter
 from .resources.coordinator import ResourceCoordinator
 
 logger = logging.getLogger(__name__)
 
 
-class StreamlinedNormalizer:
+class Normalizer:
     """
     Direct implementation of data normalization from raw to staging.
 
@@ -45,10 +45,10 @@ class StreamlinedNormalizer:
             resource_coordinator: Manages all resources (DB, API keys, storage, etc.)
         """
         self.coordinator = resource_coordinator
-        self.registry = get_consolidated_registry()
+        self.registry = get_registry()
         self.normalizer_storage = None  # Will be initialized when needed
 
-        logger.info("StreamlinedNormalizer initialized")
+        logger.info("Normalizer initialized")
 
     def _generate_deterministic_id(
         self, data: dict[str, Any], exclude_fields: list[str] = None
@@ -269,8 +269,9 @@ class StreamlinedNormalizer:
         schema_names = self.registry.get_schema_names(data_type)
         target_schema = schema_names["staging"]
 
-        self.normalizer_storage = OptimizedNormalizerStorage(
+        self.normalizer_storage = StorageAdapter(
             storage_manager=storage_manager,
+            phase=ProcessingStage.STAGING,
             target_schema=target_schema,
             data_type=data_type,
         )
@@ -667,9 +668,7 @@ class StreamlinedNormalizer:
                         )
 
                         # Add common metadata
-                        flat_data["processed_at"] = datetime.now(
-                            UTC
-                        ).isoformat()
+                        flat_data["processed_at"] = datetime.now(UTC).isoformat()
                         flat_data["source_doc_id"] = source_doc_id
 
                         # Store main record using optimized normalizer storage
@@ -871,9 +870,7 @@ class StreamlinedNormalizer:
                         )
 
                         # Add common metadata
-                        flat_data["processed_at"] = datetime.now(
-                            UTC
-                        ).isoformat()
+                        flat_data["processed_at"] = datetime.now(UTC).isoformat()
                         flat_data["source_doc_id"] = source_doc_id
 
                         # Store main record using optimized normalizer storage
@@ -1843,4 +1840,4 @@ class StreamlinedNormalizer:
         except Exception as e:
             logger.warning(f"Error during normalizer cleanup: {e}")
 
-        logger.info("StreamlinedNormalizer cleanup completed")
+        logger.info("Normalizer cleanup completed")

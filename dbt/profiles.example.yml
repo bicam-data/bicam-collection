@@ -1,0 +1,16 @@
+bicam:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      user: your_user
+      password: your_password
+      port: 5432
+      dbname: your_database
+      schema: bicam_dev
+      threads: 8
+      keepalives_idle: 0
+
+# Copy this file to ~/.dbt/profiles.yml and adjust credentials.
+

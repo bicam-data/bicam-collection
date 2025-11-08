@@ -13,8 +13,11 @@
     is_main: true
     create_raw: true
     id_fields: [report_id]
-    related_tables:
+  related_tables:
       - texts
+      - associatedbill
+      - associatedtreaties
+      - committees
 
   processing:
     batch_size: 100

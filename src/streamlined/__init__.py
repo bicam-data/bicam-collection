@@ -5,16 +5,16 @@ A simplified, efficient 4-layer architecture that reduces complexity by 50%
 while preserving all existing custom logic through a plugin system.
 
 Core Components:
-- StreamlinedExecutor: Direct execution coordinator
-- StreamlinedFetcher: Integrated fetching with parallel processing
-- StreamlinedCleaner: Focused data cleaning with validation
-- StreamlinedNormalizer: Focused database normalization
+- Executor: Direct execution coordinator
+- Fetcher: Integrated fetching with parallel processing
+- Cleaner: Focused data cleaning with validation
+- Normalizer: Focused database normalization
 
 Usage:
-    from streamlined import execute_streamlined_pipeline, ResourceCoordinator
+    from streamlined import execute_pipeline, ResourceCoordinator
 
     coordinator = ResourceCoordinator()
-    results = await execute_streamlined_pipeline(
+    results = await execute_pipeline(
         coordinator=coordinator,
         data_type="bills",
         phases=["raw", "staging", "production"]
@@ -27,29 +27,28 @@ from .api_clients import (
     CongressionalAPIClient,
     GovInfoAPIClient,
 )
-from .cleaner import StreamlinedCleaner
-from .executor import StreamlinedExecutor, execute_streamlined_pipeline
-from .fetcher import StreamlinedFetcher
+from .cleaner import Cleaner
+from .executor import Executor, execute_pipeline
+from .fetcher import Fetcher
 
 # Legacy utilities (deprecated - use streamlined versions above)
 from .libs import (
     HierarchicalCheckpointManager,
     RunManager,
 )
-from .normalizer import StreamlinedNormalizer
+from .normalizer import Normalizer
 
 # Plugin system
 from .plugins import (
     CleanerPlugin,
     FetcherPlugin,
     NormalizerPlugin,
-    get_consolidated_registry,
+    get_registry,
 )
 
 # Processing components
 from .processing import (
     AdaptiveWorkQueue,
-    DynamicKeyPool,
 )
 
 # Resource management (prioritize streamlined versions)
@@ -57,44 +56,43 @@ from .resources import (
     APIKeyManager,
     CheckpointManager,
     ClientManager,
+    Config,  # Use streamlined version
     DatabaseManager,  # Use streamlined version
+    # Dagster integration
+    ProcessingResource,
     ResourceCoordinator,
     RunTrackingManager,
     StorageManager,
-    StreamlinedConfig,  # Use streamlined version
-    # Dagster integration
-    StreamlinedProcessingResource,
-    create_streamlined_dagster_resource,
-    get_streamlined_coordinator_from_context,
-    setup_streamlined_database,  # Simple database setup
-    streamlined_processing_resource,
+    create_dagster_resource,
+    get_coordinator_from_context,
+    processing_resource,
+    setup_database,  # Simple database setup
 )
 
 __all__ = [
     # Core components
-    "StreamlinedExecutor",
-    "StreamlinedFetcher",
-    "StreamlinedCleaner",
-    "StreamlinedNormalizer",
-    "execute_streamlined_pipeline",
+    "Executor",
+    "Fetcher",
+    "Cleaner",
+    "Normalizer",
+    "execute_pipeline",
     # Resource management (streamlined versions)
     "ResourceCoordinator",
-    "StreamlinedConfig",  # Primary config class
+    "Config",  # Primary config class
     "DatabaseManager",  # Primary database manager
-    "setup_streamlined_database",  # Simple database setup
+    "setup_database",  # Simple database setup
     "APIKeyManager",
     "CheckpointManager",
     "RunTrackingManager",
     "StorageManager",
     "ClientManager",
     # Plugin system
-    "get_consolidated_registry",
+    "get_registry",
     "FetcherPlugin",
     "CleanerPlugin",
     "NormalizerPlugin",
     # Processing
     "AdaptiveWorkQueue",
-    "DynamicKeyPool",
     # API clients
     "CongressionalAPIClient",
     "GovInfoAPIClient",
@@ -102,10 +100,10 @@ __all__ = [
     "HierarchicalCheckpointManager",
     "RunManager",
     # Dagster integration
-    "StreamlinedProcessingResource",
-    "create_streamlined_dagster_resource",
-    "get_streamlined_coordinator_from_context",
-    "streamlined_processing_resource",
+    "ProcessingResource",
+    "create_dagster_resource",
+    "get_coordinator_from_context",
+    "processing_resource",
 ]
 
 __version__ = "2.0.0"

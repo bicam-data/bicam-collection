@@ -8,17 +8,16 @@ ResourceCoordinator approach.
 
 import asyncio
 import logging
-from typing import Any
 
 from dagster import ConfigurableResource, InitResourceContext, resource
 
-from .config import StreamlinedConfig
+from .config import Config
 from .coordinator import ResourceCoordinator
 
 logger = logging.getLogger(__name__)
 
 
-class StreamlinedProcessingResource(ConfigurableResource):
+class ProcessingResource(ConfigurableResource):
     """
     Dagster resource that provides the streamlined ResourceCoordinator.
 
@@ -45,9 +44,9 @@ class StreamlinedProcessingResource(ConfigurableResource):
                 if self._coordinator is None:  # Double-check pattern
                     # Create config from environment or file
                     if self.config_file:
-                        config = StreamlinedConfig.from_env(self.config_file)
+                        config = Config.from_env(self.config_file)
                     else:
-                        config = StreamlinedConfig.from_env()
+                        config = Config.from_env()
 
                     # Override with resource-specific settings
                     config.infrastructure.use_postgres_runs = self.use_postgres_runs
@@ -59,9 +58,7 @@ class StreamlinedProcessingResource(ConfigurableResource):
                     self._coordinator = ResourceCoordinator(config)
                     await self._coordinator.initialize()
 
-                    logger.info(
-                        "StreamlinedProcessingResource: ResourceCoordinator initialized"
-                    )
+                    logger.info("ProcessingResource: ResourceCoordinator initialized")
 
         return self._coordinator
 
@@ -70,9 +67,7 @@ class StreamlinedProcessingResource(ConfigurableResource):
         if self._coordinator:
             try:
                 await self._coordinator.cleanup()
-                logger.info(
-                    "StreamlinedProcessingResource: ResourceCoordinator cleaned up"
-                )
+                logger.info("ProcessingResource: ResourceCoordinator cleaned up")
             except Exception as e:
                 logger.warning(f"Error during coordinator cleanup: {e}")
             finally:
@@ -135,11 +130,11 @@ class StreamlinedProcessingResource(ConfigurableResource):
         "use_optimized_storage": bool,
     },
 )
-def streamlined_processing_resource(
+def processing_resource(
     context: InitResourceContext,
-) -> StreamlinedProcessingResource:
-    """Create streamlined processing resource from context."""
-    return StreamlinedProcessingResource(
+) -> ProcessingResource:
+    """Create processing resource from context."""
+    return ProcessingResource(
         config_file=context.resource_config.get("config_file"),
         use_postgres_runs=context.resource_config.get("use_postgres_runs", True),
         use_optimized_storage=context.resource_config.get(
@@ -148,19 +143,19 @@ def streamlined_processing_resource(
     )
 
 
-def create_streamlined_dagster_resource() -> StreamlinedProcessingResource:
-    """Create a streamlined processing resource with default configuration."""
-    return StreamlinedProcessingResource()
+def create_dagster_resource() -> ProcessingResource:
+    """Create a processing resource with default configuration."""
+    return ProcessingResource()
 
 
 # Convenience function for assets that need the new coordinator directly
-async def get_streamlined_coordinator_from_context(context) -> ResourceCoordinator:
+async def get_coordinator_from_context(context) -> ResourceCoordinator:
     """
     Extract ResourceCoordinator from Dagster context.
 
     Usage in assets:
-        coordinator = await get_streamlined_coordinator_from_context(context)
-        fetcher = StreamlinedFetcher(coordinator)
+        coordinator = await get_coordinator_from_context(context)
+        fetcher = Fetcher(coordinator)
     """
     processing_resource = context.resources.processing_resource
     if hasattr(processing_resource, "get_coordinator"):
@@ -168,10 +163,10 @@ async def get_streamlined_coordinator_from_context(context) -> ResourceCoordinat
     else:
         # Fallback for assets still using old ProcessingResource
         logger.warning(
-            "Asset is using old ProcessingResource, consider migrating to StreamlinedProcessingResource"
+            "Asset is using old ProcessingResource, consider migrating to ProcessingResource"
         )
         # Create coordinator from old resource
-        config = StreamlinedConfig.from_env()
+        config = Config.from_env()
         coordinator = ResourceCoordinator(config)
         await coordinator.initialize()
         return coordinator

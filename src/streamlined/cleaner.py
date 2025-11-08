@@ -15,14 +15,14 @@ from .libs.hierarchical_checkpoint_system import (
     CleaningPhase,
     ProcessingStage,
 )
-from .plugins.consolidated_registry import get_consolidated_registry
-from .processing.optimized_storage_manager import OptimizedCleanerStorage
+from .plugins.registry import get_registry
+from .processing.storage_adapter import StorageAdapter
 from .resources.coordinator import ResourceCoordinator
 
 logger = logging.getLogger(__name__)
 
 
-class StreamlinedCleaner:
+class Cleaner:
     """
     Enhanced data cleaner with full plugin support and checkpoint management.
 
@@ -44,7 +44,7 @@ class StreamlinedCleaner:
             resource_coordinator: Manages all resources (DB, API keys, storage, etc.)
         """
         self.coordinator = resource_coordinator
-        self.plugin_registry = get_consolidated_registry()
+        self.plugin_registry = get_registry()
 
         # Cache for custom logic plugins
         self._custom_logic_cache = {}
@@ -52,7 +52,7 @@ class StreamlinedCleaner:
         # Target table override system
         self._target_table_override = None
 
-        logger.info("StreamlinedCleaner initialized")
+        logger.info("Cleaner initialized")
 
     async def clean_data_type(
         self,
@@ -108,8 +108,9 @@ class StreamlinedCleaner:
             }
 
         # Initialize cleaner storage adapter
-        cleaner_storage = OptimizedCleanerStorage(
+        cleaner_storage = StorageAdapter(
             storage_manager=storage_manager,
+            phase=ProcessingStage.CLEANING,
             staging_schema=staging_schema,
             production_schema=production_schema,
             data_type=data_type,
@@ -716,7 +717,7 @@ class StreamlinedCleaner:
         except Exception as e:
             logger.warning(f"Could not flush checkpoint caches: {e}")
 
-        logger.info("StreamlinedCleaner cleanup completed")
+        logger.info("Cleaner cleanup completed")
 
     async def get_cleaning_status(self, data_type: str) -> dict[str, Any]:
         """Get cleaning status with checkpoint information."""

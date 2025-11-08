@@ -12,16 +12,16 @@ Key improvements:
 - StorageManager: Focused storage operations
 - ClientManager: Focused API client lifecycle
 - ResourceCoordinator: Lightweight composition of all managers
-- StreamlinedProcessingResource: Dagster integration for ResourceCoordinator
+- ProcessingResource: Dagster integration for ResourceCoordinator
 """
 
-from .config import StreamlinedConfig
+from .config import Config
 from .coordinator import ResourceCoordinator
 from .dagster_integration import (
-    StreamlinedProcessingResource,
-    create_streamlined_dagster_resource,
-    get_streamlined_coordinator_from_context,
-    streamlined_processing_resource,
+    ProcessingResource,
+    create_dagster_resource,
+    get_coordinator_from_context,
+    processing_resource,
 )
 from .managers import (
     APIKeyManager,
@@ -30,7 +30,7 @@ from .managers import (
     DatabaseManager,
     RunTrackingManager,
     StorageManager,
-    setup_streamlined_database,
+    setup_database,
 )
 
 __all__ = [
@@ -41,11 +41,11 @@ __all__ = [
     "StorageManager",
     "ClientManager",
     "ResourceCoordinator",
-    "StreamlinedConfig",
-    "setup_streamlined_database",
+    "Config",
+    "setup_database",
     # Dagster integration
-    "StreamlinedProcessingResource",
-    "create_streamlined_dagster_resource",
-    "get_streamlined_coordinator_from_context",
-    "streamlined_processing_resource",
+    "ProcessingResource",
+    "create_dagster_resource",
+    "get_coordinator_from_context",
+    "processing_resource",
 ]

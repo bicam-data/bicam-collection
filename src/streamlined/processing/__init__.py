@@ -1,4 +1,4 @@
-from .key_pool import DynamicKeyPool
+# DynamicKeyPool removed - using rotisserie instead
 from .work_queue import AdaptiveWorkQueue, WorkChunk
 
-__all__ = ["DynamicKeyPool", "AdaptiveWorkQueue", "WorkChunk"]
+__all__ = ["AdaptiveWorkQueue", "WorkChunk"]

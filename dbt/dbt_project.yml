@@ -1,0 +1,43 @@
+name: 'bicam_dbt'
+version: '1.0.0'
+config-version: 2
+
+profile: 'bicam'
+
+vars:
+  # For dbt testing, point to separate staging input schemas
+  congressional_staging_schema: 'dbt_bicam_stg_congressional'
+  govinfo_staging_schema: 'dbt_bicam_stg_govinfo'
+
+  # Raw input schemas (API landing)
+  congressional_raw_schema: 'bicam_raw_congressional'
+  govinfo_raw_schema: 'bicam_raw_govinfo'
+
+  # dbt output schemas (by layer)
+  dbt_stg_schema: 'dbt_bicam_stg'
+  dbt_int_schema: 'dbt_bicam_int'
+  dbt_core_schema: 'dbt_bicam_core'
+  dbt_mart_schema: 'dbt_bicam_mart'
+
+models:
+  bicam_dbt:
+    +persist_docs: { relation: true, columns: true }
+    stg:
+      +schema: "{{ var('dbt_stg_schema', 'bicam_stg_dbt') }}"
+    int:
+      +schema: "{{ var('dbt_int_schema', 'bicam_int_dbt') }}"
+    core:
+      +schema: "{{ var('dbt_core_schema', 'bicam_core') }}"
+    mart:
+      +schema: "{{ var('dbt_mart_schema', 'bicam_mart') }}"
+
+macro-paths: ["macros"]
+model-paths: ["models"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+test-paths: ["tests"]
+
+quoting:
+  database: false
+  schema: false
+  identifier: false

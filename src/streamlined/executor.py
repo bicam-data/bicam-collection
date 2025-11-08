@@ -9,17 +9,28 @@ Benefits: Direct execution path, centralized error handling, simplified resource
 import logging
 from typing import Any
 
-from .cleaner import StreamlinedCleaner
-from .fetcher import StreamlinedFetcher
-from .normalizer import StreamlinedNormalizer
-from .plugins.consolidated_registry import get_consolidated_registry
-from .processing.optimized_processor import OptimizedParallelProcessor
+from .cleaner import Cleaner
+from .fetcher import Fetcher
+from .libs.hierarchical_checkpoint_system import ProcessingStage
+from .normalizer import Normalizer
+from .plugins.registry import get_registry
+from .processing.processor import ParallelProcessor
 from .resources.coordinator import ResourceCoordinator
 
 logger = logging.getLogger(__name__)
 
+# Phase name mapping: user-facing strings -> ProcessingStage enum values
+# This provides a consistent mapping between executor phase names and checkpoint stages
+PHASE_TO_STAGE = {
+    "raw": ProcessingStage.FETCHING,
+    "staging": ProcessingStage.STAGING,
+    "production": ProcessingStage.CLEANING,
+}
 
-class StreamlinedExecutor:
+STAGE_TO_PHASE = {v: k for k, v in PHASE_TO_STAGE.items()}
+
+
+class Executor:
     """
     Direct execution coordinator that orchestrates the streamlined pipeline.
 
@@ -39,41 +50,9 @@ class StreamlinedExecutor:
             resource_coordinator: Manages all resources (DB, API keys, storage, etc.)
         """
         self.coordinator = resource_coordinator
-        self.plugin_registry = get_consolidated_registry()
-
-        # Enable parallelization if we have multiple API keys
-        # OptimizedParallelProcessor works best with ALL keys in a dynamic pool
-        if (
-            len(self.coordinator.config.api.keys) > 2
-            and not self.coordinator.config.parallelization.enabled
-        ):
-            logger.info(
-                f"Auto-enabling parallelization with {len(self.coordinator.config.api.keys)} API keys for OptimizedParallelProcessor"
-            )
-            # Enable parallelization with minimal config (OptimizedParallelProcessor ignores sessions)
-            self.coordinator.config.parallelization.enabled = True
-            self.coordinator.config.parallelization.fetcher = {
-                "congressional": {
-                    "num_sessions": 1,  # Ignored by OptimizedParallelProcessor
-                    "keys_per_session": len(
-                        self.coordinator.config.api.keys
-                    ),  # All keys
-                },
-                "govinfo": {
-                    "num_sessions": 1,  # Ignored by OptimizedParallelProcessor
-                    "keys_per_session": len(
-                        self.coordinator.config.api.keys
-                    ),  # All keys
-                },
-            }
-
-        # Initialize streamlined components using proper constructors
-        # Note: fetcher will be initialized lazily since from_coordinator is async
-        self.fetcher = None
-        self.cleaner = StreamlinedCleaner(resource_coordinator)
-        self.normalizer = StreamlinedNormalizer(resource_coordinator)
-
-        logger.info("StreamlinedExecutor initialized with direct execution path")
+        self.plugin_registry = get_registry()
+        _ensure_parallelization(self.coordinator)
+        logger.info("Executor initialized with direct execution path")
 
     def _get_data_source(self, data_type: str) -> str:
         """Get the data source for a given data type."""
@@ -132,23 +111,30 @@ class StreamlinedExecutor:
                 logger.info(f"Executing phase: {phase}")
 
                 try:
-                    if phase == "raw":
+                    # Map phase string to ProcessingStage for consistency
+                    stage = PHASE_TO_STAGE.get(phase)
+                    if stage is None:
+                        raise ValueError(
+                            f"Unknown phase: {phase}. Valid phases: {list(PHASE_TO_STAGE.keys())}"
+                        )
+
+                    if stage == ProcessingStage.FETCHING:
                         # Raw data fetching
                         phase_results = await self._execute_raw_phase(
                             data_type, data_source, from_date, to_date, limit, **kwargs
                         )
-                    elif phase == "staging":
+                    elif stage == ProcessingStage.STAGING:
                         # Data normalization to staging
                         phase_results = await self._execute_staging_phase(
                             data_type, **kwargs
                         )
-                    elif phase == "production":
+                    elif stage == ProcessingStage.CLEANING:
                         # Data cleaning to production
                         phase_results = await self._execute_production_phase(
                             data_type, **kwargs
                         )
                     else:
-                        raise ValueError(f"Unknown phase: {phase}")
+                        raise ValueError(f"Unhandled stage: {stage}")
 
                     results["metrics"][phase] = phase_results
                     logger.info(f"Phase {phase} completed successfully")
@@ -171,21 +157,6 @@ class StreamlinedExecutor:
             results["status"] = "failed"
 
         finally:
-            # Cleanup components
-            try:
-                # Cleanup normalizer (will flush any buffered data)
-                await self.normalizer.cleanup()
-
-                # Cleanup fetcher if initialized
-                if self.fetcher:
-                    await self.fetcher.cleanup()
-
-                # Cleanup cleaner
-                # await self.cleaner.cleanup()
-
-            except Exception as e:
-                logger.warning(f"Error during component cleanup: {e}")
-
             # Cleanup resources
             await self.coordinator.cleanup()
 
@@ -201,89 +172,25 @@ class StreamlinedExecutor:
         **kwargs,
     ) -> dict[str, Any]:
         """Execute raw data fetching phase."""
-        logger.info(f"Executing raw phase for {data_type} (source: {data_source})")
-
-        # Initialize fetcher lazily if not already done
-        if self.fetcher is None:
-            # Extract parallel related data options
-            parallel_related_data_kwargs = {}
-            if "enable_parallel_related_data" in kwargs:
-                parallel_related_data_kwargs["enable_parallel_related_data"] = kwargs[
-                    "enable_parallel_related_data"
-                ]
-            if "parallel_related_data_threshold" in kwargs:
-                parallel_related_data_kwargs["parallel_related_data_threshold"] = (
-                    kwargs["parallel_related_data_threshold"]
-                )
-
-            self.fetcher = await StreamlinedFetcher.from_coordinator(
-                self.coordinator,
-                data_type_name=data_type,
-                data_source=data_source,
-                **parallel_related_data_kwargs,
-            )
-
-        # Use streamlined fetcher with plugin system
-        results = await self.fetcher.process_items(
-            from_date=from_date,
-            to_date=to_date,
-            limit=limit,
+        return await execute_raw_phase(
+            self.coordinator,
+            data_type,
+            data_source,
+            from_date,
+            to_date,
+            limit,
             **kwargs,
         )
 
-        return {
-            "phase": "raw",
-            "items_fetched": results.get("total_processed", 0),
-            "items_stored": results.get("total_processed", 0),
-            "duration": results.get("duration", 0),
-            "status": "completed",
-        }
-
     async def _execute_staging_phase(self, data_type: str, **kwargs) -> dict[str, Any]:
         """Execute data normalization to staging phase."""
-        logger.info(f"Executing staging phase for {data_type}")
-
-        # Use streamlined normalizer with plugin system
-        results = await self.normalizer.normalize_data_type(
-            data_type=data_type, **kwargs
-        )
-
-        # Map the actual returned metrics to expected format
-        return {
-            "phase": "staging",
-            "items_normalized": (
-                results.get("main_records_processed", 0)
-                + results.get("related_records_processed", 0)
-            ),
-            "items_inserted": (
-                results.get("main_records_processed", 0)
-                + results.get("related_records_processed", 0)
-                + results.get("lists_extracted", 0)
-            ),
-            "duration": results.get("duration", 0),
-            "status": results.get("status", "completed"),
-            "errors": results.get("errors", 0),
-        }
+        return await execute_staging_phase(self.coordinator, data_type, **kwargs)
 
     async def _execute_production_phase(
         self, data_type: str, **kwargs
     ) -> dict[str, Any]:
         """Execute data cleaning to production phase."""
-        logger.info(f"Executing production phase for {data_type}")
-
-        # Use streamlined cleaner with plugin system
-        results = await self.cleaner.clean_data_type(data_type=data_type, **kwargs)
-
-        return {
-            "phase": "production",
-            "items_cleaned": results.get("total_records_processed", 0),
-            "items_validated": results.get(
-                "total_records_processed", 0
-            ),  # Same as cleaned for now
-            "duration": results.get("duration", 0),
-            "status": results.get("status", "completed"),
-            "errors": results.get("total_errors", 0),
-        }
+        return await execute_production_phase(self.coordinator, data_type, **kwargs)
 
     async def get_execution_status(self, data_type: str) -> dict[str, Any]:
         """Get current execution status for a data type."""
@@ -325,7 +232,7 @@ class StreamlinedExecutor:
 
         This method:
         1. Initializes a fetcher for the specified data type
-        2. Uses the OptimizedParallelProcessor to fetch related tables with full storage infrastructure
+        2. Uses the ParallelProcessor to fetch related tables with full storage infrastructure
         3. Provides full resource coordination and error handling
 
         Args:
@@ -358,15 +265,15 @@ class StreamlinedExecutor:
 
         try:
             # Initialize fetcher
-            fetcher = await StreamlinedFetcher.from_coordinator(
+            fetcher = await Fetcher.from_coordinator(
                 self.coordinator, data_type_name=data_type, data_source=data_source
             )
 
-            # Create OptimizedParallelProcessor for parallel execution
+            # Create ParallelProcessor for parallel execution
             logger.info(
-                f"Creating OptimizedParallelProcessor with {len(fetcher.api_keys)} API keys"
+                f"Creating ParallelProcessor with {len(fetcher.api_keys)} API keys"
             )
-            processor = OptimizedParallelProcessor(
+            processor = ParallelProcessor(
                 api_keys=fetcher.api_keys,
                 client_class=fetcher.client.__class__ if fetcher.client else None,
                 db_pool=fetcher.db_pool,
@@ -397,8 +304,131 @@ class StreamlinedExecutor:
                 await fetcher.cleanup()
 
 
+# =============================================================================
+# Functional phase execution functions
+# =============================================================================
+
+
+def _ensure_parallelization(coordinator: ResourceCoordinator):
+    """Ensure parallelization is enabled if we have multiple API keys."""
+    if (
+        len(coordinator.config.api.keys) > 2
+        and not coordinator.config.parallelization.enabled
+    ):
+        logger.info(
+            f"Auto-enabling parallelization with {len(coordinator.config.api.keys)} API keys"
+        )
+        coordinator.config.parallelization.enabled = True
+        coordinator.config.parallelization.fetcher = {
+            "congressional": {
+                "num_sessions": 1,
+                "keys_per_session": len(coordinator.config.api.keys),
+            },
+            "govinfo": {
+                "num_sessions": 1,
+                "keys_per_session": len(coordinator.config.api.keys),
+            },
+        }
+
+
+async def execute_raw_phase(
+    coordinator: ResourceCoordinator,
+    data_type: str,
+    data_source: str,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    limit: int | None = None,
+    **kwargs,
+) -> dict[str, Any]:
+    """Execute raw data fetching phase."""
+    logger.info(f"Executing raw phase for {data_type} (source: {data_source})")
+
+    parallel_related_data_kwargs = {
+        k: v
+        for k, v in kwargs.items()
+        if k in ("enable_parallel_related_data", "parallel_related_data_threshold")
+    }
+
+    fetcher = await Fetcher.from_coordinator(
+        coordinator,
+        data_type_name=data_type,
+        data_source=data_source,
+        **parallel_related_data_kwargs,
+    )
+
+    try:
+        results = await fetcher.process_items(
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            **kwargs,
+        )
+
+        return {
+            "phase": "raw",
+            "items_fetched": results.get("total_processed", 0),
+            "items_stored": results.get("total_processed", 0),
+            "duration": results.get("duration", 0),
+            "status": "completed",
+        }
+    finally:
+        await fetcher.cleanup()
+
+
+async def execute_staging_phase(
+    coordinator: ResourceCoordinator, data_type: str, **kwargs
+) -> dict[str, Any]:
+    """Execute data normalization to staging phase."""
+    logger.info(f"Executing staging phase for {data_type}")
+
+    normalizer = Normalizer(coordinator)
+    try:
+        results = await normalizer.normalize_data_type(data_type=data_type, **kwargs)
+
+        return {
+            "phase": "staging",
+            "items_normalized": (
+                results.get("main_records_processed", 0)
+                + results.get("related_records_processed", 0)
+            ),
+            "items_inserted": (
+                results.get("main_records_processed", 0)
+                + results.get("related_records_processed", 0)
+                + results.get("lists_extracted", 0)
+            ),
+            "duration": results.get("duration", 0),
+            "status": results.get("status", "completed"),
+            "errors": results.get("errors", 0),
+        }
+    finally:
+        await normalizer.cleanup()
+
+
+async def execute_production_phase(
+    coordinator: ResourceCoordinator, data_type: str, **kwargs
+) -> dict[str, Any]:
+    """Execute data cleaning to production phase."""
+    logger.info(f"Executing production phase for {data_type}")
+
+    cleaner = Cleaner(coordinator)
+    results = await cleaner.clean_data_type(data_type=data_type, **kwargs)
+
+    return {
+        "phase": "production",
+        "items_cleaned": results.get("total_records_processed", 0),
+        "items_validated": results.get("total_records_processed", 0),
+        "duration": results.get("duration", 0),
+        "status": results.get("status", "completed"),
+        "errors": results.get("total_errors", 0),
+    }
+
+
+# =============================================================================
 # Convenience function for direct execution
-async def execute_streamlined_pipeline(
+# =============================================================================
+
+
+async def execute_pipeline(
     coordinator: ResourceCoordinator,
     data_type: str,
     phases: list[str],
@@ -408,7 +438,7 @@ async def execute_streamlined_pipeline(
     **kwargs,
 ) -> dict[str, Any]:
     """
-    Execute streamlined pipeline directly without creating executor instance.
+    Execute pipeline directly without creating executor instance.
 
     Args:
         coordinator: Resource coordinator instance
@@ -422,7 +452,7 @@ async def execute_streamlined_pipeline(
     Returns:
         Execution results dictionary
     """
-    executor = StreamlinedExecutor(coordinator)
+    executor = Executor(coordinator)
     return await executor.execute_data_type(
         data_type=data_type,
         phases=phases,

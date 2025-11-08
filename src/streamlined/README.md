@@ -10,7 +10,7 @@ The streamlined architecture transforms the original 8-layer complex pipeline in
 
 ```bash
 CLI → Pipeline Runner → Generalized Assets → ProcessingResource →
-BaseFetcher → CongressionalBaseFetcher → SpecificFetcher → OptimizedParallelProcessor
+BaseFetcher → CongressionalBaseFetcher → SpecificFetcher → ParallelProcessor
 ```
 
 ### After (4 Focused Layers)
@@ -30,48 +30,48 @@ Enhanced CLI → Direct Asset Executor → Streamlined Components → Integrated
 
 ## 📦 Architecture Components
 
-### 1. StreamlinedExecutor
+### 1. Executor
 
 Direct execution coordinator that orchestrates the pipeline.
 
 ```python
-from bicam_collection.streamlined import StreamlinedExecutor, ResourceCoordinator
+from bicam_collection.streamlined import Executor, ResourceCoordinator
 
 coordinator = ResourceCoordinator()
-executor = StreamlinedExecutor(coordinator)
+executor = Executor(coordinator)
 results = await executor.execute_data_type("bills", ["raw", "staging", "production"])
 ```
 
-### 2. StreamlinedFetcher
+### 2. Fetcher
 
 Integrated fetching with built-in parallel processing.
 
 ```python
-from bicam_collection.streamlined import StreamlinedFetcher
+from bicam_collection.streamlined import Fetcher
 
-fetcher = StreamlinedFetcher(coordinator)
+fetcher = Fetcher(coordinator)
 results = await fetcher.fetch_data_type("bills", from_date="2024-01-01", limit=100)
 ```
 
-### 3. StreamlinedCleaner
+### 3. Cleaner
 
 Focused data cleaning with integrated validation.
 
 ```python
-from bicam_collection.streamlined import StreamlinedCleaner
+from bicam_collection.streamlined import Cleaner
 
-cleaner = StreamlinedCleaner(coordinator)
+cleaner = Cleaner(coordinator)
 results = await cleaner.clean_data_type("bills", batch_size=50)
 ```
 
-### 4. StreamlinedNormalizer
+### 4. Normalizer
 
 Focused database normalization with batch processing and recursive list extraction.
 
 ```python
-from bicam_collection.streamlined import StreamlinedNormalizer
+from bicam_collection.streamlined import Normalizer
 
-normalizer = StreamlinedNormalizer(coordinator)
+normalizer = Normalizer(coordinator)
 results = await normalizer.normalize_data_type("bills", batch_size=100)
 ```
 
@@ -102,6 +102,24 @@ amendments (main table from amendments_raw)
 - **Recursive List Extraction**: Extracts lists from all tables, including those extracted from other tables
 - **Smart Table Discovery**: Checks raw schema first, then staging schema for proper processing order
 
+## DBT Cleaning and Standardization
+
+After fetch + normalize, cleaning and standardization are handled in the dbt project at `dbt/`:
+
+- stg_ layer: light typing and standardization over `bicam_staging_<source>` tables
+- int_ layer: structural transforms (splits/joins), deduplication, rule-based cleaning
+- core_ layer: harmonized entities (merge across sources)
+- mart_ layer: analytics-ready, consumer-specific marts
+
+Run locally:
+
+1) Install dbt Postgres adapter, create a `~/.dbt/profiles.yml` (see `dbt/profiles.example.yml`).
+2) `cd dbt && dbt build --select tag:congressional` (runs stg -> int -> core -> mart for congressional).
+
+Python helper (optional):
+
+- Use `src/streamlined/dbt_integration/runner.py:1` to invoke dbt from Python.
+
 ## 🔌 Plugin System
 
 The plugin system automatically preserves all existing custom logic:
@@ -130,11 +148,11 @@ await registry.auto_register_plugins()  # Discovers and registers all existing i
 ### Direct Execution (Recommended)
 
 ```python
-from bicam_collection.streamlined import execute_streamlined_pipeline, ResourceCoordinator
+from bicam_collection.streamlined import execute_pipeline, ResourceCoordinator
 
 # Simple execution
 coordinator = ResourceCoordinator()
-results = await execute_streamlined_pipeline(
+results = await execute_pipeline(
     coordinator=coordinator,
     data_type="bills",
     phases=["raw", "staging", "production"],
@@ -147,16 +165,16 @@ results = await execute_streamlined_pipeline(
 
 ```python
 from bicam_collection.streamlined import (
-    StreamlinedFetcher, 
-    StreamlinedCleaner, 
-    StreamlinedNormalizer,
+    Fetcher, 
+    Cleaner, 
+    Normalizer,
     ResourceCoordinator
 )
 
 coordinator = ResourceCoordinator()
-fetcher = StreamlinedFetcher(coordinator)
-cleaner = StreamlinedCleaner(coordinator)
-normalizer = StreamlinedNormalizer(coordinator)
+fetcher = Fetcher(coordinator)
+cleaner = Cleaner(coordinator)
+normalizer = Normalizer(coordinator)
 
 # Use components individually
 fetch_results = await fetcher.fetch_data_type("bills", limit=10)
@@ -167,15 +185,15 @@ normalize_results = await normalizer.normalize_data_type("bills")
 ### Configuration
 
 ```python
-from bicam_collection.streamlined import StreamlinedConfig, ResourceCoordinator
+from bicam_collection.streamlined import Config, ResourceCoordinator
 
 # Load from environment
-config = StreamlinedConfig.from_environment()
+config = Config.from_env()
 
 # Create custom configuration
 from bicam_collection.streamlined.resources.config import DatabaseConfig, APIConfig
 
-custom_config = StreamlinedConfig(
+custom_config = Config(
     database=DatabaseConfig(host="localhost", port=5432, name="bicam_test"),
     api=APIConfig(base_url="https://api.congress.gov", timeout=30)
 )
@@ -258,9 +276,9 @@ storage_manager = coordinator.storage_manager
 ### Plugin Testing
 
 ```python
-from bicam_collection.streamlined import StreamlinedFetcher
+from bicam_collection.streamlined import Fetcher
 
-fetcher = StreamlinedFetcher(coordinator)
+fetcher = Fetcher(coordinator)
 test_results = await fetcher.test_plugin_integration("bills")
 print(test_results)
 ```
@@ -268,9 +286,9 @@ print(test_results)
 ### Configuration Testing
 
 ```python
-from bicam_collection.streamlined import StreamlinedConfig
+from bicam_collection.streamlined import Config
 
-config = StreamlinedConfig.from_environment()
+config = Config.from_env()
 validation_errors = config.validate()
 if validation_errors:
     print(f"Configuration errors: {validation_errors}")
@@ -281,10 +299,10 @@ if validation_errors:
 ```bash
 streamlined/
 ├── __init__.py              # Main module exports
-├── executor.py              # StreamlinedExecutor
-├── fetcher.py               # StreamlinedFetcher
-├── cleaner.py               # StreamlinedCleaner
-├── normalizer.py            # StreamlinedNormalizer
+├── executor.py              # Executor
+├── fetcher.py               # Fetcher
+├── cleaner.py               # Cleaner
+├── normalizer.py            # Normalizer
 ├── cli.py                   # Command-line interface
 ├── resources/               # Resource management
 │   ├── __init__.py
@@ -363,7 +381,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 # Run with debug logging
-results = await execute_streamlined_pipeline(...)
+results = await execute_pipeline(...)
 ```
 
 ## 📚 Examples

@@ -155,7 +155,7 @@ class InfrastructureConfig:
 
 
 @dataclass
-class StreamlinedConfig:
+class Config:
     """Complete configuration for streamlined pipeline."""
 
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
@@ -184,7 +184,7 @@ class StreamlinedConfig:
         self.fallback_days = int(os.getenv("FALLBACK_DAYS", "30"))
 
     @classmethod
-    def from_env(cls, env_file: str | None = None) -> "StreamlinedConfig":
+    def from_env(cls, env_file: str | None = None) -> "Config":
         """Create configuration from environment variables."""
         if load_dotenv:
             if env_file:
@@ -312,7 +312,7 @@ class StreamlinedConfig:
 
 def get_config() -> dict[str, Any]:
     """Get configuration as a dictionary with proper API key handling."""
-    config = StreamlinedConfig.from_env()
+    config = Config.from_env()
 
     # Ensure API keys are properly handled as a list
     api_keys = config.api.keys

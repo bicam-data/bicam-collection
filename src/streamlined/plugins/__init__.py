@@ -22,7 +22,7 @@ from .base import (
 from .congressional import (
     CongressionalFetcherPlugin,
 )
-from .consolidated_registry import get_consolidated_registry
+from .registry import get_registry
 from .govinfo import GovInfoFetcherPlugin
 
 __all__ = [
@@ -31,7 +31,7 @@ __all__ = [
     "FetcherPlugin",
     "CleanerPlugin",
     "NormalizerPlugin",
-    "get_consolidated_registry",
+    "get_registry",
     "CongressionalFetcherPlugin",
     "GovInfoFetcherPlugin",
 ]

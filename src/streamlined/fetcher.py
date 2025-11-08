@@ -1,9 +1,9 @@
 """
-Streamlined Fetcher - Refactored to work with OptimizedParallelProcessor and checkpoint system
+Streamlined Fetcher - Refactored to work with ParallelProcessor and checkpoint system
 
 This fetcher focuses on:
 1. Using plugins for custom logic
-2. Implementing the interface expected by OptimizedParallelProcessor
+2. Implementing the interface expected by ParallelProcessor
 3. NOT doing its own parallel processing
 4. Comprehensive checkpoint management support
 """
@@ -21,18 +21,18 @@ from .libs.hierarchical_checkpoint_system import (
     HierarchicalCheckpointManager,
     ProcessingStage,
 )
-from .plugins.consolidated_registry import get_consolidated_registry
-from .processing.optimized_processor import OptimizedParallelProcessor
+from .plugins.registry import get_registry
+from .processing.processor import ParallelProcessor
 
 logger = logging.getLogger(__name__)
 
 
-class StreamlinedFetcher:
+class Fetcher:
     """
-    Fetcher that uses plugins for custom logic and works with OptimizedParallelProcessor.
+    Fetcher that uses plugins for custom logic and works with ParallelProcessor.
 
     This class:
-    - Delegates parallel processing to OptimizedParallelProcessor
+    - Delegates parallel processing to ParallelProcessor
     - Uses plugins for data-source-specific logic
     - Provides the interface expected by the parallel processor
     - Supports comprehensive checkpoint management
@@ -93,7 +93,7 @@ class StreamlinedFetcher:
             self.api_keys = client.api_keys
 
         logger.info(
-            f"StreamlinedFetcher initialized for {data_type_name} (source: {data_source}, "
+            f"Fetcher initialized for {data_type_name} (source: {data_source}, "
             f"parallel_related_data: {self.enable_parallel_related_data})"
         )
 
@@ -107,7 +107,7 @@ class StreamlinedFetcher:
         parallel_related_data_threshold: int | None = None,
     ):
         """
-        Create a StreamlinedFetcher from a ResourceCoordinator.
+        Create a Fetcher from a ResourceCoordinator.
 
         This is the preferred way to create a fetcher when using the new
         streamlined architecture with ResourceCoordinator.
@@ -118,20 +118,20 @@ class StreamlinedFetcher:
         checkpoint_manager = resource_coordinator.get_checkpoint_manager_instance()
         run_manager = await resource_coordinator.get_run_manager_instance()
 
-        # Get ALL API keys from the coordinator for OptimizedParallelProcessor
-        # OptimizedParallelProcessor manages keys dynamically, so we need ALL keys, not session-based keys
+        # Get ALL API keys from the coordinator for ParallelProcessor
+        # ParallelProcessor manages keys dynamically, so we need ALL keys, not session-based keys
         system_manager = api_key_manager.get_system_manager()
         api_keys = system_manager.api_keys if system_manager else []
 
         logger.info(
-            f"Fetcher initialized with {len(api_keys)} API keys for OptimizedParallelProcessor"
+            f"Fetcher initialized with {len(api_keys)} API keys for ParallelProcessor"
         )
 
-        # OptimizedParallelProcessor expects ALL keys and will create len(api_keys) * 1.5 workers
+        # ParallelProcessor expects ALL keys and will create len(api_keys) * 1.5 workers
         if data_type_name and api_keys:
             expected_workers = int(len(api_keys) * 1.5)
             logger.info(
-                f"OptimizedParallelProcessor will create ~{expected_workers} workers from {len(api_keys)} keys"
+                f"ParallelProcessor will create ~{expected_workers} workers from {len(api_keys)} keys"
             )
 
         # Create a client using the coordinator's client management
@@ -164,7 +164,7 @@ class StreamlinedFetcher:
             return
 
         try:
-            registry = get_consolidated_registry()
+            registry = get_registry()
             self._plugin = registry.get_fetcher_plugin(self.data_type_name)
             if self._plugin:
                 logger.info(f"Loaded plugin for {self.data_type_name}")
@@ -243,7 +243,7 @@ class StreamlinedFetcher:
         return False
 
     # =============================================================================
-    # MAIN PROCESSING METHOD - Delegates to OptimizedParallelProcessor
+    # MAIN PROCESSING METHOD - Delegates to ParallelProcessor
     # =============================================================================
 
     async def process_items(
@@ -259,7 +259,7 @@ class StreamlinedFetcher:
         **kwargs,
     ) -> dict[str, Any]:
         """
-        Main processing method that uses OptimizedParallelProcessor for parallel execution.
+        Main processing method that uses ParallelProcessor for parallel execution.
         """
         logger.info(f"Starting {self.data_type_name} processing")
 
@@ -298,8 +298,8 @@ class StreamlinedFetcher:
             logger.info(f"Starting fresh {self.data_type_name} processing")
 
         if enable_parallelization and self.api_keys and len(self.api_keys) > 1:
-            # Use OptimizedParallelProcessor for parallel processing
-            processor = OptimizedParallelProcessor(
+            # Use ParallelProcessor for parallel processing
+            processor = ParallelProcessor(
                 api_keys=self.api_keys,
                 client_class=self.client.__class__,
                 db_pool=self.db_pool,
@@ -332,7 +332,7 @@ class StreamlinedFetcher:
             )
 
     # =============================================================================
-    # INTERFACE METHODS FOR OptimizedParallelProcessor
+    # INTERFACE METHODS FOR ParallelProcessor
     # =============================================================================
 
     async def fetch_phase_1_data_with_client(
@@ -572,7 +572,7 @@ class StreamlinedFetcher:
             return None
 
         try:
-            registry = get_consolidated_registry()
+            registry = get_registry()
             config_file = registry.get_config_file(self.data_type_name)
 
             if config_file:
@@ -697,7 +697,7 @@ class StreamlinedFetcher:
         """
         Fetch specific related tables from existing Phase 2 data using parallel processing.
 
-        This method delegates to OptimizedParallelProcessor for true parallel execution:
+        This method delegates to ParallelProcessor for true parallel execution:
         1. Queries the database for existing Phase 2 data
         2. Creates parallel workers to fetch related tables concurrently
         3. Uses the full optimized storage infrastructure
@@ -749,14 +749,14 @@ class StreamlinedFetcher:
                 return {"error": f"Failed to create API client: {e}"}
 
         logger.info(
-            f"Delegating related tables fetch to OptimizedParallelProcessor for {self.data_type_name}"
+            f"Delegating related tables fetch to ParallelProcessor for {self.data_type_name}"
         )
 
         # Import here to avoid circular imports
-        from .processing.optimized_processor import OptimizedParallelProcessor
+        from .processing.processor import ParallelProcessor
 
-        # Create OptimizedParallelProcessor for parallel execution
-        processor = OptimizedParallelProcessor(
+        # Create ParallelProcessor for parallel execution
+        processor = ParallelProcessor(
             api_keys=self.api_keys,
             client_class=self.client.__class__ if self.client else None,
             db_pool=self.db_pool,
@@ -835,7 +835,7 @@ class StreamlinedFetcher:
         return related_data
 
     # =============================================================================
-    # STORAGE METHODS (called by OptimizedParallelProcessor)
+    # STORAGE METHODS (called by ParallelProcessor)
     # =============================================================================
 
     async def store_phase_1_data(self, data: dict, batch_id: str | None = None) -> None:
@@ -1022,7 +1022,7 @@ class StreamlinedFetcher:
     def get_default_schema(self) -> str:
         """Get the default schema name for this data type."""
         try:
-            registry = get_consolidated_registry()
+            registry = get_registry()
             schema_names = registry.get_schema_names(self.data_type_name)
             return schema_names.get("raw", "bicam_raw_unknown")
         except Exception:
@@ -1032,7 +1032,7 @@ class StreamlinedFetcher:
         self, from_date: str | None, to_date: str | None, limit: int | None, **kwargs
     ) -> dict[str, Any]:
         """
-        Get pagination metadata for the OptimizedParallelProcessor.
+        Get pagination metadata for the ParallelProcessor.
         This is called by the processor to determine work distribution.
         """
         try:
@@ -1122,7 +1122,7 @@ class StreamlinedFetcher:
         # Fallback to registry if not set
         if self.data_type_name:
             try:
-                registry = get_consolidated_registry()
+                registry = get_registry()
                 return registry.get_data_source(self.data_type_name)
             except Exception as e:
                 logger.warning(
@@ -1338,7 +1338,7 @@ class StreamlinedFetcher:
 
     async def cleanup(self):
         """Cleanup resources and update metadata tables."""
-        logger.info("StreamlinedFetcher cleanup started")
+        logger.info("Fetcher cleanup started")
 
         try:
             # Flush checkpoint caches
@@ -1441,10 +1441,10 @@ class StreamlinedFetcher:
                 except Exception as e:
                     logger.warning(f"Error updating metadata during cleanup: {e}")
 
-            logger.info("StreamlinedFetcher cleanup completed")
+            logger.info("Fetcher cleanup completed")
 
         except Exception as e:
-            logger.error(f"Error during StreamlinedFetcher cleanup: {e}")
+            logger.error(f"Error during Fetcher cleanup: {e}")
 
     async def _get_latest_processed_date(self) -> str | None:
         """

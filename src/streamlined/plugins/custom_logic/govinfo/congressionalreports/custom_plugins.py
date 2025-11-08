@@ -115,6 +115,110 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             pass
         return False
 
+    def _normalize_report_type(self, report_type_raw: str | None) -> str | None:
+        """Normalize document type to canonical tokens like 'hrpt' or 'srpt'.
+
+        Accepts common variants (e.g., 'H. Rept.', 'House Report', 'S Rept', etc.).
+        """
+        if not report_type_raw:
+            return None
+        s = str(report_type_raw).lower().strip()
+        # remove punctuation and extra spaces
+        s = re.sub(r"[\s\._-]+", " ", s)
+        s_nopunct = re.sub(r"[^a-z0-9 ]", "", s)
+
+        mappings = {
+            # House report
+            "hrpt": "hrpt",
+            "h rept": "hrpt",
+            "h rpt": "hrpt",
+            "h rep": "hrpt",
+            "h report": "hrpt",
+            "house report": "hrpt",
+            "house rept": "hrpt",
+            # Senate report
+            "srpt": "srpt",
+            "s rept": "srpt",
+            "s rpt": "srpt",
+            "s rep": "srpt",
+            "s report": "srpt",
+            "senate report": "srpt",
+            "senate rept": "srpt",
+        }
+
+        # Direct hit
+        if s in mappings:
+            return mappings[s]
+        if s_nopunct in mappings:
+            return mappings[s_nopunct]
+
+        # Try collapsing to letters only
+        letters_only = re.sub(r"[^a-z]", "", s_nopunct)
+        if letters_only in ("hrpt", "hrept", "hreport"):
+            return "hrpt"
+        if letters_only in ("srpt", "srept", "sreport"):
+            return "srpt"
+
+        # Fallback to raw token if already hrpt/srpt-like
+        if letters_only in ("hrpt", "srpt"):
+            return letters_only
+
+        return report_type_raw.lower()
+
+    def _normalize_report_number(self, num: Any) -> str | None:
+        """Extract numeric component of documentnumber if present.
+
+        Returns string digits or None.
+        """
+        if num is None:
+            return None
+        s = str(num).strip()
+        m = re.findall(r"\d+", s)
+        if not m:
+            return s or None
+        return "".join(m)
+
+    def _parse_heading_for_part(self, cleaned: dict[str, Any]) -> int | None:
+        """Look for part/volume indications in heading/title/subtitle fields."""
+        fields = [
+            cleaned.get("heading"),
+            cleaned.get("title"),
+            cleaned.get("subtitle"),
+            cleaned.get("shorttitle"),
+        ]
+        for val in fields:
+            if not val:
+                continue
+            text = str(val)
+            m = re.search(r"\bpart\s+([ivxlcdm]+|\d+)\b", text, flags=re.IGNORECASE)
+            if m:
+                token = m.group(1)
+                if token.isdigit():
+                    return int(token)
+                roman_val = self.roman_to_int(token)
+                if roman_val:
+                    return roman_val
+            m = re.search(r"\bvol(?:ume)?\s+([ivxlcdm]+|\d+)\b", text, flags=re.IGNORECASE)
+            if m:
+                token = m.group(1)
+                if token.isdigit():
+                    return int(token)
+                roman_val = self.roman_to_int(token)
+                if roman_val:
+                    return roman_val
+        return None
+
+    def _detect_is_supplement(self, cleaned: dict[str, Any]) -> bool:
+        """Detect if record is a supplement/appendix/addendum variant."""
+        candidates = [cleaned.get("heading"), cleaned.get("title"), cleaned.get("subtitle")]
+        for val in candidates:
+            if not val:
+                continue
+            s = str(val).lower()
+            if any(token in s for token in ("supplement", "suppl", "supp.", "appendix", "app.", "addendum")):
+                return True
+        return False
+
     def _build_report_identity(
         self, cleaned: dict[str, Any]
     ) -> tuple[str, str | None, str | None, int, str, str, str, str]:
@@ -157,10 +261,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             congress = manual_val.get("congress")
             part_number = manual_val.get("part_number")
         else:
-            report_type = cleaned.get("documenttype")
-            report_type = report_type.lower() if isinstance(report_type, str) else None
-            part_number = cleaned.get("documentpart") or 0
-            report_number = cleaned.get("documentnumber") or None
+            report_type = self._normalize_report_type(cleaned.get("documenttype"))
+            part_number = cleaned.get("documentpart") or cleaned.get("volumenumber") or 0
+            # Extract numeric component of documentnumber if not clean
+            report_number = self._normalize_report_number(cleaned.get("documentnumber"))
             congress = str(cleaned.get("congress") or "") or None
 
         if not all([report_type, report_number, congress]):
@@ -169,10 +273,12 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             )
 
         if not is_package_row:
-            part_field = cleaned.get("partnumber") or cleaned.get("documentpart")
+            part_field = cleaned.get("partnumber") or cleaned.get("documentpart") or cleaned.get("volumenumber")
             if part_field is None:
                 # Parse from package ID or other fields
-                parsed_part = self.parse_part_from_fields(cleaned)
+                parsed_part = (
+                    self._parse_heading_for_part(cleaned) or self.parse_part_from_fields(cleaned)
+                )
                 part_number = parsed_part if parsed_part is not None else part_number
             elif cleaned.get("packageid") == cleaned.get("granuleid"):
                 part_number = 0
@@ -197,7 +303,10 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
         else:
             part_token_base = str(part_number)
 
-        part_token = f"{part_token_base}{'e' if is_errata else ''}"
+        # Detect supplements and append appropriate suffix token
+        is_supplement = self._detect_is_supplement(cleaned)
+        suffix = ("e" if is_errata else "") + ("s" if is_supplement else "")
+        part_token = f"{part_token_base}{suffix}"
         report_id = f"{report_type}{report_number}-{part_token}-{congress}"
         granule_id = (
             str(cleaned.get("granuleid") or cleaned.get("granule_id"))
@@ -258,33 +367,27 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             return False
 
     def roman_to_int(self, roman: str) -> int | None:
-        mapping = {
-            "I": 1,
-            "II": 2,
-            "III": 3,
-            "IV": 4,
-            "V": 5,
-            "VI": 6,
-            "VII": 7,
-            "VIII": 8,
-            "IX": 9,
-            "X": 10,
-            "XI": 11,
-            "XII": 12,
-            "XIII": 13,
-            "XIV": 14,
-            "XV": 15,
-            "XVI": 16,
-            "XVII": 17,
-            "XVIII": 18,
-            "XIX": 19,
-            "XX": 20,
-        }
-        return mapping.get(roman.upper())
+        """Convert Roman numerals up to several hundred. Returns None if invalid."""
+        if not roman:
+            return None
+        s = roman.upper()
+        values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+        total = 0
+        prev = 0
+        for ch in reversed(s):
+            if ch not in values:
+                return None
+            val = values[ch]
+            if val < prev:
+                total -= val
+            else:
+                total += val
+                prev = val
+        return total if total > 0 else None
 
     def parse_part_from_fields(self, cleaned: dict[str, Any]) -> int:
-        # Priority: explicit partnumber -> title/subtitle -> packageid suffix
-        part_field = cleaned.get("partnumber") or cleaned.get("documentpart")
+        # Priority: explicit partnumber/volumenumber -> heading/title/subtitle -> packageid suffix
+        part_field = cleaned.get("partnumber") or cleaned.get("documentpart") or cleaned.get("volumenumber")
         if part_field:
             part_field_str = str(part_field).strip()
             if part_field_str.isdigit():
@@ -292,6 +395,11 @@ class CongressionalreportsCleanerLogic(BaseCleanerLogic):
             roman_val = self.roman_to_int(part_field_str)
             if roman_val is not None:
                 return roman_val
+
+        # Try headings/titles
+        parsed = self._parse_heading_for_part(cleaned)
+        if parsed:
+            return parsed
 
         # As a last resort, inspect packageid for suffix hints like volII/ptII/-pt2
         # But avoid matching report numbers (e.g., don't match "pt128" in "CRPT-104hrpt128")

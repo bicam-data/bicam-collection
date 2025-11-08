@@ -20,6 +20,7 @@ from urllib.parse import quote, urlencode
 
 import aiohttp
 import asyncpg
+from rotisserie import AuthConfig
 
 from .base_api_client import BaseAPIClient, BaseAPIError
 
@@ -189,11 +190,10 @@ class GovInfoAPIClient(BaseAPIClient):
 
         path = f"/collections/{collection_code}/{formatted_start}/{formatted_end}"
 
-        # Build query parameters
+        # Build query parameters (api_key will be added by rotisserie)
         params = {
             "pageSize": page_size,
             "offsetMark": offset_mark,
-            "api_key": self._get_current_api_key(),
         }
 
         if doc_class:
@@ -203,112 +203,80 @@ class GovInfoAPIClient(BaseAPIClient):
         return f"{self.base_url}{path}?{query_string}"
 
     async def _make_request(self, url: str, max_retries: int = 3) -> dict[str, Any]:
-        """Make an API request and return the JSON response with comprehensive error handling."""
+        """Make an API request and return the JSON response using rotisserie for key management."""
         await self._ensure_session()
         await self._rate_limit()
 
-        retries = 0
+        logger.debug(f"Making request to: {url}")
 
-        while retries < max_retries:
-            logger.debug(f"Making request to: {url} (attempt {retries + 1})")
+        # Extract endpoint from URL for rotisserie
+        # GovInfo URLs are full URLs, extract the path
+        endpoint = url.replace(self.base_url, "").split("?")[0]
+        if not endpoint.startswith("/"):
+            endpoint = f"/{endpoint}"
 
+        # Remove api_key from URL if present (rotisserie will add it)
+        url_without_key = re.sub(r"[&?]api_key=[^&]*", "", url)
+        if "?" in url_without_key and url_without_key.endswith("?"):
+            url_without_key = url_without_key.rstrip("?")
+
+        # Use rotisserie auth context manager for automatic key rotation and 429 handling
+        # Configure to use query parameter for API key (GovInfo API uses api_key query param)
+        auth_config = AuthConfig(in_="query", query_param="api_key")
+        async with self.key_pool.auth(
+            endpoint=endpoint, reserve=1, priority=1, auth_config=auth_config
+        ) as auth:
             try:
-                async with self.session.get(url) as response:
+                # For aiohttp, use the decorator style with auth.get()
+                async with auth.get(self.session, url_without_key) as response:
                     logger.debug(f"Response status: {response.status}")
 
                     if response.status == 200:
                         data = await response.json()
                         return data
 
-                    # Use base class methods for common error handling
-                    if await self._handle_rate_limit_response(response):
-                        # Update URL with new API key for GovInfo-specific handling
-                        if "api_key=" in url:
-                            new_api_key = self._get_current_api_key()
-                            url = re.sub(
-                                r"api_key=[^&]*", f"api_key={new_api_key}", url
-                            )
-                        continue
-
-                    if await self._handle_auth_error(response):
-                        # Update URL with new API key for GovInfo-specific handling
-                        if "api_key=" in url:
-                            new_api_key = self._get_current_api_key()
-                            url = re.sub(
-                                r"api_key=[^&]*", f"api_key={new_api_key}", url
-                            )
-                        retries += 1
-                        continue
-
-                    # Handle GovInfo-specific errors
+                    # Rotisserie handles 429 automatically, but log other errors
                     if response.status == 403:
-                        # API key might be invalid, try rotating
-                        logger.warning(
-                            f"API key failed (403), rotating to next key (attempt {retries + 1})"
+                        response_text = await response.text()
+                        logger.warning(f"403 response text: {response_text}")
+                        logger.warning(f"403 request url: {url_without_key}")
+                        await self._log_error_to_db(
+                            url_without_key,
+                            "API key authentication failed (403)",
+                            "api_key_error",
                         )
-                        self._rotate_api_key()
-                        retries += 1
-                        if retries >= max_retries:
-                            await self._log_error_to_db(
-                                url,
-                                f"All API keys failed authentication after {max_retries} attempts",
-                                "api_key_error",
-                            )
-                            raise GovInfoAPIError(
-                                f"All API keys failed authentication after {max_retries} attempts"
-                            )
-                        # Update URL with new API key
-                        if "api_key=" in url:
-                            new_api_key = self._get_current_api_key()
-                            url = re.sub(
-                                r"api_key=[^&]*", f"api_key={new_api_key}", url
-                            )
-                        continue
+                        raise GovInfoAPIError(
+                            f"API key authentication failed (403): {response_text}"
+                        )
                     elif response.status in [520, 503]:
-                        # Cloudflare error or Service Unavailable - retry after 10 seconds
-                        await asyncio.sleep(10)
-                        continue
+                        # Cloudflare error or Service Unavailable
+                        error_text = await response.text()
+                        await self._log_error_to_db(
+                            url_without_key,
+                            f"Service unavailable ({response.status}): {error_text}",
+                            "service_error",
+                        )
+                        raise GovInfoAPIError(
+                            f"Service unavailable ({response.status}): {error_text}"
+                        )
                     else:
                         error_text = await response.text()
-                        retries += 1
-                        if retries < max_retries:
-                            logger.warning(
-                                f"API error {response.status}, retrying (attempt {retries + 1}): {error_text}"
-                            )
-                            await asyncio.sleep(2**retries)  # Exponential backoff
-                            continue
-                        else:
-                            await self._log_error_to_db(
-                                url,
-                                f"API request failed: {response.status} - {error_text}",
-                                "api_request_error",
-                            )
-                            raise GovInfoAPIError(
-                                f"API request failed: {response.status} - {error_text}"
-                            )
+                        await self._log_error_to_db(
+                            url_without_key,
+                            f"API request failed: {response.status} - {error_text}",
+                            "api_request_error",
+                        )
+                        raise GovInfoAPIError(
+                            f"API request failed: {response.status} - {error_text}"
+                        )
 
             except aiohttp.ClientError as e:
-                retries += 1
-                if retries < max_retries:
-                    logger.warning(
-                        f"Network error, retrying (attempt {retries + 1}): {e}"
-                    )
-                    await asyncio.sleep(2**retries)  # Exponential backoff
-                    continue
-                else:
-                    await self._log_error_to_db(
-                        url,
-                        f"Network error after {max_retries} attempts: {e}",
-                        "network_error",
-                    )
-                    raise GovInfoAPIError(
-                        f"Network error after {max_retries} attempts: {e}"
-                    ) from e
-
-        await self._log_error_to_db(
-            url, f"Max retries ({max_retries}) exceeded", "max_retries_exceeded"
-        )
-        raise GovInfoAPIError(f"Max retries ({max_retries}) exceeded")
+                await self._log_error_to_db(
+                    url_without_key,
+                    f"Network error: {e}",
+                    "network_error",
+                )
+                raise GovInfoAPIError(f"Network error: {e}") from e
 
     # =============================================================================
     # PHASE 1: COLLECTION DATA RETRIEVAL (equivalent to retrieve_data_list)

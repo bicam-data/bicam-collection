@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 import asyncpg
+from rotisserie import AuthConfig
 
 from .base_api_client import BaseAPIClient, BaseAPIError
 
@@ -90,7 +91,7 @@ class CongressionalAPIClient(BaseAPIClient):
     async def _make_request(
         self, endpoint: str, params: dict | None = None, max_retries: int = 3
     ) -> dict[str, Any]:
-        """Make an API request and return the JSON response."""
+        """Make an API request and return the JSON response using rotisserie for key management."""
         await self._ensure_session()
         await self._rate_limit()
 
@@ -98,147 +99,74 @@ class CongressionalAPIClient(BaseAPIClient):
         if not endpoint.startswith("/"):
             endpoint = f"/{endpoint}"
 
-        # Build complete URL with parameters manually
+        # Build complete URL with parameters (excluding api_key - rotisserie handles that)
         request_params = params.copy() if params else {}
-        request_params.update(
-            {"format": "json", "api_key": self._get_current_api_key()}
-        )
+        request_params["format"] = "json"
 
-        # Manually construct URL with query parameters
+        # Manually construct URL with query parameters (without api_key)
         query_string = urlencode(request_params)
         url = f"{self.base_url}{endpoint}?{query_string}"
 
-        # Debug logging to show the constructed URL
         logger.debug(f"Making request to URL: {url}")
-        logger.debug(f"API key being used: {self._get_current_api_key()[:10]}...")
 
-        retries = 0
-
-        while retries < max_retries:
-            logger.debug(f"Making request to: {url} (attempt {retries + 1})")
-
+        # Use rotisserie auth context manager for automatic key rotation and 429 handling
+        # Rotisserie will automatically retry on 429 using Retry-After headers
+        # Configure to use query parameter for API key (Congressional API uses api_key query param)
+        auth_config = AuthConfig(in_="query", query_param="api_key")
+        async with self.key_pool.auth(
+            endpoint=endpoint, reserve=1, priority=1, auth_config=auth_config
+        ) as auth:
             try:
-                async with self.session.get(url) as response:
+                # For aiohttp, use the decorator style with auth.get()
+                async with auth.get(self.session, url) as response:
                     logger.debug(f"Response status: {response.status}")
 
                     if response.status == 200:
                         data = await response.json()
                         return data
 
-                    # Use base class methods for common error handling
-                    if await self._handle_rate_limit_response(response):
-                        continue  # Retry with new key
-
-                    if await self._handle_auth_error(response):
-                        retries += 1
-                        continue  # Retry with new key
-
-                    # Handle Congressional API specific errors
+                    # Rotisserie handles 429 automatically, but log other errors
                     if response.status == 403:
-                        # API key might be invalid or rate limited, try rotating
-                        logger.warning(
-                            f"API key failed (403), rotating to next key (attempt {retries + 1})"
+                        response_text = await response.text()
+                        logger.warning(f"403 response text: {response_text}")
+                        logger.warning(f"403 request url: {url}")
+                        await self._log_error_to_db(
+                            url,
+                            "API key authentication failed (403)",
+                            "api_key_error",
                         )
-
-                        # Log the response text to understand what the API is telling us
-                        try:
-                            response_text = await response.text()
-                            logger.warning(f"403 response text: {response_text}")
-                            logger.warning(f"403 request url: {url}")
-                        except Exception as e:
-                            logger.warning(f"Could not read 403 response text: {e}")
-
-                        self._rotate_api_key()
-
-                        # Check for Retry-After header (403 might also be rate limiting)
-                        retry_after = response.headers.get("Retry-After")
-                        if retry_after:
-                            try:
-                                # Retry-After can be either seconds or HTTP date
-                                if retry_after.isdigit():
-                                    wait_seconds = int(retry_after)
-                                else:
-                                    # Parse HTTP date format
-                                    from email.utils import parsedate_to_datetime
-
-                                    retry_time = parsedate_to_datetime(retry_after)
-                                    wait_seconds = max(
-                                        0,
-                                        (
-                                            retry_time - datetime.now(UTC)
-                                        ).total_seconds(),
-                                    )
-
-                                logger.info(
-                                    f"API requested wait time for 403: {wait_seconds} seconds"
-                                )
-                                await asyncio.sleep(wait_seconds)
-                            except (ValueError, TypeError) as e:
-                                logger.warning(
-                                    f"Failed to parse Retry-After header '{retry_after}': {e}"
-                                )
-                                # Fall back to short wait
-                                await asyncio.sleep(5)
-                        else:
-                            # No Retry-After header, use short wait
-                            await asyncio.sleep(5)
-
-                        retries += 1
-                        if retries >= max_retries:
-                            await self._log_error_to_db(
-                                url,
-                                f"All API keys failed authentication after {max_retries} attempts",
-                                "api_key_error",
-                            )
-                            raise CongressionalAPIError(
-                                f"All API keys failed authentication after {max_retries} attempts"
-                            )
-                        continue
+                        raise CongressionalAPIError(
+                            f"API key authentication failed (403): {response_text}"
+                        )
                     elif response.status in [520, 503]:
-                        # Cloudflare error or Service Unavailable - retry after 10 seconds
-                        await asyncio.sleep(10)
-                        continue
+                        # Cloudflare error or Service Unavailable
+                        error_text = await response.text()
+                        await self._log_error_to_db(
+                            url,
+                            f"Service unavailable ({response.status}): {error_text}",
+                            "service_error",
+                        )
+                        raise CongressionalAPIError(
+                            f"Service unavailable ({response.status}): {error_text}"
+                        )
                     else:
                         error_text = await response.text()
-                        retries += 1
-                        if retries < max_retries:
-                            logger.warning(
-                                f"API error {response.status}, retrying (attempt {retries + 1}): {error_text}"
-                            )
-                            await asyncio.sleep(2**retries)  # Exponential backoff
-                            continue
-                        else:
-                            await self._log_error_to_db(
-                                url,
-                                f"API request failed: {response.status} - {error_text}",
-                                "api_request_error",
-                            )
-                            raise CongressionalAPIError(
-                                f"API request failed: {response.status} - {error_text}"
-                            )
+                        await self._log_error_to_db(
+                            url,
+                            f"API request failed: {response.status} - {error_text}",
+                            "api_request_error",
+                        )
+                        raise CongressionalAPIError(
+                            f"API request failed: {response.status} - {error_text}"
+                        )
 
             except aiohttp.ClientError as e:
-                retries += 1
-                if retries < max_retries:
-                    logger.warning(
-                        f"Network error, retrying (attempt {retries + 1}): {e}"
-                    )
-                    await asyncio.sleep(2**retries)  # Exponential backoff
-                    continue
-                else:
-                    await self._log_error_to_db(
-                        url,
-                        f"Network error after {max_retries} attempts: {e}",
-                        "network_error",
-                    )
-                    raise CongressionalAPIError(
-                        f"Network error after {max_retries} attempts: {e}"
-                    ) from e
-
-        await self._log_error_to_db(
-            url, f"Max retries ({max_retries}) exceeded", "max_retries_exceeded"
-        )
-        raise CongressionalAPIError(f"Max retries ({max_retries}) exceeded")
+                await self._log_error_to_db(
+                    url,
+                    f"Network error: {e}",
+                    "network_error",
+                )
+                raise CongressionalAPIError(f"Network error: {e}") from e
 
     async def retrieve_full_data_from_url(
         self, url: str, full_key: str | None = None, max_retries: int = 5

@@ -14,16 +14,18 @@ import asyncpg
 import yaml
 
 from streamlined.api_clients import CongressionalAPIClient, GovInfoAPIClient
-from streamlined.libs.api_key_manager import APIKeySession, SystemAPIKeyManager
+
+# SystemAPIKeyManager and APIKeySession removed - using rotisserie instead
 from streamlined.libs.hierarchical_checkpoint_system import (
     HierarchicalCheckpointManager,
 )
 from streamlined.libs.run_tracking import RunManager
-from streamlined.plugins.consolidated_registry import get_consolidated_registry
-from streamlined.processing.optimized_storage_manager import OptimizedStorageManager
+from streamlined.processing.storage_manager import (
+    StorageManager as ProcessingStorageManager,
+)
 
 if TYPE_CHECKING:
-    from .config import StreamlinedConfig
+    from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -338,7 +340,12 @@ class DatabaseManager:
 
 
 class APIKeyManager:
-    """Focused manager for API key distribution and management."""
+    """
+    Simplified API key manager using rotisserie.
+
+    Rotisserie handles key rotation and rate limiting automatically,
+    so this manager is now just a thin wrapper for compatibility.
+    """
 
     def __init__(
         self,
@@ -348,41 +355,15 @@ class APIKeyManager:
     ):
         self.api_keys = api_keys
         self.parallelization_config = parallelization_config or {}
-        self.use_dynamic_pool = use_dynamic_pool
-        self._system_manager: SystemAPIKeyManager | None = None
         self._parallel_sessions: dict[str, list] = {}
 
-    def get_system_manager(self) -> SystemAPIKeyManager:
-        """Get or create system API key manager."""
-        if self._system_manager is None:
-            if not self.api_keys:
-                raise ValueError("No API keys configured")
-
-            enable_parallelization = bool(self.parallelization_config)
-
-            # For OptimizedParallelProcessor, use ALL available keys for maximum performance
-            # The old session-based approach was designed for traditional parallelization
-            if enable_parallelization:
-                keys_per_session = self.parallelization_config.get(
-                    "keys_per_session", len(self.api_keys)
-                )
-            else:
-                # Use all available keys for maximum performance, even in non-parallelized mode
-                keys_per_session = len(self.api_keys)
-
-            self._system_manager = SystemAPIKeyManager(
-                api_keys=self.api_keys,
-                default_keys_per_client=keys_per_session,
-                enable_parallelization=enable_parallelization,
-                use_dynamic_pool=self.use_dynamic_pool,
-            )
-
-            logger.info(f"Initialized API key manager with {len(self.api_keys)} keys")
-
-        return self._system_manager
-
     async def get_parallel_sessions(self, data_type: str, processing_type: str) -> list:
-        """Get or create parallel sessions for a data type."""
+        """
+        Get parallel sessions for a data type.
+
+        For fetchers: Returns a simple session dict with all API keys.
+        Rotisserie handles the actual key management in the API clients.
+        """
         if data_type in self._parallel_sessions:
             return self._parallel_sessions[data_type]
 
@@ -406,116 +387,38 @@ class APIKeyManager:
             )
             return sessions
 
-        # Handle API key-based parallelization for fetchers
-        system_manager = self.get_system_manager()
-
-        # For fetcher operations, use all available keys for OptimizedParallelProcessor
-        # unless explicitly configured otherwise
+        # For fetchers, create a simple session with all API keys
+        # Rotisserie in the API clients handles actual key rotation
         if processing_type == "fetcher":
-            if not self.parallelization_config:
-                # Use all available keys for OptimizedParallelProcessor
-                logger.info(
-                    f"Using all {len(self.api_keys)} keys for {data_type} OptimizedParallelProcessor"
-                )
-                session = APIKeySession(f"{data_type}_session_0", self.api_keys)
-                self._parallel_sessions[data_type] = [session]
-                return [session]
-            elif not system_manager.enable_parallelization:
-                # Use all available keys even when parallelization is disabled
-                logger.info(
-                    f"Parallelization disabled but using all {len(self.api_keys)} keys for {data_type}"
-                )
-                session = APIKeySession(f"{data_type}_session_0", self.api_keys)
-                self._parallel_sessions[data_type] = [session]
-                return [session]
-
-        # Original logic for configured parallelization
-        if not self.parallelization_config or not system_manager.enable_parallelization:
-            # Single session fallback (only for non-fetcher operations)
-            traditional_keys = system_manager.assign_keys_for_data_type(data_type)
-            if traditional_keys:
-                session = APIKeySession(f"{data_type}_session_0", traditional_keys)
-                self._parallel_sessions[data_type] = [session]
-                return [session]
-            return []
-
-        # Create parallel sessions
-        registry = get_consolidated_registry()
-
-        data_source_config = {}
-        try:
-            data_source = registry.get_data_source(data_type)
-            fetcher_config = self.parallelization_config.get("fetcher", {})
-            data_source_config = fetcher_config.get(data_source, {})
-        except Exception as e:
-            logger.warning(f"Error getting data source for {data_type}: {e}")
-
-        # For fetcher operations, calculate optimal number of sessions based on available keys
-        if processing_type == "fetcher":
-            available_keys = len(
-                [
-                    k
-                    for k, s in system_manager.key_status.items()
-                    if s.assigned_to is None
-                ]
-            )
-            keys_per_session = data_source_config.get("keys_per_session", 2)
-
-            # Calculate optimal number of sessions: use all available keys efficiently
-            if available_keys >= 4:
-                # If we have 4+ keys, create multiple sessions
-                num_sessions = max(2, available_keys // keys_per_session)
-            elif available_keys >= 2:
-                # If we have 2-3 keys, create 1 session with all keys
-                num_sessions = 1
-                keys_per_session = available_keys
-            else:
-                # If we have 1 key, create 1 session
-                num_sessions = 1
-                keys_per_session = 1
-
+            session = {
+                "session_id": f"{data_type}_session_0",
+                "api_keys": self.api_keys,
+                "type": "api_based",
+            }
+            self._parallel_sessions[data_type] = [session]
             logger.info(
-                f"Calculated optimal sessions for {data_type}: {num_sessions} sessions with {keys_per_session} keys each (from {available_keys} available keys)"
+                f"Created API session for {data_type} with {len(self.api_keys)} keys (rotisserie handles rotation)"
             )
-        else:
-            # For non-fetcher operations, use configured values
-            num_sessions = data_source_config.get("num_sessions", 1)
-            keys_per_session = data_source_config.get("keys_per_session", 2)
+            return [session]
 
-        sessions = system_manager.assign_parallel_sessions_for_data_type(
-            data_type, num_sessions, keys_per_session
-        )
-
-        self._parallel_sessions[data_type] = sessions
-        logger.info(
-            f"Created {len(sessions)} API key-based parallel sessions for {data_type}"
-        )
-        return sessions
+        # Default: single CPU-based session
+        session = {"session_id": f"{data_type}_session_0", "type": "cpu_based"}
+        self._parallel_sessions[data_type] = [session]
+        return [session]
 
     async def release_keys_for_data_type(self, data_type: str):
-        """Release keys for a specific data type."""
+        """Release sessions for a specific data type."""
         if data_type in self._parallel_sessions:
             del self._parallel_sessions[data_type]
-
-        if self._system_manager:
-            if hasattr(self._system_manager, "release_parallel_sessions_for_data_type"):
-                released = self._system_manager.release_parallel_sessions_for_data_type(
-                    data_type
-                )
-                logger.info(
-                    f"Released {len(released)} parallel sessions from {data_type}"
-                )
-            else:
-                released = self._system_manager.release_keys_for_data_type(data_type)
-                logger.info(f"Released {len(released)} keys from {data_type}")
+            logger.debug(f"Released sessions for {data_type}")
 
     def get_status(self) -> dict[str, Any]:
         """Get API key manager status."""
-        if self._system_manager:
-            status = self._system_manager.get_status_summary()
-            status["parallelization_config"] = self.parallelization_config
-            return status
-        return {"status": "no_manager_initialized"}
+        return {
+            "total_keys": len(self.api_keys),
+            "parallelization_config": self.parallelization_config,
+            "active_sessions": len(self._parallel_sessions),
+        }
 
 
 class CheckpointManager:
@@ -584,22 +487,22 @@ class StorageManager:
         self.db_manager = db_manager
         self.checkpoint_db_path = checkpoint_db_path
         self.batch_size = batch_size
-        self._manager: OptimizedStorageManager | None = None
+        self._manager: ProcessingStorageManager | None = None
 
-    async def get_manager(self) -> OptimizedStorageManager | None:
+    async def get_manager(self) -> ProcessingStorageManager | None:
         """Get or create storage manager."""
         if not self.use_optimized_storage:
             return None
 
         if self._manager is None and self.db_manager:
             db_pool = await self.db_manager.get_pool()
-            self._manager = OptimizedStorageManager(
+            self._manager = ProcessingStorageManager(
                 pg_pool=db_pool,
                 checkpoint_db_path=self.checkpoint_db_path,
                 batch_size=self.batch_size,
             )
             await self._manager.start()
-            logger.info("OptimizedStorageManager started")
+            logger.info("StorageManager started")
 
         return self._manager
 
@@ -638,17 +541,31 @@ class ClientManager:
                 clients.append(self._api_clients[client_key])
                 continue
 
+            # Get API keys from session (rotisserie handles rotation in clients)
+            api_keys = session.get("api_keys", [])
+            if not api_keys:
+                logger.warning(f"No API keys in session {client_key}, skipping")
+                continue
+
+            # Create rotisserie key pool for this client
+            from rotisserie import AsyncKeyPool, KeyConfig
+
+            key_configs = [KeyConfig(f"key_{j}", key) for j, key in enumerate(api_keys)]
+            key_pool = AsyncKeyPool(key_configs, distribute=True)
+
             if source == "congressional":
                 client = CongressionalAPIClient(
-                    api_keys=session.api_keys,
+                    api_keys=api_keys,
                     rate_limit_per_second=self.api_rate_limit,
                     db_pool=db_pool,
+                    key_pool=key_pool,
                 )
             elif source == "govinfo":
                 client = GovInfoAPIClient(
-                    api_keys=session.api_keys,
+                    api_keys=api_keys,
                     rate_limit_per_second=self.api_rate_limit,
                     db_pool=db_pool,
+                    key_pool=key_pool,
                 )
             else:
                 raise ValueError(f"Invalid source: {source}")
@@ -656,7 +573,7 @@ class ClientManager:
             self._api_clients[client_key] = client
             clients.append(client)
 
-            masked_keys = [k[:8] + "..." for k in session.api_keys]
+            masked_keys = [k[:8] + "..." for k in api_keys]
             logger.info(
                 f"Created API client for {data_type} session {i}: {masked_keys}"
             )
@@ -692,16 +609,16 @@ class ClientManager:
         logger.debug("API clients closed successfully")
 
 
-async def setup_streamlined_database(
+async def setup_database(
     host: str = None,
     port: int = None,
     database: str = None,
     user: str = None,
     password: str = None,
-    config: "StreamlinedConfig" = None,
+    config: "Config" = None,
 ) -> bool:
     """
-    Set up database schemas using streamlined architecture.
+    Set up database schemas.
 
     Args:
         host: Database host (or use config)
@@ -709,7 +626,7 @@ async def setup_streamlined_database(
         database: Database name (or use config)
         user: Database user (or use config)
         password: Database password (or use config)
-        config: StreamlinedConfig instance (takes precedence)
+        config: Config instance (takes precedence)
 
     Returns:
         True if setup successful, False otherwise

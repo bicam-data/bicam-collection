@@ -35,9 +35,9 @@ class GovInfoFetcherPlugin:
         """Load configuration for this data type."""
         try:
             # Load configuration from the consolidated registry which handles both list and dict YAML
-            from .consolidated_registry import get_consolidated_registry
+            from .registry import get_registry
 
-            registry = get_consolidated_registry()
+            registry = get_registry()
             data_type_config = registry.get_data_type_config(self.data_type)
 
             # Convert to SimpleNamespace for easier access
@@ -70,10 +70,10 @@ class GovInfoFetcherPlugin:
         )
 
     def _get_custom_logic_plugin(self, data_type: str):
-        from .consolidated_registry import get_consolidated_registry
+        from .registry import get_registry
 
         if self._custom_logic is None:
-            registry = get_consolidated_registry()
+            registry = get_registry()
             self._custom_logic = registry.get_custom_logic_plugin(data_type, "fetching")
 
         return self._custom_logic
