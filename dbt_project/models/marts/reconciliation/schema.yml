@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: int_committee_reports__congress
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: canonical_report_id
+        tests: [not_null]
+  - name: int_committee_reports__govinfo
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: canonical_report_id
+        tests: [not_null]
+  - name: int_committee_report_candidates
+    columns:
+      - name: candidate_id
+        tests: [not_null, unique]
+      - name: canonical_report_id
+        tests: [not_null]
+  - name: fct_committee_report_matches
+    columns:
+      - name: match_id
+        tests: [not_null, unique]
+      - name: decision
+        tests:
+          - accepted_values:
+              arguments:
+                values: [accepted, rejected, unmatched]
+

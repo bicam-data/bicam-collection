@@ -1,0 +1,23 @@
+entity: committee_report
+identity:
+  components:
+    - report_type
+    - report_number
+    - congress
+    - report_part
+    - is_errata
+  canonical_format: "{report_type}{report_number}-{congress}-{report_part}[e]"
+sources:
+  congress:
+    model: stg_congress__committee_report_detail
+    natural_key: report_part_id
+  govinfo:
+    model: stg_govinfo__committeereports
+    natural_key: report_id
+matching:
+  automatic_rule: exact_canonical_identity
+  corroborating_fields: [title, chamber, issued_at]
+  fuzzy_match_requires_review: true
+quality:
+  max_competing_accepted_matches: 0
+  max_missing_canonical_identity: 0

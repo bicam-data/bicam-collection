@@ -1,0 +1,37 @@
+{{ config(tags=["committee_report_reconciliation", "intermediate"]) }}
+
+with congress_records as (
+    select * from {{ ref('int_committee_reports__congress') }}
+),
+govinfo_records as (
+    select * from {{ ref('int_committee_reports__govinfo') }}
+)
+
+select
+    {{ hash_to_uuid("coalesce(congress.source_record_id, '') || '|' || coalesce(govinfo.source_record_id, '')") }} as candidate_id,
+    coalesce(congress.canonical_report_id, govinfo.canonical_report_id) as canonical_report_id,
+    congress.source_record_id as congress_source_record_id,
+    govinfo.source_record_id as govinfo_source_record_id,
+    case
+        when congress.source_record_id is not null and govinfo.source_record_id is not null
+            then 'exact_canonical_identity'
+        when congress.source_record_id is null then 'missing_congress_record'
+        else 'missing_govinfo_record'
+    end as candidate_rule,
+    case
+        when congress.normalized_title is not null
+         and congress.normalized_title = govinfo.normalized_title then true
+        when congress.source_record_id is null or govinfo.source_record_id is null then null
+        else false
+    end as title_agrees,
+    case
+        when congress.chamber is not null
+         and congress.chamber = govinfo.chamber then true
+        when congress.source_record_id is null or govinfo.source_record_id is null then null
+        else false
+    end as chamber_agrees,
+    congress.title as congress_title,
+    govinfo.title as govinfo_title
+from congress_records as congress
+full outer join govinfo_records as govinfo
+    on congress.canonical_report_id = govinfo.canonical_report_id

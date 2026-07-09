@@ -727,15 +727,6 @@ models:
       - name: congress
         tests: [not_null]
 
-  - name: stg_congress__committee_print_texts
-    columns:
-      - name: raw_id
-        tests: [not_null]
-      - name: parent_raw_id
-        tests: [not_null]
-      - name: url
-        tests: [not_null]
-
   - name: stg_congress__hearing_detail
     columns:
       - name: hearing_id

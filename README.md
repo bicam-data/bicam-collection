@@ -105,3 +105,31 @@ uv run dbt test --project-dir dbt_project
 The bundled `profiles.yml` expects Postgres connection settings via `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, and `DB_SCHEMA`.
 
 Right now staging models in [dbt_project.yml](/home/rdelano/bicam/bicam-collection/dbt_project/dbt_project.yml) are materialized as `view`. The expected next evolution is to keep lightweight staging where that still works, then move heavier marts to `table` or `incremental` materializations as the warehouse grows.
+
+## Schema migrations
+
+SQL migrations in `migrations/` are applied once and tracked in
+`schema_migrations`. Apply them before a crawl or dbt run that depends on a new
+schema feature:
+
+```bash
+make migrate
+```
+
+`001_raw_response_versions.sql` creates an append-only record of each distinct
+payload observed at an endpoint. `raw_responses` remains the current-state
+table, while `raw_response_versions` preserves source evidence for repeatable
+transformations and reconciliation.
+
+## Committee-report reconciliation
+
+The initial reconciliation slice compares Congress.gov and GovInfo committee
+reports by a shared canonical identity: report type, number, Congress, part,
+and errata status. It produces deterministic candidates in
+`int_committee_report_candidates` and reviewed outcomes in
+`fct_committee_report_matches`.
+
+Add an explicit human decision to
+`dbt_project/seeds/reconciliation/committee_report_match_overrides.csv` when a
+candidate must be accepted or rejected outside the deterministic rule. The dbt
+tests enforce unique accepted pairings and non-null canonical identities.

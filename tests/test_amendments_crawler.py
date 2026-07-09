@@ -29,6 +29,7 @@ class FakeStore:
     def __init__(self) -> None:
         self.raw_by_url: dict[str, dict] = {}
         self.fetch_events: list[dict] = []
+        self.failed_requests: list[dict] = []
         self.finished: tuple[str, int, object | None] | None = None
         self.refresh_nodes: list[object] = []
 
@@ -54,6 +55,9 @@ class FakeStore:
     def record_fetch(self, **kwargs) -> None:
         self.fetch_events.append(kwargs)
 
+    def record_failed_request(self, **kwargs) -> None:
+        self.failed_requests.append(kwargs)
+
 
 def _load(name: str) -> dict:
     return load_example_payload(EXAMPLES_DIR / name)
@@ -76,7 +80,10 @@ class AmendmentCrawlerTests(unittest.TestCase):
         cosponsors["pagination"]["next"] = ""
         amendments_to_amendment["pagination"]["next"] = ""
 
-        seed_url = with_query_params("https://api.congress.gov/v3/amendment?format=json", {"limit": 250})
+        seed_url = with_query_params(
+            "https://api.congress.gov/v3/amendment?format=json",
+            {"limit": 250, "sort": "updateDate+desc"},
+        )
         detail_url = canonicalize_congress_api_url("https://api.congress.gov/v3/amendment/117/samdt/3892?format=json")
         actions_url = canonicalize_congress_api_url("https://api.congress.gov/v3/amendment/117/samdt/3892/actions?format=json&limit=250")
         cosponsors_url = canonicalize_congress_api_url("https://api.congress.gov/v3/amendment/117/samdt/3892/cosponsors?format=json&limit=250")
