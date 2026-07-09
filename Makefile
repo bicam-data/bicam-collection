@@ -2,7 +2,7 @@ COMPOSE := docker compose
 TOOLS_PROFILE := --profile tools
 OPS_PROFILE := --profile ops
 
-.PHONY: help init-env build up up-ops down logs psql crawl crawl-one dbt-run dbt-test crawler-shell dbt-shell
+.PHONY: help init-env build up up-ops down logs psql migrate crawl crawl-one dbt-run dbt-test crawler-shell dbt-shell
 
 help:
 	@printf "Available targets:\n"
@@ -13,6 +13,7 @@ help:
 	@printf "  down          Stop the compose stack\n"
 	@printf "  logs          Tail Postgres logs\n"
 	@printf "  psql          Open psql against the compose Postgres instance\n"
+	@printf "  migrate       Apply ordered SQL migrations inside the crawler image\n"
 	@printf "  crawl         Run scripts/run_multi_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
 	@printf "  crawl-one     Run scripts/run_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
 	@printf "  dbt-run       Run dbt run inside the dbt container; pass ARGS=\"...\"\n"
@@ -40,6 +41,9 @@ logs:
 
 psql:
 	$(COMPOSE) exec postgres psql -U $${DB_USER:-admin} -d $${DB_NAME:-bicam_collection}
+
+migrate:
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_migrations.py
 
 crawl:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_multi_crawl.py $(ARGS)

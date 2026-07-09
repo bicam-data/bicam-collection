@@ -41,11 +41,33 @@ CREATE INDEX IF NOT EXISTS idx_raw_responses_node_type ON raw_responses(node_typ
 CREATE INDEX IF NOT EXISTS idx_raw_responses_parent_id ON raw_responses(parent_id);
 CREATE INDEX IF NOT EXISTS idx_raw_responses_latest_run ON raw_responses(latest_crawl_run_id);
 
+CREATE TABLE IF NOT EXISTS raw_response_versions (
+    id UUID PRIMARY KEY,
+    raw_response_id UUID NOT NULL REFERENCES raw_responses(id),
+    endpoint_url TEXT NOT NULL,
+    source TEXT NOT NULL,
+    category TEXT NOT NULL,
+    node_type TEXT NOT NULL,
+    parent_id UUID REFERENCES raw_responses(id),
+    response JSONB NOT NULL,
+    response_hash TEXT NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    first_crawl_run_id UUID REFERENCES crawl_runs(id),
+    latest_crawl_run_id UUID REFERENCES crawl_runs(id),
+    UNIQUE(raw_response_id, response_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_raw_response_versions_raw_response_id ON raw_response_versions(raw_response_id);
+CREATE INDEX IF NOT EXISTS idx_raw_response_versions_latest_run ON raw_response_versions(latest_crawl_run_id);
+CREATE INDEX IF NOT EXISTS idx_raw_response_versions_source_category ON raw_response_versions(source, category);
+
 CREATE TABLE IF NOT EXISTS crawl_run_fetches (
     id UUID PRIMARY KEY,
     crawl_run_id UUID NOT NULL REFERENCES crawl_runs(id),
     endpoint_url TEXT NOT NULL,
     raw_response_id UUID REFERENCES raw_responses(id),
+    raw_response_version_id UUID REFERENCES raw_response_versions(id),
     parent_endpoint_url TEXT,
     node_type TEXT NOT NULL,
     follow_mode TEXT NOT NULL,
@@ -86,6 +108,7 @@ ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS attempt_count INTEGER;
 ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS rate_limit_attempts INTEGER;
 ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS api_key_name TEXT;
 ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS pool_allocation JSONB;
+ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS raw_response_version_id UUID REFERENCES raw_response_versions(id);
 ALTER TABLE failed_requests ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
 ALTER TABLE failed_requests ADD COLUMN IF NOT EXISTS attempt_count INTEGER;
 ALTER TABLE failed_requests ADD COLUMN IF NOT EXISTS rate_limit_attempts INTEGER;
@@ -295,6 +318,31 @@ class PostgresStore:
             ),
             fetchone=True,
         )[0]
+        self._execute(
+            """
+            INSERT INTO raw_response_versions (
+                id, raw_response_id, endpoint_url, source, category, node_type, parent_id,
+                response, response_hash, first_crawl_run_id, latest_crawl_run_id
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+            ON CONFLICT (raw_response_id, response_hash) DO UPDATE
+            SET last_seen_at = NOW(),
+                latest_crawl_run_id = EXCLUDED.latest_crawl_run_id
+            """,
+            (
+                str(uuid.uuid4()),
+                stored_id,
+                endpoint_url,
+                source,
+                category,
+                node_type,
+                parent_id,
+                response_json,
+                response_hash,
+                latest_crawl_run_id,
+                latest_crawl_run_id,
+            ),
+        )
         return str(stored_id)
 
     def record_fetch(
@@ -317,17 +365,23 @@ class PostgresStore:
         self._execute(
             """
             INSERT INTO crawl_run_fetches (
-                id, crawl_run_id, endpoint_url, raw_response_id,
+                id, crawl_run_id, endpoint_url, raw_response_id, raw_response_version_id,
                 parent_endpoint_url, node_type, follow_mode, http_status, outcome,
                 duration_ms, attempt_count, rate_limit_attempts, api_key_name, pool_allocation
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            VALUES (%s, %s, %s, %s,
+                (SELECT id FROM raw_response_versions
+                 WHERE raw_response_id = %s AND latest_crawl_run_id = %s
+                 ORDER BY last_seen_at DESC LIMIT 1),
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             """,
             (
                 str(uuid.uuid4()),
                 crawl_run_id,
                 endpoint_url,
                 raw_response_id,
+                raw_response_id,
+                crawl_run_id,
                 parent_endpoint_url,
                 node_type,
                 follow_mode,
@@ -589,6 +643,31 @@ class AsyncPostgresStore:
             ),
             fetchone=True,
         )
+        await self._execute(
+            """
+            INSERT INTO raw_response_versions (
+                id, raw_response_id, endpoint_url, source, category, node_type, parent_id,
+                response, response_hash, first_crawl_run_id, latest_crawl_run_id
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+            ON CONFLICT (raw_response_id, response_hash) DO UPDATE
+            SET last_seen_at = NOW(),
+                latest_crawl_run_id = EXCLUDED.latest_crawl_run_id
+            """,
+            (
+                str(uuid.uuid4()),
+                stored_row[0],
+                endpoint_url,
+                source,
+                category,
+                node_type,
+                parent_id,
+                response_json,
+                response_hash,
+                latest_crawl_run_id,
+                latest_crawl_run_id,
+            ),
+        )
         return str(stored_row[0])
 
     async def record_fetch(
@@ -611,17 +690,23 @@ class AsyncPostgresStore:
         await self._execute(
             """
             INSERT INTO crawl_run_fetches (
-                id, crawl_run_id, endpoint_url, raw_response_id,
+                id, crawl_run_id, endpoint_url, raw_response_id, raw_response_version_id,
                 parent_endpoint_url, node_type, follow_mode, http_status, outcome,
                 duration_ms, attempt_count, rate_limit_attempts, api_key_name, pool_allocation
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            VALUES (%s, %s, %s, %s,
+                (SELECT id FROM raw_response_versions
+                 WHERE raw_response_id = %s AND latest_crawl_run_id = %s
+                 ORDER BY last_seen_at DESC LIMIT 1),
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             """,
             (
                 str(uuid.uuid4()),
                 crawl_run_id,
                 endpoint_url,
                 raw_response_id,
+                raw_response_id,
+                crawl_run_id,
                 parent_endpoint_url,
                 node_type,
                 follow_mode,

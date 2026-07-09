@@ -32,6 +32,7 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
             if self.test_urls:
                 conn.execute("DELETE FROM crawl_run_fetches WHERE endpoint_url = ANY(%s)", (self.test_urls,))
                 conn.execute("DELETE FROM failed_requests WHERE endpoint_url = ANY(%s)", (self.test_urls,))
+                conn.execute("DELETE FROM raw_response_versions WHERE endpoint_url = ANY(%s)", (self.test_urls,))
                 conn.execute("DELETE FROM raw_responses WHERE endpoint_url = ANY(%s)", (self.test_urls,))
             if self.run_ids:
                 conn.execute("DELETE FROM crawl_runs WHERE id = ANY(%s::uuid[])", (self.run_ids,))
@@ -99,7 +100,8 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
         with psycopg.connect(self.settings.database_url) as conn:
             fetch_row = conn.execute(
                 """
-                SELECT outcome, duration_ms, attempt_count, rate_limit_attempts, api_key_name, pool_allocation
+                SELECT outcome, duration_ms, attempt_count, rate_limit_attempts,
+                       api_key_name, pool_allocation, raw_response_version_id is not null
                 FROM crawl_run_fetches
                 WHERE crawl_run_id = %s
                 """,
@@ -115,7 +117,7 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()
             conn.commit()
 
-        self.assertEqual(fetch_row, ("fetched", 12, 1, 0, "alpha", {"endpoint_name": "members", "selected_key_name": "alpha"}))
+        self.assertEqual(fetch_row, ("fetched", 12, 1, 0, "alpha", {"endpoint_name": "members", "selected_key_name": "alpha"}, True))
         self.assertEqual(failed_row, ("boom", 25, 2, 1, "beta", {"endpoint_name": "members", "selected_key_name": "beta"}))
 
 
@@ -133,6 +135,7 @@ class AsyncPostgresStoreAsyncioRunTests(unittest.TestCase):
         with psycopg.connect(self.settings.database_url) as conn:
             conn.execute("DELETE FROM crawl_run_fetches WHERE endpoint_url = %s", (self.test_url,))
             conn.execute("DELETE FROM failed_requests WHERE endpoint_url = %s", (self.test_url,))
+            conn.execute("DELETE FROM raw_response_versions WHERE endpoint_url = %s", (self.test_url,))
             conn.execute("DELETE FROM raw_responses WHERE endpoint_url = %s", (self.test_url,))
             if self.run_id is not None:
                 conn.execute("DELETE FROM crawl_runs WHERE id = %s::uuid", (self.run_id,))
