@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: fct_collection_coverage
+    columns:
+      - name: coverage_id
+        tests: [not_null, unique]
+      - name: source
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+      - name: node_type
+        tests: [not_null]
+      - name: current_response_count
+        tests: [not_null]
+

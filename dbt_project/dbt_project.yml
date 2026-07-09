@@ -13,6 +13,10 @@ models:
   bicam_collection:
     staging:
       +materialized: view
+    intermediate:
+      +materialized: table
+    marts:
+      +materialized: table
 
 seeds:
   bicam_collection:

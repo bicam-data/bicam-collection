@@ -2,7 +2,7 @@ COMPOSE := docker compose
 TOOLS_PROFILE := --profile tools
 OPS_PROFILE := --profile ops
 
-.PHONY: help init-env build up up-ops down logs psql migrate crawl crawl-one dbt-run dbt-test crawler-shell dbt-shell
+.PHONY: help init-env build up up-ops down logs psql migrate reconcile crawl crawl-one dbt-run dbt-test crawler-shell dbt-shell
 
 help:
 	@printf "Available targets:\n"
@@ -14,6 +14,7 @@ help:
 	@printf "  logs          Tail Postgres logs\n"
 	@printf "  psql          Open psql against the compose Postgres instance\n"
 	@printf "  migrate       Apply ordered SQL migrations inside the crawler image\n"
+	@printf "  reconcile    Build committee-report reconciliation models and tests\n"
 	@printf "  crawl         Run scripts/run_multi_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
 	@printf "  crawl-one     Run scripts/run_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
 	@printf "  dbt-run       Run dbt run inside the dbt container; pass ARGS=\"...\"\n"
@@ -44,6 +45,9 @@ psql:
 
 migrate:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_migrations.py
+
+reconcile:
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select tag:committee_report_reconciliation
 
 crawl:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_multi_crawl.py $(ARGS)
