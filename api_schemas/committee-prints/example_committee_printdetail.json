@@ -1,0 +1,41 @@
+{
+  "committeePrint": [
+    {
+      "associatedBills": [
+        {
+          "congress": 117,
+          "number": "8",
+          "type": "HRES",
+          "url": "https://api.congress.gov/v3/bill/117/hres/8?format=json"
+        }
+      ],
+      "chamber": "House",
+      "citation": "117th Congress",
+      "committees": [
+        {
+          "name": "Select Committee on the Climate Crisis",
+          "systemCode": "hlcn00",
+          "url": "https://api.congress.gov/v3/committee/house/hlcn00?format=json"
+        }
+      ],
+      "congress": 117,
+      "jacketNumber": 47777,
+      "text": {
+        "count": 2,
+        "url": "https://api.congress.gov/v3/committee-print/117/house/47777/text?format=json"
+      },
+      "title": "RULES OF THE SELECT COMMITTEE ON THE CLIMATE CRISIS 2021-2022 (Adopted March 19, 2021)",
+      "updateDate": "2026-02-12T15:58:18Z"
+    }
+  ],
+  "pagination": {
+    "count": 1
+  },
+  "request": {
+    "chamber": "house",
+    "congress": "117",
+    "contentType": "application/json",
+    "format": "json",
+    "jacketNumber": "47777"
+  }
+}

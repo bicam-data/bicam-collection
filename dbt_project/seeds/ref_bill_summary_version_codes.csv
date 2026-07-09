@@ -1,0 +1,60 @@
+version_code,action_desc,chamber
+00,Introduced in House,house
+00,Introduced in Senate,senate
+01,Reported to Senate with amendment(s),senate
+02,"Reported to Senate amended, 1st committee reporting",senate
+03,"Reported to Senate amended, 2nd committee reporting",senate
+04,"Reported to Senate amended, 3rd committee reporting",senate
+07,Reported to House,house
+08,"Reported to House, Part I",house
+09,"Reported to House, Part II",house
+12,"Reported to Senate without amendment, 1st committee reporting",senate
+13,"Reported to Senate without amendment, 2nd committee reporting",senate
+17,Reported to House with amendment(s),house
+18,"Reported to House amended, Part I",house
+19,"Reported to House amended, Part II",house
+20,"Reported to House amended, Part III",house
+21,"Reported to House amended, Part IV",house
+22,"Reported to House amended, Part V",house
+25,Reported to Senate,senate
+28,"Reported to House without amendment, Part I",house
+29,"Reported to House without amendment, Part II",house
+31,"Reported to House without amendment, Part IV",house
+33,Laid on table in House,house
+34,Indefinitely postponed in Senate,senate
+35,Passed Senate amended,senate
+36,Passed House amended,house
+37,Failed of passage in Senate,senate
+38,Failed of passage in House,house
+39,Senate agreed to House amendment with amendment,senate
+40,House agreed to Senate amendment with amendment,house
+43,Senate disagreed to House amendment,senate
+44,House disagreed to Senate amendment,house
+45,Senate receded and concurred with amendment,senate
+46,House receded and concurred with amendment,house
+47,Conference report filed in Senate,senate
+48,Conference report filed in House,house
+49,Public Law,
+51,Line item veto by President,
+52,"Passed Senate amended, 2nd occurrence",senate
+53,Passed House,house
+54,"Passed House, 2nd occurrence",house
+55,Passed Senate,senate
+56,Senate vitiated passage of bill after amendment,senate
+58,Motion to recommit bill as amended by Senate,senate
+59,House agreed to Senate amendment,house
+60,"Senate agreed to House amendment with amendment, 2nd occurrence",senate
+62,"House agreed to Senate amendment with amendment, 2nd occurrence",house
+66,"House receded and concurred with amendment, 2nd occurrence",house
+70,House agreed to Senate amendment without amendment,house
+71,Senate agreed to House amendment without amendment,senate
+74,Senate agreed to House amendment,senate
+77,Discharged from House committee,house
+78,Discharged from Senate committee,senate
+79,Reported to House without amendment,house
+80,Reported to Senate without amendment,senate
+81,Passed House without amendment,house
+82,Passed Senate without amendment,senate
+83,"Conference report filed in Senate, 2nd conference report",senate
+86,"Conference report filed in House, 2nd conference report",house
+87,"Conference report filed in House, 3rd conference report",house

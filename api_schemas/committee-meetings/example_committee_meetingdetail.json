@@ -1,0 +1,95 @@
+{
+  "committeeMeeting": {
+    "chamber": "House",
+    "committees": [
+      {
+        "name": "House Natural Resources",
+        "systemCode": "hsii00",
+        "url": "https://api.congress.gov/v3/committee/house/hsii00?format=json"
+      }
+    ],
+    "congress": 119,
+    "continuations": [
+      {
+        "continuationDate": "2026-03-26T14:00:00Z"
+      }
+    ],
+    "date": "2026-03-26T10:00:00Z",
+    "eventId": "119029",
+    "hearingTranscript": [
+      {
+        "jacketNumber": 62435,
+        "url": "https://api.congress.gov/v3/hearing/119/house/62435?format=json"
+      }
+    ],
+    "location": {
+      "address": "{\"building_name\": \"University of Wisconsin La Crosse (UWL), Cleary Alumni & Friends Center, Great Hall\", \"street-address\": \"615 East Avenue N.\", \"city\": \"La Crosse\", \"state\": \"WI\", \"postal_code\": \"54601\"}"
+    },
+    "meetingDocuments": [
+      {
+        "description": "Hearing notice",
+        "documentType": "Support Document",
+        "format": "PDF",
+        "name": "Hearing Notice",
+        "url": "https://www.congress.gov/119/meeting/house/119029/documents/HMTG-119-II10-20260326-SD001.pdf"
+      }
+    ],
+    "meetingStatus": "Scheduled",
+    "relatedItems": {
+      "bills": [
+        {
+          "congress": 119,
+          "number": "257",
+          "type": "S",
+          "url": "https://api.congress.gov/v3/bill/119/s/257?format=json"
+        }
+      ],
+      "nominations": [
+        {
+          "congress": 119,
+          "number": "1234",
+          "part": "00",
+          "url": "https://api.congress.gov/v3/nomination/119/1234?format=json"
+        }
+      ],
+      "treaties": [
+        {
+          "congress": 119,
+          "number": "5",
+          "part": "1",
+          "url": "https://api.congress.gov/v3/treaty/119/5?format=json"
+        }
+      ]
+    },
+    "title": "Legislative Hearing on H.R. 6778, H.R. 7618, H.R. 7951 and H.R. 7979",
+    "type": "Hearing",
+    "updateDate": "2026-03-26T20:20:05Z",
+    "videos": [
+      {
+        "name": "Legislative Hearing on H.R. 6778, H.R. 7618, H.R. 7951 and H.R. 7979",
+        "url": "https://www.youtube.com/watch?v=iM9dOxY2QJo"
+      }
+    ],
+    "witnessDocuments": [
+      {
+        "documentType": "Witness Statement",
+        "format": "PDF",
+        "url": "https://www.congress.gov/119/meeting/house/119029/witnesses/HHRG-119-II10-Wstate-ShultzabargerE-20260326.pdf"
+      }
+    ],
+    "witnesses": [
+      {
+        "name": "Ms. Ellen Shultzabarger",
+        "organization": "U.S. Forest Service",
+        "position": "Associate Deputy Chief"
+      }
+    ]
+  },
+  "request": {
+    "chamber": "house",
+    "congress": "119",
+    "contentType": "application/json",
+    "eventId": "119029",
+    "format": "json"
+  }
+}

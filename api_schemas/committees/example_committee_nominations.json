@@ -1,0 +1,33 @@
+{
+  "nominations": [
+    {
+      "citation": "PN852-3",
+      "congress": 119,
+      "description": "Kaveh Farzad, of Maryland, to be an Assistant Secretary of Energy (International Affairs), vice Andrew Eilperin Light, resigned.",
+      "latestAction": {
+        "actionDate": "2026-03-02",
+        "text": "Received in the Senate and referred to the Committee on Energy and Natural Resources."
+      },
+      "nominationType": {
+        "isCivilian": true,
+        "isMilitary": false
+      },
+      "number": 852,
+      "partNumber": "03",
+      "receivedDate": "2026-03-02",
+      "updateDate": "2026-03-03T12:00:23Z",
+      "url": "https://api.congress.gov/v3/nomination/119/852-3?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 611,
+    "next": "https://api.congress.gov/v3/committee/senate/sseg00/nominations?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "chamber": "senate",
+    "committeeUrl": "https://api.congress.gov/v3/committee/senate/sseg00?format=json",
+    "contentType": "application/json",
+    "format": "json",
+    "systemCode": "sseg00"
+  }
+}

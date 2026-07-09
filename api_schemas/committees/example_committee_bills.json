@@ -1,0 +1,28 @@
+{
+  "committee-bills": {
+    "bills": [
+      {
+        "actionDate": "2008-06-24T23:04:17Z",
+        "congress": 110,
+        "number": "2",
+        "relationshipType": "In Committee",
+        "type": "HCONRES",
+        "updateDate": "2015-07-25T05:31:34Z",
+        "url": "https://api.congress.gov/v3/bill/110/hconres/2?format=json"
+      }
+    ],
+    "count": 11178,
+    "url": "https://api.congress.gov/v3/committee/senate/sseg00/bills?format=json"
+  },
+  "pagination": {
+    "count": 11178,
+    "next": "https://api.congress.gov/v3/committee/senate/sseg00/bills?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "chamber": "senate",
+    "committeeUrl": "https://api.congress.gov/v3/committee/senate/sseg00?format=json",
+    "contentType": "application/json",
+    "format": "json",
+    "systemCode": "sseg00"
+  }
+}

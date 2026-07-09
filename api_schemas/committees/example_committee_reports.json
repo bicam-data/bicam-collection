@@ -1,0 +1,25 @@
+{
+  "pagination": {
+    "count": 1625,
+    "next": "https://api.congress.gov/v3/committee/senate/sseg00/reports?offset=1&limit=1&format=json"
+  },
+  "reports": [
+    {
+      "chamber": "Senate",
+      "citation": "S. Rept. 113-140",
+      "congress": 113,
+      "number": 140,
+      "part": 1,
+      "type": "SRPT",
+      "updateDate": "2019-02-17 13:18:30+00:00",
+      "url": "https://api.congress.gov/v3/committee-report/113/SRPT/140?format=json"
+    }
+  ],
+  "request": {
+    "chamber": "senate",
+    "committeeUrl": "https://api.congress.gov/v3/committee/senate/sseg00?format=json",
+    "contentType": "application/json",
+    "format": "json",
+    "systemCode": "sseg00"
+  }
+}

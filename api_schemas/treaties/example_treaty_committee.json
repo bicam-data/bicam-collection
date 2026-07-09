@@ -1,0 +1,32 @@
+{
+  "pagination": {
+    "count": 1,
+    "next": ""
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  },
+  "treatyCommittees": [
+    {
+      "activities": [
+        {
+          "date": "2026-01-03T00:00:00Z",
+          "name": "Referred to"
+        }
+      ],
+      "chamber": "Senate",
+      "name": "Foreign Relations Committee",
+      "subcommittees": [
+        {
+          "name": "European Affairs Subcommittee",
+          "systemCode": "ssfr01",
+          "url": "https://api.congress.gov/v3/committee/senate/ssfr01?format=json"
+        }
+      ],
+      "systemCode": "ssfr00",
+      "type": "Standing",
+      "url": "https://api.congress.gov/v3/committee/senate/ssfr00?format=json"
+    }
+  ]
+}

@@ -1,0 +1,163 @@
+version: 2
+
+models:
+  - name: stg_govinfo__committeereports
+    columns:
+      - name: report_id
+        tests: [not_null, unique]
+      - name: package_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: report_type
+        tests: [not_null]
+      - name: report_number
+        tests: [not_null]
+      - name: report_part
+        tests: [not_null]
+      - name: collection_code
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_granules
+    columns:
+      - name: package_id
+        tests: [not_null]
+      - name: granule_id
+        tests: [not_null, unique]
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: report_part
+        tests: [not_null]
+      - name: collection_code
+        tests: [not_null]
+      - name: granule_class
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_committees
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: committee_name
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_members
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: granule_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: parsed_name
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_ils_system_ids
+    columns:
+      - name: package_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: ils_system_id
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_reference_bills
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: granule_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_reference_laws
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: law_id
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_reference_statutes
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: report_statute_id
+        tests: [not_null, unique]
+      - name: reference_statute
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_reference_statutes_pages
+    columns:
+      - name: report_statute_id
+        tests: [not_null]
+      - name: page
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_reference_codes
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: report_code_id
+        tests: [not_null, unique]
+      - name: reference_code
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_reference_codes_sections
+    columns:
+      - name: report_code_id
+        tests: [not_null]
+      - name: section
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_serialset
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: bag_id
+        tests: [not_null]
+      - name: doc_id
+        tests: [not_null]
+      - name: serialset_number
+        tests: [not_null]
+
+  - name: stg_govinfo__committeereports_serialset_topics
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_set_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: topic
+        tests: [not_null]

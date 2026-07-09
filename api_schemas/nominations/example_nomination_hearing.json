@@ -1,0 +1,21 @@
+{
+  "hearings": [
+    {
+      "chamber": "Senate",
+      "citation": "S.Hrg. 118-321",
+      "date": "2024-10-02",
+      "jacketNumber": 61234,
+      "number": "321"
+    }
+  ],
+  "pagination": {
+    "count": 1
+  },
+  "request": {
+    "congress": "118",
+    "contentType": "application/json",
+    "format": "json",
+    "nominationUrl": "https://api.congress.gov/v3/nomination/118/1980",
+    "number": "1980"
+  }
+}

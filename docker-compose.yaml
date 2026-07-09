@@ -1,0 +1,141 @@
+name: bicam-collection
+
+x-app-service: &app-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+    additional_contexts:
+      rotisserie: ../rotisserie
+  image: bicam-collection/app:local
+  working_dir: /opt/bicam-collection
+  env_file:
+    - .env
+  environment:
+    DB_HOST: postgres
+    DB_PORT: 5432
+    DB_USER: ${DB_USER:-admin}
+    DB_PASSWORD: ${DB_PASSWORD:-postgres}
+    DB_NAME: ${DB_NAME:-bicam_collection}
+    DB_SCHEMA: ${DB_SCHEMA:-public}
+    DBT_PROFILES_DIR: /opt/bicam-collection/dbt_project
+    PYTHONUNBUFFERED: "1"
+  depends_on:
+    postgres:
+      condition: service_healthy
+  init: true
+  restart: "no"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: bicam-collection-postgres
+    restart: unless-stopped
+    shm_size: ${POSTGRES_SHM_SIZE:-1g}
+    environment:
+      POSTGRES_DB: ${DB_NAME:-bicam_collection}
+      POSTGRES_USER: ${DB_USER:-admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      PGDATA: /var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-200}
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-8GB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-24GB}
+      - -c
+      - work_mem=${PG_WORK_MEM:-32MB}
+      - -c
+      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-1GB}
+      - -c
+      - checkpoint_completion_target=${PG_CHECKPOINT_COMPLETION_TARGET:-0.9}
+      - -c
+      - max_wal_size=${PG_MAX_WAL_SIZE:-8GB}
+      - -c
+      - min_wal_size=${PG_MIN_WAL_SIZE:-1GB}
+      - -c
+      - wal_compression=on
+      - -c
+      - random_page_cost=${PG_RANDOM_PAGE_COST:-1.1}
+      - -c
+      - effective_io_concurrency=${PG_EFFECTIVE_IO_CONCURRENCY:-200}
+      - -c
+      - max_worker_processes=${PG_MAX_WORKER_PROCESSES:-12}
+      - -c
+      - max_parallel_workers=${PG_MAX_PARALLEL_WORKERS:-4}
+      - -c
+      - max_parallel_workers_per_gather=${PG_MAX_PARALLEL_WORKERS_PER_GATHER:-2}
+      - -c
+      - checkpoint_timeout=${PG_CHECKPOINT_TIMEOUT:-15min}
+      - -c
+      - autovacuum_max_workers=${PG_AUTOVACUUM_MAX_WORKERS:-3}
+      - -c
+      - autovacuum_vacuum_cost_limit=${PG_AUTOVACUUM_VACUUM_COST_LIMIT:-1000}
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - log_min_duration_statement=${PG_LOG_MIN_DURATION_STATEMENT:-1000}
+      - -c
+      - log_checkpoints=on
+      - -c
+      - log_lock_waits=on
+      - -c
+      - track_io_timing=on
+    ports:
+      - "${DB_PORT_FORWARD:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-admin} -d ${DB_NAME:-bicam_collection}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  postgres-backup:
+    image: postgres:16
+    container_name: bicam-collection-postgres-backup
+    profiles: ["ops"]
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-postgres}
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USER:-admin}
+      PGDATABASE: ${DB_NAME:-bicam_collection}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - postgres_backups:/backups
+    entrypoint: ["/bin/bash", "-lc"]
+    command:
+      - |
+        set -euo pipefail
+        mkdir -p /backups
+        while true; do
+          ts=$$(date -u +%Y%m%dT%H%M%SZ)
+          pg_dump --format=custom --file="/backups/$${PGDATABASE}_$${ts}.dump" "$${PGDATABASE}"
+          find /backups -type f -name '*.dump' -mtime +"$${BACKUP_RETENTION_DAYS}" -delete
+          sleep "$${BACKUP_INTERVAL_SECONDS}"
+        done
+
+  crawler:
+    <<: *app-service
+    container_name: bicam-collection-crawler
+    profiles: ["tools"]
+    command: ["sleep", "infinity"]
+
+  dbt:
+    <<: *app-service
+    container_name: bicam-collection-dbt
+    profiles: ["tools"]
+    command: ["sleep", "infinity"]
+
+volumes:
+  postgres_data:
+  postgres_backups:

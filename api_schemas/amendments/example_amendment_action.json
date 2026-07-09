@@ -1,0 +1,27 @@
+{
+  "actions": [
+    {
+      "actionCode": "H32111",
+      "actionDate": "2005-01-26",
+      "actionTime": "11:28:22",
+      "sourceSystem": {
+        "code": 2,
+        "name": "House floor actions"
+      },
+      "text": "On agreeing to the Oxley amendment (A001) Agreed to by voice vote. ",
+      "type": "Floor"
+    }
+  ],
+  "pagination": {
+    "count": 6,
+    "next": "https://api.congress.gov/v3/amendment/109/hamdt/2/actions?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "amendmentNumber": "2",
+    "amendmentType": "hamdt",
+    "amendmentUrl": "https://api.congress.gov/v3/amendment/109/hamdt/2?format=json",
+    "congress": "109",
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "reports": [
+    {
+      "chamber": "House",
+      "citation": "H. Rept. 119-1",
+      "cmte_rpt_id": "CRPT-119hrpt1",
+      "congress": 119,
+      "number": 1,
+      "part": 1,
+      "type": "HRPT",
+      "updateDate": "2025-05-27T14:12:39Z",
+      "url": "https://api.congress.gov/v3/committee-report/119/HRPT/1?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/committee-report?offset=250&limit=250&format=json"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

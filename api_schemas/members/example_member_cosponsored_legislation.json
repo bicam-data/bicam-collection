@@ -1,0 +1,21 @@
+{
+  "cosponsoredLegislation": [
+    {
+      "amendmentNumber": "5164",
+      "congress": 114,
+      "introducedDate": "2016-12-09",
+      "latestAction": null,
+      "type": null,
+      "url": "https://api.congress.gov/v3/amendment/114/samdt/5164?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 7520,
+    "next": "https://api.congress.gov/v3/member/L000174/cosponsored-legislation?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "bioguideId": "l000174",
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

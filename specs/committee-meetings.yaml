@@ -1,0 +1,24 @@
+category: committee-meetings
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /committee-meeting
+  node_type: committee_meeting_list
+refresh_root_node_type: committee_meeting_detail
+nodes:
+  committee_meeting_list:
+    item_path: $.committeeMeetings[*]
+    high_water_mark_path: $.committeeMeetings[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: committee_meeting_detail
+        url_path: $.committeeMeetings[*].url
+        follow_mode: recurse
+  committee_meeting_detail:
+    data_path: $.committeeMeeting
+    high_water_mark_path: $.committeeMeeting.updateDate

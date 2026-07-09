@@ -1,0 +1,69 @@
+category: amendments
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /amendment
+  node_type: amendment_list
+refresh_root_node_type: amendment_detail
+nodes:
+  amendment_list:
+    item_path: $.amendments[*]
+    high_water_mark_path: $.amendments[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+      sort: updateDate+desc
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+    child_edges:
+      - target: amendment_detail
+        url_path: $.amendments[*].url
+        follow_mode: recurse
+  amendment_detail:
+    data_path: $.amendment
+    high_water_mark_path: $.amendment.updateDate
+    child_edges:
+      - target: amendment_actions
+        url_path: $.amendment.actions.url
+        follow_mode: recurse
+      - target: amendment_cosponsors
+        url_path: $.amendment.cosponsors.url
+        follow_mode: recurse
+      - target: amendment_amendments_to_amendment
+        url_path: $.amendment.amendmentsToAmendment.url
+        follow_mode: recurse
+      - target: amendment_texts
+        url_path: $.amendment.textVersions.url
+        follow_mode: recurse
+  amendment_actions:
+    item_path: $.actions[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  amendment_cosponsors:
+    item_path: $.cosponsors[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  amendment_amendments_to_amendment:
+    item_path: $.amendments[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  amendment_texts:
+    item_path: $.textVersions[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

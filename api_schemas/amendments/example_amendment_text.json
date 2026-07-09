@@ -1,0 +1,29 @@
+{
+  "pagination": {
+    "count": 1
+  },
+  "request": {
+    "amendmentNumber": "3892",
+    "amendmentType": "samdt",
+    "amendmentUrl": "https://api.congress.gov/v3/amendment/117/samdt/3892?format=json",
+    "congress": "117",
+    "contentType": "application/json",
+    "format": "json"
+  },
+  "textVersions": [
+    {
+      "date": "2021-10-26T04:00:00Z",
+      "formats": [
+        {
+          "type": "HTML",
+          "url": "https://www.congress.gov/117/crec/2021/10/26/167/188/modified/CREC-2021-10-26-pt1-PgS7378-5.htm"
+        },
+        {
+          "type": "PDF",
+          "url": "https://www.congress.gov/117/crec/2021/10/26/167/188/CREC-2021-10-26-pt1-PgS7378-5.pdf"
+        }
+      ],
+      "type": "Submitted"
+    }
+  ]
+}

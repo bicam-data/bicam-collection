@@ -1,0 +1,138 @@
+category: bills
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /bill
+  node_type: bill_list
+refresh_root_node_type: bill_detail
+nodes:
+  bill_list:
+    item_path: $.bills[*]
+    high_water_mark_path: $.bills[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+    child_edges:
+      - target: bill_detail
+        url_path: $.bills[*].url
+        follow_mode: recurse
+  bill_detail:
+    data_path: $.bill
+    child_edges:
+      - target: bill_committee_report_detail
+        url_path: $.bill.committeeReports[*].url
+        follow_mode: item_only
+      - target: bill_actions
+        url_path: $.bill.actions.url
+        follow_mode: recurse
+      - target: bill_amendments
+        url_path: $.bill.amendments.url
+        follow_mode: recurse
+      - target: bill_committees
+        url_path: $.bill.committees.url
+        follow_mode: recurse
+      - target: bill_cosponsors
+        url_path: $.bill.cosponsors.url
+        follow_mode: recurse
+      - target: bill_relatedbills
+        url_path: $.bill.relatedBills.url
+        follow_mode: recurse
+      - target: bill_subjects
+        url_path: $.bill.subjects.url
+        follow_mode: recurse
+      - target: bill_summaries
+        url_path: $.bill.summaries.url
+        follow_mode: recurse
+      - target: bill_text
+        url_path: $.bill.textVersions.url
+        follow_mode: recurse
+      - target: bill_titles
+        url_path: $.bill.titles.url
+        follow_mode: recurse
+  bill_actions:
+    item_path: $.actions[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+  bill_amendments:
+    item_path: $.amendments[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+  bill_committees:
+    item_path: $.committees[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  bill_cosponsors:
+    item_path: $.cosponsors[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+  bill_relatedbills:
+    item_path: $.relatedBills[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  bill_subjects:
+    item_path: $.subjects.legislativeSubjects[*]
+    data_path: $.subjects
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+  bill_summaries:
+    item_path: $.summaries[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  bill_text:
+    item_path: $.textVersions[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  bill_titles:
+    item_path: $.titles[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+  bill_committee_report_detail:
+    data_path: $.committeeReports[0]

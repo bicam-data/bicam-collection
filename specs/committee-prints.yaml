@@ -1,0 +1,34 @@
+category: committee-prints
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /committee-print
+  node_type: committee_print_list
+refresh_root_node_type: committee_print_detail
+nodes:
+  committee_print_list:
+    item_path: $.committeePrints[*]
+    high_water_mark_path: $.committeePrints[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: committee_print_detail
+        url_path: $.committeePrints[*].url
+        follow_mode: recurse
+  committee_print_detail:
+    high_water_mark_path: $.committeePrint[*].updateDate
+    child_edges:
+      - target: committee_print_texts
+        url_path: $.committeePrint[*].text.url
+        follow_mode: recurse
+  committee_print_texts:
+    item_path: $.text[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

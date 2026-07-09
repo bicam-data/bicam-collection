@@ -1,0 +1,19 @@
+{
+  "committeeMeetings": [
+    {
+      "chamber": "House",
+      "congress": 119,
+      "eventId": "119029",
+      "updateDate": "2026-03-26T20:20:05Z",
+      "url": "https://api.congress.gov/v3/committee-meeting/119/house/119029?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/committee-meeting?offset=250&limit=250&format=json"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

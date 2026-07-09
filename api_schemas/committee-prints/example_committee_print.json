@@ -1,0 +1,19 @@
+{
+  "committeePrints": [
+    {
+      "chamber": "House",
+      "congress": 117,
+      "jacketNumber": 47777,
+      "updateDate": "2026-02-12T15:58:18Z",
+      "url": "https://api.congress.gov/v3/committee-print/117/house/47777?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/committee-print?offset=250&limit=250&format=json"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

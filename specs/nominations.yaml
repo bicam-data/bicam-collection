@@ -1,0 +1,63 @@
+category: nominations
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /nomination
+  node_type: nomination_list
+refresh_root_node_type: nomination_detail
+nodes:
+  nomination_list:
+    item_path: $.nominations[*]
+    high_water_mark_path: $.nominations[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+    child_edges:
+      - target: nomination_detail
+        url_path: $.nominations[*].url
+        follow_mode: recurse
+  nomination_detail:
+    data_path: $.nomination
+    high_water_mark_path: $.nomination.updateDate
+    child_edges:
+      - target: nomination_actions
+        url_path: $.nomination.actions.url
+        follow_mode: recurse
+      - target: nomination_committees
+        url_path: $.nomination.committees.url
+        follow_mode: recurse
+      - target: nomination_hearings
+        url_path: $.nomination.hearings.url
+        follow_mode: recurse
+      - target: nomination_nominee_detail
+        url_path: $.nomination.nominees[*].url
+        follow_mode: recurse
+  nomination_actions:
+    item_path: $.actions[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  nomination_committees:
+    item_path: $.committees[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  nomination_hearings:
+    item_path: $.hearings[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  nomination_nominee_detail:
+    item_path: $.nominees[*]

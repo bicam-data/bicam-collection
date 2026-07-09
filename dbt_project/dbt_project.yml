@@ -1,0 +1,19 @@
+name: bicam_collection
+version: 1.0.0
+config-version: 2
+profile: bicam_collection
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages", "logs"]
+
+models:
+  bicam_collection:
+    staging:
+      +materialized: view
+
+seeds:
+  bicam_collection:
+    +quote_columns: false

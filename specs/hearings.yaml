@@ -1,0 +1,24 @@
+category: hearings
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /hearing
+  node_type: hearing_list
+refresh_root_node_type: hearing_detail
+nodes:
+  hearing_list:
+    item_path: $.hearings[*]
+    high_water_mark_path: $.hearings[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: hearing_detail
+        url_path: $.hearings[*].url
+        follow_mode: recurse
+  hearing_detail:
+    data_path: $.hearing
+    high_water_mark_path: $.hearing.updateDate

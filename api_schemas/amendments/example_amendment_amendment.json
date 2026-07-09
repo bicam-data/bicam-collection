@@ -1,0 +1,23 @@
+{
+  "amendments": [
+    {
+      "congress": 117,
+      "number": "2714",
+      "type": "SAMDT",
+      "updateDate": "2021-08-11T01:44:13Z",
+      "url": "https://api.congress.gov/v3/amendment/117/samdt/2714?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 507,
+    "next": "https://api.congress.gov/v3/amendment/117/samdt/2137/amendments?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "amendmentNumber": "2137",
+    "amendmentType": "samdt",
+    "amendmentUrl": "https://api.congress.gov/v3/amendment/117/samdt/2137?format=json",
+    "congress": "117",
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

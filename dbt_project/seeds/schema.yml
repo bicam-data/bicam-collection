@@ -1,0 +1,16 @@
+version: 2
+
+seeds:
+  - name: ref_bill_summary_version_codes
+    columns:
+      - name: version_code
+        tests: [not_null]
+      - name: action_desc
+        tests: [not_null]
+
+  - name: ref_title_type_codes
+    columns:
+      - name: title_type_code
+        tests: [not_null]
+      - name: description
+        tests: [not_null]

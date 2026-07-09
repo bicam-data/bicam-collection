@@ -1,0 +1,16 @@
+{
+  "packageId": "CRPT-119hrpt173",
+  "granuleId": "CRPT-119hrpt173",
+  "collectionCode": "CRPT",
+  "collectionName": "Congressional Reports",
+  "title": "DEPARTMENT OF HOMELAND SECURITY APPROPRIATIONS BILL, 2026",
+  "granuleClass": "FIRSTPART",
+  "dateIssued": "2025-06-26",
+  "lastModified": "2025-10-08T19:02:10Z",
+  "detailsLink": "https://www.govinfo.gov/app/details/CRPT-119hrpt173/CRPT-119hrpt173",
+  "download": {
+    "modsLink": "https://api.govinfo.gov/packages/CRPT-119hrpt173/granules/CRPT-119hrpt173/mods",
+    "premisLink": "https://api.govinfo.gov/packages/CRPT-119hrpt173/granules/CRPT-119hrpt173/premis",
+    "txtLink": "https://api.govinfo.gov/packages/CRPT-119hrpt173/granules/CRPT-119hrpt173/txt"
+  }
+}

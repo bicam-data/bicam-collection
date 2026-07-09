@@ -1,0 +1,29 @@
+{
+  "cosponsors": [
+    {
+      "bioguideId": "W000817",
+      "firstName": "Elizabeth",
+      "fullName": "Sen. Warren, Elizabeth [D-MA]",
+      "isOriginalCosponsor": false,
+      "lastName": "Warren",
+      "middleName": "A.",
+      "party": "D",
+      "sponsorshipDate": "2021-11-16",
+      "state": "MA",
+      "url": "https://api.congress.gov/v3/member/W000817?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "countIncludingWithdrawnCosponsors": 2,
+    "next": "https://api.congress.gov/v3/amendment/117/samdt/3892/cosponsors?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "amendmentNumber": "3892",
+    "amendmentType": "samdt",
+    "amendmentUrl": "https://api.congress.gov/v3/amendment/117/samdt/3892?format=json",
+    "congress": "117",
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

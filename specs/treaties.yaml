@@ -1,0 +1,44 @@
+category: treaties
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /treaty
+  node_type: treaty_list
+refresh_root_node_type: treaty_detail
+nodes:
+  treaty_list:
+    item_path: $.treaties[*]
+    high_water_mark_path: $.treaties[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: treaty_detail
+        url_path: $.treaties[*].url
+        follow_mode: recurse
+  treaty_detail:
+    high_water_mark_path: $.treaty[*].updateDate
+    child_edges:
+      - target: treaty_actions
+        url_path: $.treaty[*].actions.url
+        follow_mode: recurse
+      - target: treaty_committees
+        url_path: $.treaty[*].committees.url
+        follow_mode: recurse
+  treaty_actions:
+    item_path: $.actions[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  treaty_committees:
+    item_path: $.treatyCommittees[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

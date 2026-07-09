@@ -1,0 +1,20 @@
+{
+  "nominees": [
+    {
+      "firstName": "Jane",
+      "lastName": "Doe",
+      "middleName": "Q",
+      "ordinal": 1,
+      "state": "TX"
+    }
+  ],
+  "pagination": {
+    "count": 1
+  },
+  "request": {
+    "congress": "118",
+    "contentType": "application/json",
+    "format": "json",
+    "number": "1980"
+  }
+}

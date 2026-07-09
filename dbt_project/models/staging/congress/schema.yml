@@ -1,0 +1,1144 @@
+version: 2
+
+models:
+  - name: stg_congress__bill_detail
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: bill_id
+        tests: [not_null, unique]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: is_law
+        tests: [not_null]
+
+  - name: stg_congress__bill_actions
+    columns:
+      - name: action_id
+        tests: [not_null, unique]
+      - name: bill_id
+        tests: [not_null]
+
+  - name: stg_congress__bill_cbo_cost_estimates
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: url
+        tests: [not_null]
+
+  - name: stg_congress__bill_sponsors
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: bioguide_id
+        tests: [not_null]
+
+  - name: stg_congress__bill_laws
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: law_id
+        tests: [not_null, unique]
+      - name: law_type
+        tests: [not_null]
+      - name: law_number
+        tests: [not_null]
+
+  - name: stg_congress__bill_amendments
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: amendment_id
+        tests: [not_null]
+      - name: amendment_type
+        tests: [not_null]
+      - name: amendment_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__bill_committees
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: committee_code
+        tests: [not_null]
+      - name: committee_name
+        tests: [not_null]
+
+  - name: stg_congress__bill_committeereports
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: report_id
+        tests: [not_null]
+      - name: report_type
+        tests: [not_null]
+      - name: report_number
+        tests: [not_null]
+      - name: report_part
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__bill_cosponsors
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: bioguide_id
+        tests: [not_null]
+      - name: is_original_cosponsor
+        tests: [not_null]
+
+  - name: stg_congress__bill_relatedbills
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: relatedbill_id
+        tests: [not_null]
+      - name: relatedbill_type
+        tests: [not_null]
+      - name: relatedbill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: relationship_type
+        tests: [not_null]
+      - name: relationship_identified_by
+        tests: [not_null]
+
+  - name: stg_congress__bill_subjects
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: subject
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__bill_summaries
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: action_date
+        tests: [not_null]
+      - name: action_desc
+        tests: [not_null]
+      - name: text
+        tests: [not_null]
+      - name: version_code
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__bill_texts
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: type
+        tests: [not_null]
+
+  - name: stg_congress__bill_titles
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: title
+        tests: [not_null]
+      - name: title_type
+        tests: [not_null]
+      - name: title_type_code
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__bill_notes
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: note_id
+        tests: [not_null]
+      - name: note_text
+        tests: [not_null]
+
+  - name: stg_congress__bill_notes_links
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: note_id
+        tests: [not_null]
+      - name: name
+        tests: [not_null]
+      - name: url
+        tests: [not_null]
+
+  - name: stg_congress__bill_actions_committees
+    columns:
+      - name: action_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: committee_code
+        tests: [not_null]
+
+  - name: stg_congress__bill_actions_recordedvotes
+    columns:
+      - name: action_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: url
+        tests: [not_null]
+
+  - name: stg_congress__member_detail
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: bioguide_id
+        tests: [not_null]
+      - name: normalized_name
+        tests: [not_null]
+      - name: direct_order_name
+        tests: [not_null]
+      - name: inverted_order_name
+        tests: [not_null]
+      - name: is_current_member
+        tests: [not_null]
+      - name: sponsored_legislation_count
+        tests: [not_null]
+      - name: cosponsored_legislation_count
+        tests: [not_null]
+
+  - name: stg_congress__member_sponsored_legislation
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: parent_raw_id
+        tests: [not_null]
+
+  - name: stg_congress__member_cosponsored_legislation
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: parent_raw_id
+        tests: [not_null]
+
+  - name: stg_congress__member_bills
+    columns:
+      - name: bioguide_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: sponsorship_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['cosponsor', 'sponsor']
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__member_amendments
+    columns:
+      - name: bioguide_id
+        tests: [not_null]
+      - name: amendment_id
+        tests: [not_null]
+      - name: sponsorship_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['cosponsor', 'sponsor']
+      - name: amendment_type
+        tests: [not_null]
+      - name: amendment_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__member_leadershiproles
+    columns:
+      - name: bioguide_id
+        tests: [not_null]
+      - name: role
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: is_current
+        tests: [not_null]
+
+  - name: stg_congress__member_partyhistory
+    columns:
+      - name: bioguide_id
+        tests: [not_null]
+      - name: party_code
+        tests: [not_null]
+      - name: party_name
+        tests: [not_null]
+      - name: start_year
+        tests: [not_null]
+
+  - name: stg_congress__member_terms
+    columns:
+      - name: bioguide_id
+        tests: [not_null]
+      - name: member_type
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: start_year
+        tests: [not_null]
+      - name: state_name
+        tests: [not_null]
+      - name: state_code
+        tests: [not_null]
+
+  - name: stg_congress__member_previousnames
+    columns:
+      - name: bioguide_id
+        tests: [not_null]
+      - name: direct_order_name
+        tests: [not_null]
+      - name: inverted_order_name
+        tests: [not_null]
+      - name: first_name
+        tests: [not_null]
+      - name: last_name
+        tests: [not_null]
+      - name: start_date
+        tests: [not_null]
+
+  - name: stg_congress__member_sponsored_amendments
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: amendment_number
+        tests: [not_null]
+      - name: type
+        tests: [not_null]
+
+  - name: stg_congress__member_cosponsored_amendments
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: amendment_number
+        tests: [not_null]
+      - name: type
+        tests: [not_null]
+
+  - name: stg_congress__congress_detail
+    columns:
+      - name: congress_number
+        tests: [not_null, unique]
+      - name: congress_name
+        tests: [not_null]
+      - name: start_year
+        tests: [not_null]
+      - name: end_year
+        tests: [not_null]
+
+  - name: stg_congress__congress_sessions
+    columns:
+      - name: congress_number
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: type
+        tests: [not_null]
+      - name: start_date
+        tests: [not_null]
+
+  - name: stg_congress__committee_detail
+    columns:
+      - name: committee_id
+        tests: [not_null, unique]
+      - name: system_code
+        tests: [not_null]
+      - name: name
+        tests: [not_null]
+      - name: committee_type
+        tests: [not_null]
+      - name: is_current
+        tests: [not_null]
+      - name: bills_count
+        tests: [not_null]
+      - name: reports_count
+        tests: [not_null]
+      - name: nominations_count
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__committee_history
+    columns:
+      - name: committee_id
+        tests: [not_null]
+      - name: started_at
+        tests: [not_null]
+
+  - name: stg_congress__committee_subcommittees
+    columns:
+      - name: committee_id
+        tests: [not_null]
+      - name: subcommittee_id
+        tests: [not_null]
+
+  - name: stg_congress__committee_bills
+    columns:
+      - name: committee_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__committee_reports
+    columns:
+      - name: committee_id
+        tests: [not_null]
+      - name: report_id
+        tests: [not_null]
+      - name: report_part_id
+        tests: [not_null]
+
+  - name: stg_congress__committee_nominations
+    columns:
+      - name: committee_id
+        tests: [not_null]
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_number
+        tests: [not_null]
+      - name: nomination_part
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__amendment_detail
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: amendment_id
+        tests: [not_null, unique]
+      - name: amendment_number
+        tests: [not_null]
+      - name: amendment_type
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: is_bill_amendment
+        tests: [not_null]
+      - name: is_amendment_amendment
+        tests: [not_null]
+      - name: is_treaty_amendment
+        tests: [not_null]
+      - name: actions_count
+        tests: [not_null]
+      - name: cosponsors_count
+        tests: [not_null]
+      - name: cosponsors_withdrawn_count
+        tests: [not_null]
+      - name: texts_count
+        tests: [not_null]
+
+  - name: stg_congress__amendment_sponsors
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: bioguide_id
+        tests: [not_null]
+
+  - name: stg_congress__amendment_committee_sponsors
+    columns:
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: committee_url
+        tests: [not_null]
+
+  - name: stg_congress__amendment_on_behalf_sponsors
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: bioguide_id
+        tests: [not_null]
+
+  - name: stg_congress__amendment_cosponsors
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: bioguide_id
+        tests: [not_null]
+      - name: is_original_cosponsor
+        tests: [not_null]
+
+  - name: stg_congress__amendment_actions
+    columns:
+      - name: action_id
+        tests: [not_null, unique]
+      - name: amendment_id
+        tests: [not_null]
+
+  - name: stg_congress__amendment_actions_committees
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: action_id
+        tests: [not_null]
+      - name: committee_code
+        tests: [not_null]
+
+  - name: stg_congress__amendment_actions_recordedvotes
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: action_id
+        tests: [not_null]
+      - name: url
+        tests: [not_null]
+
+  - name: stg_congress__amendment_notes
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: note_id
+        tests: [not_null]
+      - name: text
+        tests: [not_null]
+
+  - name: stg_congress__amendment_notes_links
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: name
+        tests: [not_null]
+      - name: url
+        tests: [not_null]
+
+  - name: stg_congress__amendment_amendments_to_amendment
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: parent_raw_id
+        tests: [not_null]
+
+  - name: stg_congress__amendment_amendments
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: amending_amendment_id
+        tests: [not_null]
+      - name: amendment_type
+        tests: [not_null]
+      - name: amendment_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__amendment_texts
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: type
+        tests: [not_null]
+
+  - name: stg_congress__amendment_amended_bills
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: bill_type
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+
+  - name: stg_congress__amendment_amended_amendments
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: amended_amendment_id
+        tests: [not_null]
+      - name: amendment_number
+        tests: [not_null]
+      - name: amendment_type
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__amendment_amended_treaties
+    columns:
+      - name: amendment_id
+        tests: [not_null]
+      - name: treaty_id
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: number
+        tests: [not_null]
+
+  - name: stg_congress__committee_report_detail
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_part_id
+        tests: [not_null, unique]
+      - name: report_type
+        tests: [not_null]
+      - name: report_number
+        tests: [not_null]
+      - name: report_part
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: session
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: is_conference_report
+        tests: [not_null]
+      - name: is_errata
+        tests: [not_null]
+      - name: citation
+        tests: [not_null]
+      - name: texts_count
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__committee_report_committees
+    columns:
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: system_code
+        tests: [not_null]
+
+  - name: stg_congress__committee_report_texts
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_part_id
+        tests: [not_null]
+      - name: formatted_text_is_errata
+        tests: [not_null]
+      - name: pdf_is_errata
+        tests: [not_null]
+
+  - name: stg_congress__committee_report_treaties
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_part_id
+        tests: [not_null]
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: treaty_number
+        tests: [not_null]
+
+  - name: stg_congress__committee_report_bills
+    columns:
+      - name: report_id
+        tests: [not_null]
+      - name: report_part_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__committee_print_detail
+    columns:
+      - name: print_id
+        tests: [not_null, unique]
+      - name: print_type
+        tests: [not_null]
+      - name: print_jacketnumber
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: title
+        tests: [not_null]
+      - name: print_number
+        tests: [not_null]
+      - name: citation
+        tests: [not_null]
+      - name: texts_count
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__committee_print_committees
+    columns:
+      - name: print_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: committee_name
+        tests: [not_null]
+
+  - name: stg_congress__committee_print_texts
+    columns:
+      - name: print_id
+        tests: [not_null]
+
+  - name: stg_congress__committee_print_bills
+    columns:
+      - name: print_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__committee_print_texts
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: url
+        tests: [not_null]
+
+  - name: stg_congress__hearing_detail
+    columns:
+      - name: hearing_id
+        tests: [not_null, unique]
+      - name: hearing_part_id
+        tests: [not_null, unique]
+      - name: chamber
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: hearing_jacketnumber
+        tests: [not_null]
+      - name: hearing_part
+        tests: [not_null]
+      - name: loc_id
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__hearing_committees
+    columns:
+      - name: hearing_id
+        tests: [not_null]
+      - name: hearing_part_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: committee_name
+        tests: [not_null]
+
+  - name: stg_congress__hearing_dates
+    columns:
+      - name: hearing_id
+        tests: [not_null]
+      - name: hearing_part_id
+        tests: [not_null]
+      - name: hearing_date
+        tests: [not_null]
+
+  - name: stg_congress__hearing_texts
+    columns:
+      - name: hearing_id
+        tests: [not_null]
+      - name: hearing_part_id
+        tests: [not_null]
+      - name: formatted_text
+      - name: pdf
+      - name: raw_text
+
+  - name: stg_congress__committee_meeting_detail
+    columns:
+      - name: meeting_id
+        tests: [not_null, unique]
+      - name: title
+        tests: [not_null]
+      - name: meeting_type
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+      - name: meeting_status
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_committees
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_continuations
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: continuation_date
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_location
+    columns:
+      - name: parent_raw_id
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_videos
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: video_name
+        tests: [not_null]
+      - name: video_url
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_witnesses
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: witness_name
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_witness_documents
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: document_type
+        tests: [not_null]
+      - name: format
+        tests: [not_null]
+      - name: witness_doc_url
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_documents
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: document_type
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_hearings
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: hearing_id
+        tests: [not_null]
+      - name: hearing_type
+        tests: [not_null]
+      - name: hearing_jacketnumber
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_bills
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_treaties
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: treaty_number
+        tests: [not_null]
+
+  - name: stg_congress__committee_meeting_nominations
+    columns:
+      - name: meeting_id
+        tests: [not_null]
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__nomination_detail
+    columns:
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null, unique]
+      - name: nomination_number
+        tests: [not_null]
+      - name: nomination_part
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: actions_count
+        tests: [not_null]
+      - name: committees_count
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__nomination_actions
+    columns:
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null]
+      - name: action_id
+        tests: [not_null]
+      - name: action_date
+        tests: [not_null]
+      - name: text
+        tests: [not_null]
+
+  - name: stg_congress__nomination_actions_committees
+    columns:
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null]
+      - name: action_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+
+  - name: stg_congress__nomination_committees
+    columns:
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+
+  - name: stg_congress__nomination_committeeactivities
+    columns:
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: activity_name
+        tests: [not_null]
+
+  - name: stg_congress__nomination_hearings
+    columns:
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null]
+      - name: hearing_id
+        tests: [not_null]
+      - name: hearing_part_id
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: hearing_jacketnumber
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: hearing_number
+        tests: [not_null]
+
+  - name: stg_congress__nomination_nominees
+    columns:
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null]
+      - name: position_id
+        tests: [not_null]
+      - name: nominee_ordinal
+        tests: [not_null]
+      - name: last_name
+        tests: [not_null]
+
+  - name: stg_congress__nomination_positions
+    columns:
+      - name: nomination_id
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null]
+      - name: position_id
+        tests: [not_null]
+      - name: nominee_count
+        tests: [not_null]
+
+  - name: stg_congress__nomination_nominee_details
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: ordinal
+        tests: [not_null]
+      - name: last_name
+        tests: [not_null]
+
+  - name: stg_congress__treaty_detail
+    columns:
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null, unique]
+      - name: treaty_number
+        tests: [not_null]
+      - name: congress_received
+        tests: [not_null]
+      - name: parts_count
+        tests: [not_null]
+      - name: actions_count
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__treaty_actions
+    columns:
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null]
+      - name: action_id
+        tests: [not_null]
+      - name: action_date
+        tests: [not_null]
+      - name: text
+        tests: [not_null]
+      - name: action_type
+        tests: [not_null]
+
+  - name: stg_congress__treaty_committeeactivities
+    columns:
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: activity_name
+        tests: [not_null]
+
+  - name: stg_congress__treaty_committees
+    columns:
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: committee_name
+        tests: [not_null]
+
+  - name: stg_congress__treaty_committeereports
+    columns:
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null]
+      - name: report_id
+        tests: [not_null]
+      - name: report_type
+        tests: [not_null]
+      - name: report_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: citation
+        tests: [not_null]
+
+  - name: stg_congress__treaty_countries_parties
+    columns:
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: name
+        tests: [not_null]
+
+  - name: stg_congress__treaty_countries
+    columns:
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null]
+      - name: country
+        tests: [not_null]
+
+  - name: stg_congress__treaty_index_terms
+    columns:
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: name
+        tests: [not_null]
+
+  - name: stg_congress__treaty_indexterms
+    columns:
+      - name: treaty_id
+        tests: [not_null]
+      - name: treaty_part_id
+        tests: [not_null]
+      - name: index_term
+        tests: [not_null]
+
+  - name: stg_congress__treaty_related_docs
+    columns:
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: name
+        tests: [not_null]
+
+  - name: stg_congress__treaty_titles
+    columns:
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: title
+        tests: [not_null]

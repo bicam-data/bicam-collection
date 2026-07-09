@@ -1,0 +1,31 @@
+{
+  "nominations": [
+    {
+      "citation": "PN1980",
+      "congress": 118,
+      "description": "Judicial nomination",
+      "latestAction": {
+        "actionDate": "2024-09-12",
+        "text": "Received in the Senate and referred to the Committee on the Judiciary."
+      },
+      "nominationType": {
+        "isCivilian": true,
+        "isMilitary": false
+      },
+      "number": "1980",
+      "organization": "The Judiciary",
+      "partNumber": "00",
+      "receivedDate": "2024-09-12",
+      "updateDate": "2024-09-12T15:00:00Z",
+      "url": "https://api.congress.gov/v3/nomination/118/1980?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/nomination?offset=250&limit=250&format=json"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

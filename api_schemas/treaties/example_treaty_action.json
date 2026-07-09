@@ -1,0 +1,23 @@
+{
+  "actions": [
+    {
+      "actionCode": "S05120",
+      "actionDate": "2026-01-03",
+      "committee": {
+        "name": "Foreign Relations Committee",
+        "systemCode": "ssfr00",
+        "url": "https://api.congress.gov/v3/committee/senate/ssfr00?format=json"
+      },
+      "text": "Received in the Senate and referred to the Committee on Foreign Relations.",
+      "type": "IntroReferral"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": ""
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

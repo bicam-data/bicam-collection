@@ -1,0 +1,20 @@
+{
+  "actions": [
+    {
+      "actionCode": "1000",
+      "actionDate": "2024-09-12",
+      "text": "Received in the Senate and referred to the Committee on the Judiciary.",
+      "type": "IntroReferral"
+    }
+  ],
+  "pagination": {
+    "count": 1
+  },
+  "request": {
+    "congress": "118",
+    "contentType": "application/json",
+    "format": "json",
+    "nominationUrl": "https://api.congress.gov/v3/nomination/118/1980",
+    "number": "1980"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "amendment": {
+    "actions": {
+      "count": 1,
+      "url": "https://api.congress.gov/v3/amendment/117/samdt/3892/actions?format=json"
+    },
+    "amendedAmendment": {
+      "congress": 117,
+      "number": "3867",
+      "purpose": "In the nature of a substitute.",
+      "type": "SAMDT",
+      "updateDate": "2022-05-20T16:27:56Z",
+      "url": "https://api.congress.gov/v3/amendment/117/samdt/3867?format=json"
+    },
+    "amendedBill": {
+      "congress": 117,
+      "number": "4350",
+      "originChamber": "House",
+      "originChamberCode": "H",
+      "title": "National Defense Authorization Act for Fiscal Year 2022",
+      "type": "HR",
+      "updateDateIncludingText": "2025-12-17",
+      "url": "https://api.congress.gov/v3/bill/117/hr/4350?format=json"
+    },
+    "amendedTreaty": {
+      "congress": 116,
+      "treatyNumber": "1",
+      "url": "https://api.congress.gov/v3/treaty/116/1?format=json"
+    },
+    "amendmentsToAmendment": {
+      "count": 507,
+      "url": "https://api.congress.gov/v3/amendment/117/samdt/2137/amendments?format=json"
+    },
+    "chamber": "Senate",
+    "congress": 117,
+    "cosponsors": {
+      "count": 1,
+      "countIncludingWithdrawnCosponsors": 2,
+      "url": "https://api.congress.gov/v3/amendment/117/samdt/3892/cosponsors?format=json"
+    },
+    "description": "Sample amendment detail covering bill, amendment, and treaty mapping branches.",
+    "latestAction": {
+      "actionDate": "2021-10-26",
+      "text": "Amendment SA 3892 submitted in the Senate."
+    },
+    "number": "3892",
+    "onBehalfOfSponsor": [
+      {
+        "bioguideId": "S001191",
+        "firstName": "Kyrsten",
+        "fullName": "Sen. Sinema, Kyrsten [D-AZ]",
+        "lastName": "Sinema",
+        "party": "D",
+        "state": "AZ",
+        "type": "Submitted on behalf of",
+        "url": "https://api.congress.gov/v3/member/S001191?format=json"
+      }
+    ],
+    "purpose": "Sample amendment purpose.",
+    "sponsors": [
+      {
+        "bioguideId": "G000555",
+        "firstName": "Kirsten",
+        "fullName": "Sen. Gillibrand, Kirsten E. [D-NY]",
+        "lastName": "Gillibrand",
+        "middleName": "E.",
+        "party": "D",
+        "state": "NY",
+        "url": "https://api.congress.gov/v3/member/G000555?format=json"
+      }
+    ],
+    "submittedDate": "2021-10-26T04:00:00Z",
+    "textVersions": {
+      "count": 1,
+      "url": "https://api.congress.gov/v3/amendment/117/samdt/3892/text?format=json"
+    },
+    "type": "SAMDT",
+    "updateDate": "2022-02-22T21:30:29Z"
+  },
+  "request": {
+    "amendmentNumber": "3892",
+    "amendmentType": "samdt",
+    "congress": "117",
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

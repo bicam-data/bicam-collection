@@ -1,0 +1,29 @@
+{
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/treaty?format=json&limit=250&offset=250"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  },
+  "treaties": [
+    {
+      "congressConsidered": 119,
+      "congressReceived": 119,
+      "number": 3,
+      "parts": {
+        "count": 2,
+        "urls": [
+          "https://api.congress.gov/v3/treaty/119/3/A?format=json",
+          "https://api.congress.gov/v3/treaty/119/3/B?format=json"
+        ]
+      },
+      "suffix": "A",
+      "topic": "Protocols to the North Atlantic Treaty",
+      "transmittedDate": "2026-01-01T00:00:00Z",
+      "updateDate": "2026-01-02T00:00:00Z",
+      "url": "https://api.congress.gov/v3/treaty/119/3/A?format=json"
+    }
+  ]
+}

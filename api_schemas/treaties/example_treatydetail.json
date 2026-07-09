@@ -1,0 +1,58 @@
+{
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  },
+  "treaty": [
+    {
+      "actions": {
+        "count": 1,
+        "url": "https://api.congress.gov/v3/treaty/119/3/A/actions?format=json"
+      },
+      "committees": {
+        "count": 1,
+        "url": "https://api.congress.gov/v3/treaty/119/3/A/committees?format=json"
+      },
+      "congressConsidered": 119,
+      "congressReceived": 119,
+      "countriesParties": [
+        {
+          "name": "Sweden"
+        }
+      ],
+      "inForceDate": "2026-02-01",
+      "indexTerms": [
+        {
+          "name": "North Atlantic Treaty"
+        }
+      ],
+      "number": 3,
+      "oldNumber": "Exec. A",
+      "oldNumberDisplayName": "Executive A",
+      "parts": {
+        "count": 2,
+        "urls": [
+          "https://api.congress.gov/v3/treaty/119/3/A?format=json",
+          "https://api.congress.gov/v3/treaty/119/3/B?format=json"
+        ]
+      },
+      "relatedDocs": [
+        {
+          "name": "Ex. Rept. 119-1",
+          "url": "https://api.congress.gov/v3/committee-report/119/ERPT/1?format=json"
+        }
+      ],
+      "resolutionText": "Resolved, That the Senate advise and consent to ratification.",
+      "suffix": "A",
+      "titles": [
+        {
+          "title": "Protocols to the North Atlantic Treaty",
+          "titleType": "Treaty - Formal Title"
+        }
+      ],
+      "topic": "Protocols to the North Atlantic Treaty",
+      "transmittedDate": "2026-01-01T00:00:00Z",
+      "updateDate": "2026-01-02T00:00:00Z"
+    }
+  ]
+}

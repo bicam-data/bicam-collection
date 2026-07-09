@@ -1,0 +1,32 @@
+{
+  "committees": [
+    {
+      "chamber": "Senate",
+      "committeeTypeCode": "Standing",
+      "name": "Energy and Natural Resources Committee",
+      "subcommittees": [
+        {
+          "name": "Renewable Energy, Energy Efficiency, and Competitiveness Subcommittee",
+          "systemCode": "sseg02",
+          "url": "https://api.congress.gov/v3/committee/senate/sseg02?format=json"
+        },
+        {
+          "name": "Energy Production and Regulation Subcommittee",
+          "systemCode": "sseg05",
+          "url": "https://api.congress.gov/v3/committee/senate/sseg05?format=json"
+        }
+      ],
+      "systemCode": "sseg00",
+      "updateDate": "2026-03-24T12:48:02Z",
+      "url": "https://api.congress.gov/v3/committee/senate/sseg00?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 818,
+    "next": "https://api.congress.gov/v3/committee?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

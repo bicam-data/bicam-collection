@@ -1,0 +1,44 @@
+{
+  "hearing": {
+    "associatedMeeting": {
+      "eventId": "118987",
+      "url": "https://api.congress.gov/v3/committee-meeting/119/house/118987?format=json"
+    },
+    "chamber": "House",
+    "citation": "H.Hrg.119",
+    "committees": [
+      {
+        "name": "House Government Reform Committee",
+        "systemCode": "hsgo00",
+        "url": "https://api.congress.gov/v3/committee/house/hsgo00?format=json"
+      }
+    ],
+    "congress": 119,
+    "dates": [
+      {
+        "date": "2026-02-24"
+      }
+    ],
+    "formats": [
+      {
+        "type": "Formatted Text",
+        "url": "https://congress.gov/119/chrg/CHRG-119hhrg62790/generated/CHRG-119hhrg62790.htm"
+      },
+      {
+        "type": "PDF",
+        "url": "https://congress.gov/119/chrg/CHRG-119hhrg62790/CHRG-119hhrg62790.pdf"
+      }
+    ],
+    "jacketNumber": 62790,
+    "libraryOfCongressIdentifier": "LC75347",
+    "title": "AN UPDATE ON DOD'S STRUGGLING BACKGROUND CHECK SYSTEM",
+    "updateDate": "2026-03-28T01:21:20Z"
+  },
+  "request": {
+    "chamber": "house",
+    "congress": "119",
+    "contentType": "application/json",
+    "format": "json",
+    "jacketNumber": "62790"
+  }
+}

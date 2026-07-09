@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: "{{ env_var('DB_SCHEMA', 'public') }}"
+    tables:
+      - name: raw_responses
+      - name: crawl_runs
+      - name: crawl_run_fetches

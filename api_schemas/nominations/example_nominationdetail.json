@@ -1,0 +1,47 @@
+{
+  "nomination": {
+    "actions": {
+      "count": 2,
+      "url": "https://api.congress.gov/v3/nomination/118/1980/actions?format=json"
+    },
+    "authorityDate": "2024-09-12",
+    "citation": "PN1980",
+    "committees": {
+      "count": 1,
+      "url": "https://api.congress.gov/v3/nomination/118/1980/committees?format=json"
+    },
+    "congress": 118,
+    "description": "Judicial nomination",
+    "hearings": {
+      "count": 1,
+      "url": "https://api.congress.gov/v3/nomination/118/1980/hearings?format=json"
+    },
+    "latestAction": {
+      "actionDate": "2024-09-12",
+      "text": "Received in the Senate and referred to the Committee on the Judiciary."
+    },
+    "nominationType": {
+      "isCivilian": true,
+      "isMilitary": false
+    },
+    "nominees": [
+      {
+        "nomineeCount": 1,
+        "ordinal": 1,
+        "organization": "The Judiciary",
+        "positionTitle": "United States District Judge for the Western District of Texas",
+        "url": "https://api.congress.gov/v3/nomination/118/1980/1?format=json"
+      }
+    ],
+    "number": "1980",
+    "partNumber": "00",
+    "receivedDate": "2024-09-12",
+    "updateDate": "2024-09-12T15:00:00Z"
+  },
+  "request": {
+    "congress": "118",
+    "contentType": "application/json",
+    "format": "json",
+    "number": "1980"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "committee": {
+    "bills": {
+      "count": 23311,
+      "url": "https://api.congress.gov/v3/committee/senate/sseg00/bills?format=json"
+    },
+    "committeeWebsiteUrl": "https://www.energy.senate.gov/public/",
+    "communications": {
+      "count": 8921,
+      "url": "https://api.congress.gov/v3/committee/senate/sseg00/senate-communication?format=json"
+    },
+    "history": [
+      {
+        "committeeTypeCode": "Standing",
+        "establishingAuthority": "95 S Res 4",
+        "libraryOfCongressName": "Energy and Natural Resources",
+        "locLinkedDataId": "n79043129",
+        "naraId": "10520021",
+        "officialName": "Committee on Energy and Natural Resources",
+        "startDate": "1977-02-04T05:00:00Z",
+        "superintendentDocumentNumber": "Y 4.EN 2:",
+        "updateDate": "2025-01-14T17:11:28Z"
+      }
+    ],
+    "isCurrent": true,
+    "nominations": {
+      "count": 611,
+      "url": "https://api.congress.gov/v3/committee/senate/sseg00/nominations?format=json"
+    },
+    "reports": {
+      "count": 1625,
+      "url": "https://api.congress.gov/v3/committee/senate/sseg00/reports?format=json"
+    },
+    "subcommittees": [
+      {
+        "name": "Renewable Energy, Energy Efficiency, and Competitiveness Subcommittee",
+        "systemCode": "sseg02",
+        "url": "https://api.congress.gov/v3/committee/senate/sseg02?format=json"
+      },
+      {
+        "name": "Energy Production and Regulation Subcommittee",
+        "systemCode": "sseg05",
+        "url": "https://api.congress.gov/v3/committee/senate/sseg05?format=json"
+      }
+    ],
+    "systemCode": "sseg00",
+    "type": "Standing",
+    "updateDate": "2026-03-24T12:48:02Z"
+  },
+  "request": {
+    "chamber": "senate",
+    "contentType": "application/json",
+    "format": "json",
+    "systemCode": "sseg00"
+  }
+}

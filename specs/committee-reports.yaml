@@ -1,0 +1,34 @@
+category: committee-reports
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /committee-report
+  node_type: committee_report_list
+refresh_root_node_type: committee_report_detail
+nodes:
+  committee_report_list:
+    item_path: $.reports[*]
+    high_water_mark_path: $.reports[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: committee_report_detail
+        url_path: $.reports[*].url
+        follow_mode: recurse
+  committee_report_detail:
+    high_water_mark_path: $.committeeReports[*].updateDate
+    child_edges:
+      - target: committee_report_texts
+        url_path: $.committeeReports[*].text.url
+        follow_mode: recurse
+  committee_report_texts:
+    item_path: $.text[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

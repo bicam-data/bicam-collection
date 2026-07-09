@@ -1,0 +1,39 @@
+{
+  "committeeReports": [
+    {
+      "associatedTreaties": [
+        {
+          "congress": 112,
+          "number": 8,
+          "url": "https://api.congress.gov/v3/treaty/112/8?format=json"
+        }
+      ],
+      "chamber": "Senate",
+      "citation": "Exec. Rept. 118-1",
+      "committees": [
+        {
+          "name": "Foreign Relations Committee",
+          "systemCode": "ssfr00",
+          "url": "https://api.congress.gov/v3/committee/senate/ssfr00?format=json"
+        }
+      ],
+      "congress": 118,
+      "isConferenceReport": false,
+      "issueDate": "2024-01-10T05:00:00Z",
+      "number": 1,
+      "part": 1,
+      "reportType": "Exec.Rept.",
+      "sessionNumber": 2,
+      "title": "TREATY REPORT EXAMPLE",
+      "type": "ERPT",
+      "updateDate": "2024-01-11T12:00:00Z"
+    }
+  ],
+  "request": {
+    "congress": "118",
+    "contentType": "application/json",
+    "format": "json",
+    "reportNumber": "1",
+    "reportType": "erpt"
+  }
+}

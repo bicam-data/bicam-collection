@@ -1,0 +1,28 @@
+{
+  "members": [
+    {
+      "bioguideId": "A000383",
+      "name": "Armstrong, Alan",
+      "partyName": "Republican",
+      "state": "Oklahoma",
+      "terms": {
+        "item": [
+          {
+            "chamber": "Senate",
+            "startYear": 2026
+          }
+        ]
+      },
+      "updateDate": "2026-03-26T10:30:18Z",
+      "url": "https://api.congress.gov/v3/member/A000383?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 2690,
+    "next": "https://api.congress.gov/v3/member?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

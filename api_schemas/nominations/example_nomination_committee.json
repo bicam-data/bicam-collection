@@ -1,0 +1,21 @@
+{
+  "committees": [
+    {
+      "activities": [
+        "Referred to"
+      ],
+      "chamber": "Senate",
+      "name": "Judiciary Committee",
+      "systemCode": "ssju00",
+      "type": "Standing",
+      "url": "https://api.congress.gov/v3/committee/senate/ssju00?format=json"
+    }
+  ],
+  "request": {
+    "congress": "118",
+    "contentType": "application/json",
+    "format": "json",
+    "nominationUrl": "https://api.congress.gov/v3/nomination/118/1980",
+    "number": "1980"
+  }
+}

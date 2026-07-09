@@ -1,0 +1,56 @@
+category: committees
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /committee
+  node_type: committee_list
+refresh_root_node_type: committee_detail
+nodes:
+  committee_list:
+    item_path: $.committees[*]
+    high_water_mark_path: $.committees[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: committee_detail
+        url_path: $.committees[*].url
+        follow_mode: recurse
+  committee_detail:
+    data_path: $.committee
+    high_water_mark_path: $.committee.updateDate
+    child_edges:
+      - target: committee_bills
+        url_path: $.committee.bills.url
+        follow_mode: recurse
+      - target: committee_reports
+        url_path: $.committee.reports.url
+        follow_mode: recurse
+      - target: committee_nominations
+        url_path: $.committee.nominations.url
+        follow_mode: recurse
+  committee_bills:
+    data_path: $.committee-bills
+    item_path: $.committee-bills.bills[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  committee_reports:
+    item_path: $.reports[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  committee_nominations:
+    item_path: $.nominations[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

@@ -1,0 +1,20 @@
+{
+  "hearings": [
+    {
+      "chamber": "House",
+      "congress": 119,
+      "jacketNumber": 62790,
+      "number": "119",
+      "updateDate": "2026-03-28T01:21:20Z",
+      "url": "https://api.congress.gov/v3/hearing/119/house/62790?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/hearing?offset=250&limit=250&format=json"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

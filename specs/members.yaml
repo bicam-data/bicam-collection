@@ -1,0 +1,48 @@
+category: members
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /member
+  node_type: member_list
+refresh_root_node_type: member_detail
+nodes:
+  member_list:
+    item_path: $.members[*]
+    high_water_mark_path: $.members[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+    child_edges:
+      - target: member_detail
+        url_path: $.members[*].url
+        follow_mode: recurse
+  member_detail:
+    data_path: $.member
+    high_water_mark_path: $.member.updateDate
+    child_edges:
+      - target: member_sponsored_legislation
+        url_path: $.member.sponsoredLegislation.url
+        follow_mode: recurse
+      - target: member_cosponsored_legislation
+        url_path: $.member.cosponsoredLegislation.url
+        follow_mode: recurse
+  member_sponsored_legislation:
+    item_path: $.sponsoredLegislation[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  member_cosponsored_legislation:
+    item_path: $.cosponsoredLegislation[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

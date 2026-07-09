@@ -1,0 +1,21 @@
+{
+  "pagination": {
+    "count": 1768,
+    "next": "https://api.congress.gov/v3/member/L000174/sponsored-legislation?offset=1&limit=1&format=json"
+  },
+  "request": {
+    "bioguideId": "l000174",
+    "contentType": "application/json",
+    "format": "json"
+  },
+  "sponsoredLegislation": [
+    {
+      "amendmentNumber": "5136",
+      "congress": 114,
+      "introducedDate": "2016-12-05",
+      "latestAction": null,
+      "type": null,
+      "url": "https://api.congress.gov/v3/amendment/114/samdt/5136?format=json"
+    }
+  ]
+}

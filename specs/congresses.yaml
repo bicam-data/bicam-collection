@@ -1,0 +1,24 @@
+category: congresses
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /congress
+  node_type: congress_list
+refresh_root_node_type: congress_detail
+nodes:
+  congress_list:
+    item_path: $.congresses[*]
+    high_water_mark_path: $.congresses[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: congress_detail
+        url_path: $.congresses[*].url
+        follow_mode: recurse
+  congress_detail:
+    data_path: $.congress
+    high_water_mark_path: $.congress.updateDate

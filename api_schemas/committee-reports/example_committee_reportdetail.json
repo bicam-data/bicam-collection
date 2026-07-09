@@ -1,0 +1,44 @@
+{
+  "committeeReports": [
+    {
+      "associatedBill": [
+        {
+          "congress": 119,
+          "number": "53",
+          "type": "HRES",
+          "url": "https://api.congress.gov/v3/bill/119/hres/53?format=json"
+        }
+      ],
+      "chamber": "House",
+      "citation": "H. Rept. 119-1",
+      "committees": [
+        {
+          "name": "Rules Committee",
+          "systemCode": "hsru00",
+          "url": "https://api.congress.gov/v3/committee/house/hsru00?format=json"
+        }
+      ],
+      "congress": 119,
+      "isConferenceReport": false,
+      "issueDate": "2025-01-21T05:00:00Z",
+      "number": 1,
+      "part": 1,
+      "reportType": "H.Rept.",
+      "sessionNumber": 1,
+      "text": {
+        "count": 2,
+        "url": "https://api.congress.gov/v3/committee-report/119/HRPT/1/text?format=json"
+      },
+      "title": "PROVIDING FOR CONSIDERATION OF HOUSE RESOLUTION 53",
+      "type": "HRPT",
+      "updateDate": "2025-05-27T14:12:39Z"
+    }
+  ],
+  "request": {
+    "congress": "119",
+    "contentType": "application/json",
+    "format": "json",
+    "reportNumber": "1",
+    "reportType": "hrpt"
+  }
+}
