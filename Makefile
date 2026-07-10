@@ -2,7 +2,7 @@ COMPOSE := docker compose
 TOOLS_PROFILE := --profile tools
 OPS_PROFILE := --profile ops
 
-.PHONY: help init-env build up up-ops down logs psql migrate reconcile crawl crawl-one dbt-run dbt-test crawler-shell dbt-shell
+.PHONY: help init-env build up up-ops down logs psql migrate reconcile reconcile-committee-reports crawl crawl-one dbt-run dbt-test crawler-shell dbt-shell
 
 help:
 	@printf "Available targets:\n"
@@ -15,6 +15,7 @@ help:
 	@printf "  psql          Open psql against the compose Postgres instance\n"
 	@printf "  migrate       Apply ordered SQL migrations inside the crawler image\n"
 	@printf "  reconcile    Build committee-report reconciliation models and tests\n"
+	@printf "  reconcile-committee-reports Refresh committee-report source evidence, matches, and coverage\n"
 	@printf "  crawl         Run scripts/run_multi_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
 	@printf "  crawl-one     Run scripts/run_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
 	@printf "  dbt-run       Run dbt run inside the dbt container; pass ARGS=\"...\"\n"
@@ -48,6 +49,13 @@ migrate:
 
 reconcile:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select tag:committee_report_reconciliation
+
+reconcile-committee-reports:
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select +int_committee_reports__congress
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/backfill_govinfo_committee_reports.py --limit $${REPORT_BACKFILL_LIMIT:-5000} --concurrency $${GOVINFO_BACKFILL_CONCURRENCY:-3}
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select +fct_committee_report_matches
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/backfill_govinfo_committee_reports.py --granules-for-unmatched --limit $${REPORT_BACKFILL_LIMIT:-5000} --concurrency $${GOVINFO_BACKFILL_CONCURRENCY:-3}
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select +fct_committee_report_matches fct_collection_coverage
 
 crawl:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_multi_crawl.py $(ARGS)

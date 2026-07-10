@@ -133,3 +133,17 @@ Add an explicit human decision to
 `dbt_project/seeds/reconciliation/committee_report_match_overrides.csv` when a
 candidate must be accepted or rejected outside the deterministic rule. The dbt
 tests enforce unique accepted pairings and non-null canonical identities.
+
+After collecting either committee-report source, run the complete incremental
+evidence and reconciliation workflow:
+
+```bash
+make reconcile-committee-reports
+```
+
+It first refreshes Congress.gov report identities, then retrieves only missing
+GovInfo package summaries and granules needed for unmatched report parts, and
+finally rebuilds the match and coverage models. It uses a default ceiling of
+three concurrent GovInfo requests. Set `REPORT_BACKFILL_LIMIT` (default `5000`)
+or `GOVINFO_BACKFILL_CONCURRENCY` only when a deliberately different operating
+limit is appropriate.
