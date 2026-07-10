@@ -1,0 +1,22 @@
+entity: bill
+identity:
+  components:
+    - bill_type
+    - bill_number
+    - congress
+  canonical_format: "{bill_type}{bill_number}-{congress}"
+sources:
+  congress:
+    model: stg_congress__bill_detail
+    natural_key: bill_id
+  govinfo:
+    model: stg_govinfo__bills_packages
+    natural_key: package_id
+matching:
+  automatic_rule: exact_canonical_identity
+  corroborating_fields: [title, origin_chamber, introduced_at]
+  fuzzy_match_requires_review: true
+quality:
+  max_competing_accepted_matches: 0
+  max_missing_canonical_identity: 0
+version: 1

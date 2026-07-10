@@ -1,6 +1,34 @@
 version: 2
 
 models:
+  - name: int_bills__congress
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: canonical_bill_id
+        tests: [not_null]
+  - name: int_bills__govinfo
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: canonical_bill_id
+        tests: [not_null]
+  - name: int_bill_candidates
+    columns:
+      - name: candidate_id
+        tests: [not_null, unique]
+      - name: canonical_bill_id
+        tests: [not_null]
+  - name: fct_bill_matches
+    columns:
+      - name: match_id
+        tests: [not_null, unique]
+      - name: decision
+        tests:
+          - accepted_values:
+              arguments:
+                values: [accepted, rejected, unmatched]
+
   - name: int_committee_reports__congress
     columns:
       - name: source_record_id

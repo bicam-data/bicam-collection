@@ -1,0 +1,23 @@
+category: govinfo-bills
+source: govinfo
+url_allowlist_hosts:
+  - api.govinfo.gov
+seed:
+  path: /collections/BILLS/{from_datetime}/{to_datetime}
+  node_type: govinfo_bill_package_list
+refresh_root_node_type: govinfo_bill_package_detail
+nodes:
+  govinfo_bill_package_list:
+    item_path: $.packages[*]
+    high_water_mark_path: $.packages[*].lastModified
+    pagination_path: $
+    next_page_path: $.nextPage
+    default_query_params:
+      offsetMark: "*"
+      pageSize: 100
+    child_edges:
+      - target: govinfo_bill_package_detail
+        url_path: $.packages[*].packageLink
+        follow_mode: recurse
+  govinfo_bill_package_detail:
+    high_water_mark_path: $.lastModified

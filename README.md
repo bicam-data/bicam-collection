@@ -147,3 +147,23 @@ finally rebuilds the match and coverage models. It uses a default ceiling of
 three concurrent GovInfo requests. Set `REPORT_BACKFILL_LIMIT` (default `5000`)
 or `GOVINFO_BACKFILL_CONCURRENCY` only when a deliberately different operating
 limit is appropriate.
+
+## Bill reconciliation
+
+Bill reconciliation applies the same reviewed, deterministic pattern at bill
+level. Congress.gov text-version URLs provide the exact GovInfo `BILLS` package
+identifiers, and the latest available GovInfo package version is matched by bill
+type, number, and Congress. A bill without a collected text version remains
+unmatched rather than being inferred from a title.
+
+After collecting bills, run:
+
+```bash
+make reconcile-bills
+```
+
+The workflow stages bill text versions, retrieves only their missing GovInfo
+packages, rebuilds `fct_bill_matches`, and refreshes coverage. It keeps the
+same default ceiling of three concurrent GovInfo requests. Set
+`BILL_BACKFILL_LIMIT` (default `5000`) only when a different bounded batch is
+intended.

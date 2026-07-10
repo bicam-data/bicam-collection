@@ -1,6 +1,21 @@
 version: 2
 
 models:
+  - name: stg_govinfo__bills_packages
+    columns:
+      - name: package_id
+        tests: [not_null, unique]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: bill_version
+        tests: [not_null]
+      - name: collection_code
+        tests: [not_null]
+
   - name: stg_govinfo__committeereports
     columns:
       - name: report_id

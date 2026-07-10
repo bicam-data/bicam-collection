@@ -53,6 +53,7 @@ class CliTests(unittest.TestCase):
                 "committee-reports",
                 "committees",
                 "congresses",
+                "govinfo-bills",
                 "govinfo-committee-reports",
                 "hearings",
                 "members",
