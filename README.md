@@ -162,8 +162,9 @@ After collecting bills, run:
 make reconcile-bills
 ```
 
-The workflow stages bill text versions, retrieves only their missing GovInfo
-packages, rebuilds `fct_bill_matches`, and refreshes coverage. It keeps the
-same default ceiling of three concurrent GovInfo requests. Set
-`BILL_BACKFILL_LIMIT` (default `5000`) only when a different bounded batch is
-intended.
+The workflow first retrieves missing Congress.gov bill-text child endpoints,
+then stages those text versions and retrieves only the GovInfo packages they
+identify. It rebuilds `fct_bill_matches` and refreshes coverage while keeping a
+default ceiling of three concurrent requests for each source. Set
+`BILL_TEXT_BACKFILL_LIMIT` or `BILL_BACKFILL_LIMIT` (each default `5000`) only
+when a different bounded batch is intended.

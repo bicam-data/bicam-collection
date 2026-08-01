@@ -59,6 +59,8 @@ reconcile-committee-reports:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select +fct_committee_report_matches fct_collection_coverage
 
 reconcile-bills:
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select +stg_congress__bill_detail
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/backfill_congress_bill_texts.py --limit $${BILL_TEXT_BACKFILL_LIMIT:-5000} --concurrency $${CONGRESS_BACKFILL_CONCURRENCY:-3}
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select +stg_congress__bill_texts
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/backfill_govinfo_bills.py --limit $${BILL_BACKFILL_LIMIT:-5000} --concurrency $${GOVINFO_BACKFILL_CONCURRENCY:-3}
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select +fct_bill_matches fct_collection_coverage
