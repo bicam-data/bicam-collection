@@ -1,0 +1,83 @@
+version: 1
+
+# This registry describes authority and workflow. It does not claim that a
+# secondary source provides complete coverage for an entity.
+categories:
+  amendments:
+    entity: amendment
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  bills:
+    entity: bill
+    authoritative_source: congress
+    workflow: reconciliation
+    secondary_sources: [govinfo-bills]
+    bulk_bootstrap: optional_incomplete
+  committee-meetings:
+    entity: committee_meeting
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  committee-prints:
+    entity: committee_print
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: optional_incomplete
+  committee-reports:
+    entity: committee_report
+    authoritative_source: congress
+    workflow: reconciliation
+    secondary_sources: [govinfo-committee-reports]
+    bulk_bootstrap: optional_incomplete
+  committees:
+    entity: committee
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  congresses:
+    entity: congress
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  govinfo-bills:
+    entity: bill
+    authoritative_source: govinfo
+    workflow: evidence_ingestion
+    secondary_sources: [bills]
+    bulk_bootstrap: optional_incomplete
+  govinfo-committee-reports:
+    entity: committee_report
+    authoritative_source: govinfo
+    workflow: evidence_ingestion
+    secondary_sources: [committee-reports]
+    bulk_bootstrap: optional_incomplete
+  hearings:
+    entity: hearing
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: optional_incomplete
+  members:
+    entity: member
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  nominations:
+    entity: nomination
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  treaties:
+    entity: treaty
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: optional_incomplete
