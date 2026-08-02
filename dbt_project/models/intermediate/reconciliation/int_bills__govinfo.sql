@@ -4,13 +4,16 @@ with ranked as (
     select
         'govinfo:' || package_id as source_record_id,
         'govinfo' as source_name,
+        raw_id as source_raw_id,
+        raw_response_version_id as source_raw_response_version_id,
+        endpoint_url as source_endpoint_url,
         {{ bill_canonical_id('bill_type', 'bill_number', 'congress') }} as canonical_bill_id,
         bill_type,
         bill_number,
         congress,
         title,
         {{ normalize_match_text('title') }} as normalized_title,
-        origin_chamber,
+        {{ normalize_chamber('origin_chamber') }} as origin_chamber,
         issued_at,
         last_modified as source_updated_at,
         row_number() over (
@@ -23,6 +26,9 @@ with ranked as (
 select
     source_record_id,
     source_name,
+    source_raw_id,
+    source_raw_response_version_id,
+    source_endpoint_url,
     canonical_bill_id,
     bill_type,
     bill_number,

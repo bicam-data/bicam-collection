@@ -2,6 +2,9 @@
 
 with detail as (
     select
+        id as raw_id,
+        endpoint_url,
+        raw_response_version_id,
         response -> 'nomination' as nomination_json
     from {{ source('raw', 'raw_responses') }}
     where source = 'congress'
@@ -10,6 +13,9 @@ with detail as (
 )
 
 select
+    raw_id,
+    endpoint_url,
+    raw_response_version_id,
     'pn'
     || {{ json_text('nomination_json', 'number') }}
     || '-'

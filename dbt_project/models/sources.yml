@@ -5,5 +5,6 @@ sources:
     schema: "{{ env_var('DB_SCHEMA', 'public') }}"
     tables:
       - name: raw_responses
+        identifier: raw_response_current
       - name: crawl_runs
       - name: crawl_run_fetches

@@ -8,9 +8,11 @@ This review reflects the current state of `bicam-collection`, not earlier interm
 - `PostgresStore` now uses `psycopg_pool.ConnectionPool`.
 - `.env` parsing is shared through `config.py`.
 - URL normalization and Congress API canonicalization are split.
-- The CLI discovers categories from `specs/*.yaml`; current categories are `bills` and `members`.
-- `refresh_descendants` is implemented through a spec-defined refresh root node type.
-- dbt is initialized for sources, reusable macros, and staging models only.
+- The CLI discovers all 13 categories from `specs/*.yaml`, including Congress.gov and GovInfo evidence categories.
+- `refresh_descendants` and `backfill_descendants` are implemented through spec-defined roots and stored payloads.
+- dbt now includes source staging, reconciliation intermediates/marts, and an operations coverage ledger.
+- Ordered migrations own the schema; `raw_response_current` preserves the current-state interface while immutable payload versions retain evidence.
+- Congress.gov is authoritative for amendments, nominations, committees, and committee meetings. GovInfo is supplemental for selected bill/report evidence, not a complete replacement.
 
 ## Validated Strengths
 
@@ -29,12 +31,11 @@ This review reflects the current state of `bicam-collection`, not earlier interm
 
 ### Still Valid
 
-1. The crawler is synchronous.
-   This is fine for the pilot but the original architecture called for asyncio, and scale will eventually require concurrency.
+1. Historical coverage remains an explicit, partitioned operating scope rather than a completeness claim; the scope contract and coverage mart make that visible.
 
-2. Crawler structure should continue to be simplified as modes and categories accumulate.
+2. Crawler structure should continue to be simplified as modes and categories accumulate. The async runner is bounded by category/concurrency settings and retains custom key-budget telemetry.
 
-3. Members currently seed from `/member`, which proves the generic engine but is not yet a full historical coverage strategy for that category.
+3. GovInfo bulk data can bootstrap selected collections but does not cover every Congress.gov category; API collection remains authoritative where declared.
 
 ### No Longer Valid
 
@@ -69,9 +70,9 @@ This review reflects the current state of `bicam-collection`, not earlier interm
 
 ### Revisit Before Expanding Far Beyond Bills
 
-1. Async concurrency model.
-2. More formal mode semantics and scheduling guidance.
-3. GovInfo integration.
+1. Materialize shared JSON expansions only after measured dbt pressure justifies the storage cost.
+2. Add more entity contracts and golden fixtures after the bill/report reconciliation pilot.
+3. Expand the declared Congress partitions through reviewed scope changes, not an unbounded full crawl.
 
 ## Current Mode Semantics
 
@@ -89,3 +90,6 @@ This review reflects the current state of `bicam-collection`, not earlier interm
 
 - `refresh_descendants`
   Select stored refresh-root rows from Postgres in batches and refetch their child collection URLs without revisiting the seed.
+
+- `backfill_descendants`
+  Reuse stored parent payloads, traverse their configured child and pagination links, and fetch only missing descendants. Existing payloads are recorded as skipped with audit events.

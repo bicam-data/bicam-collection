@@ -2,6 +2,9 @@
 
 with package_reports as (
     select
+        raw_id as package_raw_id,
+        endpoint_url as package_endpoint_url,
+        raw_response_version_id as package_raw_response_version_id,
         report_id,
         report_set_id,
         package_id,
@@ -30,6 +33,9 @@ with package_reports as (
 ),
 granule_detail as (
     select
+        id as raw_id,
+        endpoint_url,
+        raw_response_version_id,
         response as granule_json
     from {{ source('raw', 'raw_responses') }}
     where source = 'govinfo'
@@ -38,6 +44,9 @@ granule_detail as (
 ),
 granule_reports as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         {{ json_text('granule_json', 'packageId') }} as package_id,
         {{ json_text('granule_json', 'granuleId') }} as granule_id,
         packages.report_set_id as report_set_id,
@@ -82,6 +91,9 @@ granule_reports as (
 ),
 finalized_granules as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         {{ govinfo_committeereport_report_id('report_set_id', 'report_part', 'is_errata') }} as report_id,
         report_set_id,
         package_id,
@@ -111,6 +123,9 @@ finalized_granules as (
 ),
 package_only as (
     select
+        package_raw_id as raw_id,
+        package_endpoint_url as endpoint_url,
+        package_raw_response_version_id as raw_response_version_id,
         report_id,
         report_set_id,
         package_id,

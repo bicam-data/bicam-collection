@@ -10,3 +10,12 @@ case
   else null
 end
 {%- endmacro %}
+
+{% macro normalize_chamber(expr) -%}
+case
+  when lower(trim(coalesce({{ expr }}, ''))) in ('house', 'h') then 'house'
+  when lower(trim(coalesce({{ expr }}, ''))) in ('senate', 's') then 'senate'
+  when nullif(trim(coalesce({{ expr }}, '')), '') is null then null
+  else lower(trim({{ expr }}))
+end
+{%- endmacro %}

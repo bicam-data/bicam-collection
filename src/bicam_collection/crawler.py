@@ -10,12 +10,14 @@ from typing import Any, Protocol
 
 from bicam_collection.selectors import select, select_one
 from bicam_collection.spec_loader import CrawlSpec, EdgeSpec, NodeSpec
+from bicam_collection.storage import StoredResponseRef
 from bicam_collection.urls import build_seed_url, canonicalize_url, is_allowed_host, with_query_params
 
 
 AUTO_HIGH_WATER_MARK_MODES = {"incremental", "resume"}
 SKIP_EXISTING_MODES = {"resume"}
 DESCENDANT_REFRESH_MODE = "refresh_descendants"
+BACKFILL_DESCENDANTS_MODE = "backfill_descendants"
 
 
 @dataclass(slots=True)
@@ -45,6 +47,13 @@ class StoredNode:
     response: dict
 
 
+def _response_ids(response_ref: Any) -> tuple[str, str | None]:
+    """Accept legacy fake stores while using exact version IDs in Postgres."""
+    raw_response_id = getattr(response_ref, "raw_response_id", response_ref)
+    raw_response_version_id = getattr(response_ref, "raw_response_version_id", None)
+    return str(raw_response_id), raw_response_version_id
+
+
 class StoreProtocol(Protocol):
     def start_run(self, category: str, mode: str, high_water_mark: datetime | None = None) -> str: ...
     def get_latest_high_water_mark(self, category: str) -> datetime | None: ...
@@ -56,6 +65,7 @@ class StoreProtocol(Protocol):
         high_water_mark: datetime | None = None,
     ) -> None: ...
     def has_response(self, endpoint_url: str) -> bool: ...
+    def get_stored_node(self, endpoint_url: str) -> StoredNode | None: ...
     def list_refresh_nodes(self, *, category: str, node_type: str, limit: int) -> list[StoredNode]: ...
     def upsert_response(
         self,
@@ -67,7 +77,7 @@ class StoreProtocol(Protocol):
         parent_id: str | None,
         response: dict,
         latest_crawl_run_id: str,
-    ) -> str: ...
+    ) -> str | StoredResponseRef: ...
     def record_fetch(
         self,
         *,
@@ -79,6 +89,7 @@ class StoreProtocol(Protocol):
         follow_mode: str,
         http_status: int | None,
         outcome: str,
+        raw_response_version_id: str | None = None,
         duration_ms: int | None = None,
         attempt_count: int | None = None,
         rate_limit_attempts: int | None = None,
@@ -166,6 +177,7 @@ class AsyncStoreProtocol(Protocol):
         high_water_mark: datetime | None = None,
     ) -> None: ...
     async def has_response(self, endpoint_url: str) -> bool: ...
+    async def get_stored_node(self, endpoint_url: str) -> StoredNode | None: ...
     async def list_refresh_nodes(self, *, category: str, node_type: str, limit: int) -> list[StoredNode]: ...
     async def upsert_response(
         self,
@@ -177,7 +189,7 @@ class AsyncStoreProtocol(Protocol):
         parent_id: str | None,
         response: dict,
         latest_crawl_run_id: str,
-    ) -> str: ...
+    ) -> str | StoredResponseRef: ...
     async def record_fetch(
         self,
         *,
@@ -189,6 +201,7 @@ class AsyncStoreProtocol(Protocol):
         follow_mode: str,
         http_status: int | None,
         outcome: str,
+        raw_response_version_id: str | None = None,
         duration_ms: int | None = None,
         attempt_count: int | None = None,
         rate_limit_attempts: int | None = None,
@@ -554,6 +567,42 @@ class SpecCrawler:
                 )
                 continue
 
+            if options.mode == BACKFILL_DESCENDANTS_MODE and self._store.has_response(canonical_url):
+                stored = self._store.get_stored_node(canonical_url)
+                self._store.record_fetch(
+                    crawl_run_id=run_id,
+                    endpoint_url=canonical_url,
+                    raw_response_id=stored.raw_id if stored else None,
+                    parent_endpoint_url=job.parent_endpoint_url,
+                    node_type=job.node_type,
+                    follow_mode=job.follow_mode,
+                    http_status=None,
+                    outcome="skipped_existing_backfill",
+                )
+                if stored and job.follow_mode == "recurse":
+                    node = self._spec.nodes.get(job.node_type)
+                    if node is not None:
+                        next_page_url = select_one(stored.response, node.next_page_path) if node.next_page_path else None
+                        if isinstance(next_page_url, str) and next_page_url.strip():
+                            pagination_key = job.pagination_key or f"{job.node_type}:{canonical_url}"
+                            pages_fetched[pagination_key] = pages_fetched.get(pagination_key, 0) + 1
+                            if options.max_pages is None or pages_fetched[pagination_key] < options.max_pages:
+                                queue.append(
+                                    QueueItem(
+                                        url=self._augment_url(next_page_url, node, options),
+                                        node_type=job.node_type,
+                                        follow_mode="recurse",
+                                        parent_raw_id=job.parent_raw_id,
+                                        parent_endpoint_url=job.parent_endpoint_url,
+                                        pagination_key=pagination_key,
+                                    )
+                                )
+                        for edge in node.child_edges:
+                            self._enqueue_edge(queue, stored.response, edge, stored.raw_id, canonical_url, options)
+                        for edge in node.linked_item_edges:
+                            self._enqueue_edge(queue, stored.response, edge, stored.raw_id, canonical_url, options)
+                continue
+
             try:
                 request_kwargs = self._endpoint_request_kwargs(
                     seed_total_items=seed_total_items,
@@ -644,7 +693,7 @@ class SpecCrawler:
                         items_seen=seed_items_seen,
                         total_items=seed_total_items,
                     )
-            raw_id = self._store.upsert_response(
+            response_ref = self._store.upsert_response(
                 endpoint_url=canonical_url,
                 source=self._spec.source,
                 category=self._spec.category,
@@ -653,6 +702,7 @@ class SpecCrawler:
                 response=payload,
                 latest_crawl_run_id=run_id,
             )
+            raw_id, raw_version_id = _response_ids(response_ref)
             self._store.record_fetch(
                 crawl_run_id=run_id,
                 endpoint_url=canonical_url,
@@ -662,6 +712,7 @@ class SpecCrawler:
                 follow_mode=job.follow_mode,
                 http_status=fetch_metadata.status_code,
                 outcome="fetched",
+                raw_response_version_id=raw_version_id,
                 duration_ms=fetch_metadata.duration_ms,
                 attempt_count=fetch_metadata.attempt_count,
                 rate_limit_attempts=fetch_metadata.rate_limit_attempts,
@@ -1009,6 +1060,42 @@ class AsyncSpecCrawler:
                     )
                     seen_urls.add(canonical_url)
                     continue
+                if options.mode == BACKFILL_DESCENDANTS_MODE and await self._store.has_response(canonical_url):
+                    stored = await self._store.get_stored_node(canonical_url)
+                    await self._store.record_fetch(
+                        crawl_run_id=run_id,
+                        endpoint_url=canonical_url,
+                        raw_response_id=stored.raw_id if stored else None,
+                        parent_endpoint_url=job.parent_endpoint_url,
+                        node_type=job.node_type,
+                        follow_mode=job.follow_mode,
+                        http_status=None,
+                        outcome="skipped_existing_backfill",
+                    )
+                    seen_urls.add(canonical_url)
+                    if stored and job.follow_mode == "recurse":
+                        node = self._spec.nodes.get(job.node_type)
+                        if node is not None:
+                            next_page_url = select_one(stored.response, node.next_page_path) if node.next_page_path else None
+                            if isinstance(next_page_url, str) and next_page_url.strip():
+                                pagination_key = job.pagination_key or f"{job.node_type}:{canonical_url}"
+                                pages_fetched[pagination_key] = pages_fetched.get(pagination_key, 0) + 1
+                                if options.max_pages is None or pages_fetched[pagination_key] < options.max_pages:
+                                    queue.append(
+                                        QueueItem(
+                                            url=self._augment_url(next_page_url, node, options),
+                                            node_type=job.node_type,
+                                            follow_mode="recurse",
+                                            parent_raw_id=job.parent_raw_id,
+                                            parent_endpoint_url=job.parent_endpoint_url,
+                                            pagination_key=pagination_key,
+                                        )
+                                    )
+                            for edge in node.child_edges:
+                                self._enqueue_edge(queue, stored.response, edge, stored.raw_id, canonical_url, options)
+                            for edge in node.linked_item_edges:
+                                self._enqueue_edge(queue, stored.response, edge, stored.raw_id, canonical_url, options)
+                    continue
                 seen_urls.add(canonical_url)
                 batch.append(
                     QueueItem(
@@ -1075,7 +1162,7 @@ class AsyncSpecCrawler:
                             rate_limit_attempts=result.fetch_metadata.rate_limit_attempts,
                             api_key_name=result.fetch_metadata.api_key_name,
                             pool_allocation=result.fetch_metadata.pool_allocation,
-                        )
+                    )
                     continue
 
                 node = self._spec.nodes.get(result.job.node_type)
@@ -1111,7 +1198,7 @@ class AsyncSpecCrawler:
                             total_items=seed_total_items,
                         )
 
-                raw_id = await self._store.upsert_response(
+                response_ref = await self._store.upsert_response(
                     endpoint_url=result.job.url,
                     source=self._spec.source,
                     category=self._spec.category,
@@ -1120,6 +1207,7 @@ class AsyncSpecCrawler:
                     response=result.payload,
                     latest_crawl_run_id=run_id,
                 )
+                raw_id, raw_version_id = _response_ids(response_ref)
                 await self._store.record_fetch(
                     crawl_run_id=run_id,
                     endpoint_url=result.job.url,
@@ -1129,6 +1217,7 @@ class AsyncSpecCrawler:
                     follow_mode=result.job.follow_mode,
                     http_status=result.fetch_metadata.status_code,
                     outcome="fetched",
+                    raw_response_version_id=raw_version_id,
                     duration_ms=result.fetch_metadata.duration_ms,
                     attempt_count=result.fetch_metadata.attempt_count,
                     rate_limit_attempts=result.fetch_metadata.rate_limit_attempts,

@@ -132,7 +132,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                     endpoint_priority=3,
                 )
             metadata = _metadata_values(result.metadata)
-            raw_id = await store.upsert_response(
+            response_ref = await store.upsert_response(
                 endpoint_url=endpoint_url,
                 source="govinfo",
                 category=CATEGORY,
@@ -141,6 +141,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                 response=result.payload,
                 latest_crawl_run_id=run_id,
             )
+            raw_id = response_ref.raw_response_id
             await store.record_fetch(
                 crawl_run_id=run_id,
                 endpoint_url=endpoint_url,
@@ -150,6 +151,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                 follow_mode="targeted",
                 http_status=metadata["status_code"],
                 outcome="fetched",
+                raw_response_version_id=response_ref.raw_response_version_id,
                 duration_ms=metadata["duration_ms"],
                 attempt_count=metadata["attempt_count"],
                 rate_limit_attempts=metadata["rate_limit_attempts"],

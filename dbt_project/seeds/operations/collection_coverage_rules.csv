@@ -1,0 +1,14 @@
+source,category,node_type,expected_scope,authoritative_source,bulk_bootstrap,scope_notes
+congress,amendments,*,bounded_congress_scope,congress,false,API is authoritative; completeness is tracked by Congress partition
+congress,bills,*,bounded_congress_scope,congress,optional,API is authoritative; GovInfo is an incomplete evidence bootstrap
+congress,committee-meetings,*,bounded_congress_scope,congress,false,API is authoritative
+congress,committee-prints,*,bounded_congress_scope,congress,false,API is authoritative
+congress,committee-reports,*,bounded_congress_scope,congress,optional,API is authoritative; GovInfo report evidence is incomplete
+congress,committees,*,bounded_congress_scope,congress,false,API is authoritative
+congress,congresses,*,bounded_congress_scope,congress,false,API is authoritative
+congress,hearings,*,bounded_congress_scope,congress,false,API is authoritative
+congress,members,*,bounded_congress_scope,congress,false,API is authoritative
+congress,nominations,*,bounded_congress_scope,congress,false,API is authoritative
+congress,treaties,*,bounded_congress_scope,congress,false,API is authoritative
+govinfo,govinfo-bills,*,bootstrap_incomplete,congress,optional,Selected GovInfo bill collections can bootstrap evidence but do not replace API coverage
+govinfo,govinfo-committee-reports,*,bootstrap_incomplete,congress,optional,Selected GovInfo report evidence is supplemental

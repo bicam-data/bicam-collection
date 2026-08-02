@@ -2,6 +2,9 @@
 
 with detail_responses as (
     select
+        id as raw_id,
+        endpoint_url,
+        raw_response_version_id,
         response
     from {{ source('raw', 'raw_responses') }}
     where source = 'congress'
@@ -10,12 +13,18 @@ with detail_responses as (
 ),
 unnested as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         treaty_item.value as treaty_json
     from detail_responses
     cross join lateral {{ unnest_array('response', 'treaty', 'treaty_item') }}
 ),
 typed as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         'td'
         || {{ json_int('treaty_json', 'congressReceived') }}::text
         || '-'
@@ -51,6 +60,9 @@ deduped as (
 )
 
 select
+    raw_id,
+    endpoint_url,
+    raw_response_version_id,
     treaty_id,
     treaty_part_id,
     treaty_number,

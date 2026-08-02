@@ -2,6 +2,9 @@
 
 with detail_responses as (
     select
+        id as raw_id,
+        endpoint_url,
+        raw_response_version_id,
         response
     from {{ source('raw', 'raw_responses') }}
     where source = 'congress'
@@ -10,12 +13,18 @@ with detail_responses as (
 ),
 unnested as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         report.value as report_json
     from detail_responses
     cross join lateral {{ unnest_array('response', 'committeeReports', 'report') }}
 ),
 typed as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         {{ build_custom_id([
             "lower(" ~ json_text('report_json', 'type') ~ ")",
             "(" ~ json_text('report_json', 'number') ~ ")::text"
@@ -58,6 +67,9 @@ deduped as (
 )
 
 select
+    raw_id,
+    endpoint_url,
+    raw_response_version_id,
     report_id,
     report_part_id,
     report_type,

@@ -1,16 +1,36 @@
 version: 2
 
 models:
+  - name: fct_reconciliation_metrics
+    columns:
+      - name: metric_id
+        tests: [not_null, unique]
+      - name: entity
+        tests: [not_null]
+      - name: quality_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [pass, fail_ambiguity, fail_match_rate]
+
   - name: int_bills__congress
     columns:
       - name: source_record_id
         tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
       - name: canonical_bill_id
         tests: [not_null]
   - name: int_bills__govinfo
     columns:
       - name: source_record_id
         tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
       - name: canonical_bill_id
         tests: [not_null]
   - name: int_bill_candidates
@@ -27,18 +47,28 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: [accepted, rejected, unmatched]
+                values: [accepted, rejected, ambiguous, unmatched]
+      - name: candidate_confidence
+        tests: [not_null]
 
   - name: int_committee_reports__congress
     columns:
       - name: source_record_id
         tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
       - name: canonical_report_id
         tests: [not_null]
   - name: int_committee_reports__govinfo
     columns:
       - name: source_record_id
         tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
       - name: canonical_report_id
         tests: [not_null]
   - name: int_committee_report_candidates
@@ -55,5 +85,6 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: [accepted, rejected, unmatched]
-
+                values: [accepted, rejected, ambiguous, unmatched]
+      - name: candidate_confidence
+        tests: [not_null]

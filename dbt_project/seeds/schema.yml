@@ -14,3 +14,21 @@ seeds:
         tests: [not_null]
       - name: description
         tests: [not_null]
+
+  - name: collection_coverage_rules
+    columns:
+      - name: source
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+      - name: node_type
+        tests: [not_null]
+      - name: expected_scope
+        tests: [not_null]
+
+  - name: reconciliation_quality_thresholds
+    columns:
+      - name: entity
+        tests: [not_null, unique]
+      - name: contract_version
+        tests: [not_null]

@@ -4,6 +4,7 @@ with package_detail as (
     select
         id as raw_id,
         endpoint_url,
+        raw_response_version_id,
         response as package_json
     from {{ source('raw', 'raw_responses') }}
     where source = 'govinfo'
@@ -14,6 +15,7 @@ normalized as (
     select
         raw_id,
         endpoint_url,
+        raw_response_version_id,
         package_json,
         {{ json_text('package_json', 'packageId') }} as package_id,
         lower(coalesce(
@@ -30,6 +32,7 @@ typed as (
     select
         raw_id,
         endpoint_url,
+        raw_response_version_id,
         package_id,
         {{ govinfo_committeereport_report_set_id_from_fields(
             'report_type',
@@ -72,6 +75,7 @@ typed as (
 select
     raw_id,
     endpoint_url,
+    raw_response_version_id,
     {{ govinfo_committeereport_report_id('report_set_id', 'report_part', 'is_errata') }} as report_id,
     report_set_id,
     package_id,

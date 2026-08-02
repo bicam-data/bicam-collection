@@ -192,7 +192,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                     endpoint_priority=3,
                 )
             metadata = _metadata_values(result.metadata)
-            raw_id = await store.upsert_response(
+            response_ref = await store.upsert_response(
                 endpoint_url=endpoint_url,
                 source="govinfo",
                 category=CATEGORY,
@@ -201,6 +201,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                 response=result.payload,
                 latest_crawl_run_id=run_id,
             )
+            raw_id = response_ref.raw_response_id
             await store.record_fetch(
                 crawl_run_id=run_id,
                 endpoint_url=endpoint_url,
@@ -210,6 +211,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                 follow_mode="targeted",
                 http_status=metadata["status_code"],
                 outcome="fetched",
+                raw_response_version_id=response_ref.raw_response_version_id,
                 duration_ms=metadata["duration_ms"],
                 attempt_count=metadata["attempt_count"],
                 rate_limit_attempts=metadata["rate_limit_attempts"],
@@ -277,8 +279,8 @@ async def run_unmatched_granule_backfill(args: argparse.Namespace, *, settings: 
             async with semaphore:
                 result = await client.get_json(endpoint_url, endpoint_name="govinfo-committee-report-targeted-granule-backfill", endpoint_priority=3)
             metadata = _metadata_values(result.metadata)
-            raw_id = await store.upsert_response(endpoint_url=endpoint_url, source="govinfo", category=CATEGORY, node_type=node_type, parent_id=None, response=result.payload, latest_crawl_run_id=run_id)
-            await store.record_fetch(crawl_run_id=run_id, endpoint_url=endpoint_url, raw_response_id=raw_id, parent_endpoint_url=parent_endpoint_url, node_type=node_type, follow_mode="targeted", http_status=metadata["status_code"], outcome="fetched", duration_ms=metadata["duration_ms"], attempt_count=metadata["attempt_count"], rate_limit_attempts=metadata["rate_limit_attempts"], api_key_name=metadata["api_key_name"], pool_allocation=metadata["pool_allocation"])
+            response_ref = await store.upsert_response(endpoint_url=endpoint_url, source="govinfo", category=CATEGORY, node_type=node_type, parent_id=None, response=result.payload, latest_crawl_run_id=run_id)
+            await store.record_fetch(crawl_run_id=run_id, endpoint_url=endpoint_url, raw_response_id=response_ref.raw_response_id, raw_response_version_id=response_ref.raw_response_version_id, parent_endpoint_url=parent_endpoint_url, node_type=node_type, follow_mode="targeted", http_status=metadata["status_code"], outcome="fetched", duration_ms=metadata["duration_ms"], attempt_count=metadata["attempt_count"], rate_limit_attempts=metadata["rate_limit_attempts"], api_key_name=metadata["api_key_name"], pool_allocation=metadata["pool_allocation"])
             async with counter_lock:
                 succeeded += 1
             return result.payload

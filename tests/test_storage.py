@@ -16,7 +16,10 @@ from bicam_collection.storage import AsyncPostgresStore
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-@unittest.skipUnless((PROJECT_ROOT / ".env").exists(), "requires local .env-backed Postgres")
+@unittest.skipUnless(
+    (PROJECT_ROOT / ".env").exists() or os.getenv("BICAM_TEST_DATABASE_URL"),
+    "requires a configured Postgres test database",
+)
 class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         os.environ.pop("DATABASE_URL", None)
@@ -48,7 +51,7 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
 
         url = f"https://example.test/raw/{self.test_suffix}"
         self.test_urls.append(url)
-        raw_id = await self.store.upsert_response(
+        response_ref = await self.store.upsert_response(
             endpoint_url=url,
             source="congress",
             category=self.test_category,
@@ -61,13 +64,14 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.store.has_response(url))
         refresh_nodes = await self.store.list_refresh_nodes(category=self.test_category, node_type="detail", limit=10)
         self.assertEqual(len(refresh_nodes), 1)
-        self.assertEqual(refresh_nodes[0].raw_id, raw_id)
+        self.assertEqual(refresh_nodes[0].raw_id, response_ref.raw_response_id)
         self.assertEqual(refresh_nodes[0].endpoint_url, url)
 
         await self.store.record_fetch(
             crawl_run_id=run_id,
             endpoint_url=url,
-            raw_response_id=raw_id,
+            raw_response_id=response_ref.raw_response_id,
+            raw_response_version_id=response_ref.raw_response_version_id,
             parent_endpoint_url=None,
             node_type="detail",
             follow_mode="recurse",
@@ -120,6 +124,77 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetch_row, ("fetched", 12, 1, 0, "alpha", {"endpoint_name": "members", "selected_key_name": "alpha"}, True))
         self.assertEqual(failed_row, ("boom", 25, 2, 1, "beta", {"endpoint_name": "members", "selected_key_name": "beta"}))
 
+    async def test_payload_versions_are_linked_to_their_fetch(self) -> None:
+        url = f"https://example.test/versioned/{self.test_suffix}"
+        self.test_urls.append(url)
+        run_a = await self.store.start_run(self.test_category, "refresh")
+        run_b = await self.store.start_run(self.test_category, "refresh")
+        self.run_ids.extend([run_a, run_b])
+
+        ref_a = await self.store.upsert_response(
+            endpoint_url=url,
+            source="congress",
+            category=self.test_category,
+            node_type="detail",
+            parent_id=None,
+            response={"version": "a"},
+            latest_crawl_run_id=run_a,
+        )
+        await self.store.record_fetch(
+            crawl_run_id=run_a,
+            endpoint_url=url,
+            raw_response_id=ref_a.raw_response_id,
+            raw_response_version_id=ref_a.raw_response_version_id,
+            parent_endpoint_url=None,
+            node_type="detail",
+            follow_mode="refresh",
+            http_status=200,
+            outcome="fetched",
+        )
+        ref_b = await self.store.upsert_response(
+            endpoint_url=url,
+            source="congress",
+            category=self.test_category,
+            node_type="detail",
+            parent_id=None,
+            response={"version": "b"},
+            latest_crawl_run_id=run_b,
+        )
+        await self.store.record_fetch(
+            crawl_run_id=run_b,
+            endpoint_url=url,
+            raw_response_id=ref_b.raw_response_id,
+            raw_response_version_id=ref_b.raw_response_version_id,
+            parent_endpoint_url=None,
+            node_type="detail",
+            follow_mode="refresh",
+            http_status=200,
+            outcome="fetched",
+        )
+        await self.store.finish_run(run_a, "completed", 1)
+        await self.store.finish_run(run_b, "completed", 1)
+
+        with psycopg.connect(self.settings.database_url) as conn:
+            rows = conn.execute(
+                """
+                SELECT cf.crawl_run_id, version.response ->> 'version'
+                FROM crawl_run_fetches AS cf
+                  JOIN raw_response_versions AS version
+                  ON version.id = cf.raw_response_version_id
+                WHERE cf.endpoint_url = %s
+                ORDER BY cf.crawl_run_id
+                """,
+                (url,),
+            ).fetchall()
+            current = conn.execute(
+                "SELECT response ->> 'version' FROM raw_responses WHERE endpoint_url = %s",
+                (url,),
+            ).fetchone()
+
+        self.assertEqual({value for _, value in rows}, {"a", "b"})
+        self.assertEqual(current, ("b",))
+        self.assertNotEqual(ref_a.raw_response_version_id, ref_b.raw_response_version_id)
+
 
 @unittest.skipUnless((PROJECT_ROOT / ".env").exists(), "requires local .env-backed Postgres")
 class AsyncPostgresStoreAsyncioRunTests(unittest.TestCase):
@@ -163,7 +238,7 @@ class AsyncPostgresStoreAsyncioRunTests(unittest.TestCase):
         self.assertTrue(has_response)
         self.assertIsNotNone(self.run_id)
 
-    def test_async_store_schema_initialization_is_safe_under_concurrency(self) -> None:
+    def test_async_store_connections_are_safe_under_concurrency(self) -> None:
         run_ids: list[str] = []
         test_categories = [f"{self.test_category}-a", f"{self.test_category}-b"]
 

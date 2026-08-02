@@ -11,114 +11,6 @@ from typing import Any
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS crawl_runs (
-    id UUID PRIMARY KEY,
-    category TEXT NOT NULL,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    finished_at TIMESTAMPTZ,
-    mode TEXT NOT NULL,
-    high_water_mark TIMESTAMPTZ,
-    items_fetched INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'running'
-);
-
-CREATE TABLE IF NOT EXISTS raw_responses (
-    id UUID PRIMARY KEY,
-    endpoint_url TEXT NOT NULL UNIQUE,
-    source TEXT NOT NULL,
-    category TEXT NOT NULL,
-    node_type TEXT NOT NULL,
-    parent_id UUID REFERENCES raw_responses(id),
-    response JSONB NOT NULL,
-    response_hash TEXT NOT NULL,
-    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    latest_crawl_run_id UUID REFERENCES crawl_runs(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_raw_responses_category ON raw_responses(source, category);
-CREATE INDEX IF NOT EXISTS idx_raw_responses_node_type ON raw_responses(node_type);
-CREATE INDEX IF NOT EXISTS idx_raw_responses_parent_id ON raw_responses(parent_id);
-CREATE INDEX IF NOT EXISTS idx_raw_responses_latest_run ON raw_responses(latest_crawl_run_id);
-
-CREATE TABLE IF NOT EXISTS raw_response_versions (
-    id UUID PRIMARY KEY,
-    raw_response_id UUID NOT NULL REFERENCES raw_responses(id),
-    endpoint_url TEXT NOT NULL,
-    source TEXT NOT NULL,
-    category TEXT NOT NULL,
-    node_type TEXT NOT NULL,
-    parent_id UUID REFERENCES raw_responses(id),
-    response JSONB NOT NULL,
-    response_hash TEXT NOT NULL,
-    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    first_crawl_run_id UUID REFERENCES crawl_runs(id),
-    latest_crawl_run_id UUID REFERENCES crawl_runs(id),
-    UNIQUE(raw_response_id, response_hash)
-);
-
-CREATE INDEX IF NOT EXISTS idx_raw_response_versions_raw_response_id ON raw_response_versions(raw_response_id);
-CREATE INDEX IF NOT EXISTS idx_raw_response_versions_latest_run ON raw_response_versions(latest_crawl_run_id);
-CREATE INDEX IF NOT EXISTS idx_raw_response_versions_source_category ON raw_response_versions(source, category);
-
-CREATE TABLE IF NOT EXISTS crawl_run_fetches (
-    id UUID PRIMARY KEY,
-    crawl_run_id UUID NOT NULL REFERENCES crawl_runs(id),
-    endpoint_url TEXT NOT NULL,
-    raw_response_id UUID REFERENCES raw_responses(id),
-    raw_response_version_id UUID REFERENCES raw_response_versions(id),
-    parent_endpoint_url TEXT,
-    node_type TEXT NOT NULL,
-    follow_mode TEXT NOT NULL,
-    http_status INTEGER,
-    outcome TEXT NOT NULL,
-    duration_ms INTEGER,
-    attempt_count INTEGER,
-    rate_limit_attempts INTEGER,
-    api_key_name TEXT,
-    pool_allocation JSONB,
-    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_crawl_run_fetches_run_id ON crawl_run_fetches(crawl_run_id);
-CREATE INDEX IF NOT EXISTS idx_crawl_run_fetches_endpoint_url ON crawl_run_fetches(endpoint_url);
-
-CREATE TABLE IF NOT EXISTS failed_requests (
-    id UUID PRIMARY KEY,
-    crawl_run_id UUID NOT NULL REFERENCES crawl_runs(id),
-    category TEXT NOT NULL,
-    node_type TEXT NOT NULL,
-    endpoint_url TEXT NOT NULL,
-    parent_endpoint_url TEXT,
-    http_status INTEGER,
-    error TEXT NOT NULL,
-    duration_ms INTEGER,
-    attempt_count INTEGER,
-    rate_limit_attempts INTEGER,
-    api_key_name TEXT,
-    pool_allocation JSONB,
-    failed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_failed_requests_run_id ON failed_requests(crawl_run_id);
-CREATE INDEX IF NOT EXISTS idx_failed_requests_endpoint_url ON failed_requests(endpoint_url);
-ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
-ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS attempt_count INTEGER;
-ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS rate_limit_attempts INTEGER;
-ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS api_key_name TEXT;
-ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS pool_allocation JSONB;
-ALTER TABLE crawl_run_fetches ADD COLUMN IF NOT EXISTS raw_response_version_id UUID REFERENCES raw_response_versions(id);
-ALTER TABLE failed_requests ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
-ALTER TABLE failed_requests ADD COLUMN IF NOT EXISTS attempt_count INTEGER;
-ALTER TABLE failed_requests ADD COLUMN IF NOT EXISTS rate_limit_attempts INTEGER;
-ALTER TABLE failed_requests ADD COLUMN IF NOT EXISTS api_key_name TEXT;
-ALTER TABLE failed_requests ADD COLUMN IF NOT EXISTS pool_allocation JSONB;
-"""
-
-SCHEMA_LOCK_KEY = 3_117_250_001
-
-
 @dataclass(slots=True)
 class CrawlRunResult:
     run_id: str
@@ -130,6 +22,13 @@ class StoredNode:
     raw_id: str
     endpoint_url: str
     response: dict
+
+
+@dataclass(slots=True, frozen=True)
+class StoredResponseRef:
+    raw_response_id: str
+    raw_response_version_id: str
+    response_hash: str
 
 
 def _serialize_response(response: dict) -> tuple[str, str]:
@@ -150,7 +49,6 @@ class PostgresStore:
             raise ValueError("DATABASE_URL is required")
         self._database_url = database_url
         self._pool = ConnectionPool(conninfo=self._database_url, min_size=1, max_size=10, open=True)
-        self._ensure_schema()
 
     def _execute(
         self,
@@ -169,16 +67,6 @@ class PostgresStore:
                     return cur.fetchall()
             conn.commit()
         return None
-
-    def _ensure_schema(self) -> None:
-        with self._pool.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT pg_advisory_lock(%s)", (SCHEMA_LOCK_KEY,))
-                try:
-                    cur.execute(SCHEMA_SQL)
-                finally:
-                    cur.execute("SELECT pg_advisory_unlock(%s)", (SCHEMA_LOCK_KEY,))
-            conn.commit()
 
     def start_run(
         self,
@@ -246,6 +134,16 @@ class PostgresStore:
         )
         return row is not None
 
+    def get_stored_node(self, endpoint_url: str) -> StoredNode | None:
+        row = self._execute(
+            "SELECT id, endpoint_url, response FROM raw_responses WHERE endpoint_url = %s LIMIT 1",
+            (endpoint_url,),
+            fetchone=True,
+        )
+        if row is None:
+            return None
+        return StoredNode(raw_id=str(row[0]), endpoint_url=row[1], response=row[2])
+
     def list_refresh_nodes(
         self,
         *,
@@ -284,7 +182,7 @@ class PostgresStore:
         parent_id: str | None,
         response: dict,
         latest_crawl_run_id: str,
-    ) -> str:
+    ) -> StoredResponseRef:
         raw_id = str(uuid.uuid4())
         response_json, response_hash = _serialize_response(response)
         stored_id = self._execute(
@@ -318,7 +216,7 @@ class PostgresStore:
             ),
             fetchone=True,
         )[0]
-        self._execute(
+        version_id = self._execute(
             """
             INSERT INTO raw_response_versions (
                 id, raw_response_id, endpoint_url, source, category, node_type, parent_id,
@@ -328,6 +226,7 @@ class PostgresStore:
             ON CONFLICT (raw_response_id, response_hash) DO UPDATE
             SET last_seen_at = NOW(),
                 latest_crawl_run_id = EXCLUDED.latest_crawl_run_id
+            RETURNING id
             """,
             (
                 str(uuid.uuid4()),
@@ -342,8 +241,9 @@ class PostgresStore:
                 latest_crawl_run_id,
                 latest_crawl_run_id,
             ),
-        )
-        return str(stored_id)
+            fetchone=True,
+        )[0]
+        return StoredResponseRef(str(stored_id), str(version_id), response_hash)
 
     def record_fetch(
         self,
@@ -356,6 +256,7 @@ class PostgresStore:
         follow_mode: str,
         http_status: int | None,
         outcome: str,
+        raw_response_version_id: str | None = None,
         duration_ms: int | None = None,
         attempt_count: int | None = None,
         rate_limit_attempts: int | None = None,
@@ -370,9 +271,9 @@ class PostgresStore:
                 duration_ms, attempt_count, rate_limit_attempts, api_key_name, pool_allocation
             )
             VALUES (%s, %s, %s, %s,
-                (SELECT id FROM raw_response_versions
+                COALESCE(%s, (SELECT id FROM raw_response_versions
                  WHERE raw_response_id = %s AND latest_crawl_run_id = %s
-                 ORDER BY last_seen_at DESC LIMIT 1),
+                 ORDER BY last_seen_at DESC LIMIT 1)),
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             """,
             (
@@ -380,6 +281,7 @@ class PostgresStore:
                 crawl_run_id,
                 endpoint_url,
                 raw_response_id,
+                raw_response_version_id,
                 raw_response_id,
                 crawl_run_id,
                 parent_endpoint_url,
@@ -456,14 +358,6 @@ class AsyncPostgresStore:
             if self._initialized:
                 return
             await self._pool.open()
-            async with self._pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("SELECT pg_advisory_lock(%s)", (SCHEMA_LOCK_KEY,))
-                    try:
-                        await cur.execute(SCHEMA_SQL)
-                    finally:
-                        await cur.execute("SELECT pg_advisory_unlock(%s)", (SCHEMA_LOCK_KEY,))
-                await conn.commit()
             self._initialized = True
 
     async def _execute(
@@ -571,6 +465,16 @@ class AsyncPostgresStore:
         )
         return row is not None
 
+    async def get_stored_node(self, endpoint_url: str) -> StoredNode | None:
+        row = await self._execute(
+            "SELECT id, endpoint_url, response FROM raw_responses WHERE endpoint_url = %s LIMIT 1",
+            (endpoint_url,),
+            fetchone=True,
+        )
+        if row is None:
+            return None
+        return StoredNode(raw_id=str(row[0]), endpoint_url=row[1], response=row[2])
+
     async def list_refresh_nodes(
         self,
         *,
@@ -609,7 +513,7 @@ class AsyncPostgresStore:
         parent_id: str | None,
         response: dict,
         latest_crawl_run_id: str,
-    ) -> str:
+    ) -> StoredResponseRef:
         raw_id = str(uuid.uuid4())
         response_json, response_hash = _serialize_response(response)
         stored_row = await self._execute(
@@ -643,7 +547,7 @@ class AsyncPostgresStore:
             ),
             fetchone=True,
         )
-        await self._execute(
+        version_row = await self._execute(
             """
             INSERT INTO raw_response_versions (
                 id, raw_response_id, endpoint_url, source, category, node_type, parent_id,
@@ -653,6 +557,7 @@ class AsyncPostgresStore:
             ON CONFLICT (raw_response_id, response_hash) DO UPDATE
             SET last_seen_at = NOW(),
                 latest_crawl_run_id = EXCLUDED.latest_crawl_run_id
+            RETURNING id
             """,
             (
                 str(uuid.uuid4()),
@@ -667,8 +572,9 @@ class AsyncPostgresStore:
                 latest_crawl_run_id,
                 latest_crawl_run_id,
             ),
+            fetchone=True,
         )
-        return str(stored_row[0])
+        return StoredResponseRef(str(stored_row[0]), str(version_row[0]), response_hash)
 
     async def record_fetch(
         self,
@@ -681,6 +587,7 @@ class AsyncPostgresStore:
         follow_mode: str,
         http_status: int | None,
         outcome: str,
+        raw_response_version_id: str | None = None,
         duration_ms: int | None = None,
         attempt_count: int | None = None,
         rate_limit_attempts: int | None = None,
@@ -695,9 +602,9 @@ class AsyncPostgresStore:
                 duration_ms, attempt_count, rate_limit_attempts, api_key_name, pool_allocation
             )
             VALUES (%s, %s, %s, %s,
-                (SELECT id FROM raw_response_versions
+                COALESCE(%s, (SELECT id FROM raw_response_versions
                  WHERE raw_response_id = %s AND latest_crawl_run_id = %s
-                 ORDER BY last_seen_at DESC LIMIT 1),
+                 ORDER BY last_seen_at DESC LIMIT 1)),
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             """,
             (
@@ -705,6 +612,7 @@ class AsyncPostgresStore:
                 crawl_run_id,
                 endpoint_url,
                 raw_response_id,
+                raw_response_version_id,
                 raw_response_id,
                 crawl_run_id,
                 parent_endpoint_url,

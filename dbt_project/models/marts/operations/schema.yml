@@ -11,6 +11,11 @@ models:
         tests: [not_null]
       - name: node_type
         tests: [not_null]
+      - name: partition_value
+        tests: [not_null]
       - name: current_response_count
         tests: [not_null]
-
+      - name: expected_scope
+        tests: [not_null]
+      - name: has_observed_data
+        tests: [not_null]

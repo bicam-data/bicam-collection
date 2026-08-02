@@ -4,6 +4,7 @@ with detail as (
     select
         id as raw_id,
         endpoint_url,
+        raw_response_version_id,
         response -> 'member' as member_json
     from {{ source('raw', 'raw_responses') }}
     where source = 'congress'
@@ -34,6 +35,7 @@ latest_party as (
 select
     detail.raw_id,
     detail.endpoint_url,
+    detail.raw_response_version_id,
     {{ json_text('member_json', 'bioguideId') }} as bioguide_id,
     upper(concat_ws(
         ' ',

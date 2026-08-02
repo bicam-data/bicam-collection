@@ -2,7 +2,7 @@ COMPOSE := docker compose
 TOOLS_PROFILE := --profile tools
 OPS_PROFILE := --profile ops
 
-.PHONY: help init-env build up up-ops down logs psql migrate reconcile reconcile-committee-reports reconcile-bills crawl crawl-one dbt-run dbt-test crawler-shell dbt-shell
+.PHONY: help init-env build up up-ops down logs psql migrate recover-stale reconcile reconcile-committee-reports reconcile-bills crawl crawl-bounded crawl-one dbt-run dbt-test crawler-shell dbt-shell
 
 help:
 	@printf "Available targets:\n"
@@ -14,10 +14,12 @@ help:
 	@printf "  logs          Tail Postgres logs\n"
 	@printf "  psql          Open psql against the compose Postgres instance\n"
 	@printf "  migrate       Apply ordered SQL migrations inside the crawler image\n"
+	@printf "  recover-stale Inspect stale runs; pass ARGS=\"--apply\" to mark them abandoned\n"
 	@printf "  reconcile    Build committee-report reconciliation models and tests\n"
 	@printf "  reconcile-committee-reports Refresh committee-report source evidence, matches, and coverage\n"
 	@printf "  reconcile-bills Refresh bill package evidence, matches, and coverage\n"
 	@printf "  crawl         Run scripts/run_multi_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
+	@printf "  crawl-bounded Run the declared Congress working scope with conservative limits\n"
 	@printf "  crawl-one     Run scripts/run_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
 	@printf "  dbt-run       Run dbt run inside the dbt container; pass ARGS=\"...\"\n"
 	@printf "  dbt-test      Run dbt test inside the dbt container; pass ARGS=\"...\"\n"
@@ -48,6 +50,9 @@ psql:
 migrate:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_migrations.py
 
+recover-stale:
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/recover_stale_runs.py $(ARGS)
+
 reconcile:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm dbt dbt build --project-dir dbt_project --select tag:committee_report_reconciliation
 
@@ -67,6 +72,12 @@ reconcile-bills:
 
 crawl:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_multi_crawl.py $(ARGS)
+
+crawl-bounded:
+	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_multi_crawl.py \
+		--categories amendments bills committee-meetings committee-prints committee-reports committees hearings nominations treaties \
+		--mode $${CRAWL_MODE:-resume} --max-pages $${MAX_PAGES:-3} --page-size $${PAGE_SIZE:-250} \
+		--concurrency $${CONCURRENCY:-3} --category-workers $${CATEGORY_WORKERS:-1} $(ARGS)
 
 crawl-one:
 	$(COMPOSE) $(TOOLS_PROFILE) run --rm crawler uv run python scripts/run_crawl.py $(ARGS)

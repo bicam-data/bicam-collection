@@ -12,6 +12,12 @@ select
     coalesce(congress.canonical_report_id, govinfo.canonical_report_id) as canonical_report_id,
     congress.source_record_id as congress_source_record_id,
     govinfo.source_record_id as govinfo_source_record_id,
+    congress.source_raw_id as congress_raw_id,
+    congress.source_raw_response_version_id as congress_raw_response_version_id,
+    congress.source_endpoint_url as congress_endpoint_url,
+    govinfo.source_raw_id as govinfo_raw_id,
+    govinfo.source_raw_response_version_id as govinfo_raw_response_version_id,
+    govinfo.source_endpoint_url as govinfo_endpoint_url,
     case
         when congress.source_record_id is not null and govinfo.source_record_id is not null
             then 'exact_canonical_identity'
@@ -30,6 +36,10 @@ select
         when congress.source_record_id is null or govinfo.source_record_id is null then null
         else false
     end as chamber_agrees,
+    case
+        when congress.source_record_id is not null and govinfo.source_record_id is not null then 1.0
+        else 0.0
+    end as candidate_confidence,
     congress.title as congress_title,
     govinfo.title as govinfo_title
 from congress_records as congress

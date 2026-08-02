@@ -2,6 +2,9 @@
 
 with detail_responses as (
     select
+        id as raw_id,
+        endpoint_url,
+        raw_response_version_id,
         response
     from {{ source('raw', 'raw_responses') }}
     where source = 'congress'
@@ -10,12 +13,18 @@ with detail_responses as (
 ),
 unnested as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         print.value as print_json
     from detail_responses
     cross join lateral {{ unnest_array('response', 'committeePrint', 'print') }}
 ),
 typed as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         lower(left({{ json_text('print_json', 'chamber') }}, 1))
         || 'prt'
         || {{ json_int('print_json', 'jacketNumber') }}::text
@@ -43,6 +52,9 @@ deduped as (
 )
 
 select
+    raw_id,
+    endpoint_url,
+    raw_response_version_id,
     print_id,
     print_type,
     print_jacketnumber,

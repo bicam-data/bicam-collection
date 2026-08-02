@@ -110,6 +110,12 @@ class FakeStore:
     def has_response(self, endpoint_url: str) -> bool:
         return endpoint_url in self.existing_urls or endpoint_url in self.raw_by_url
 
+    def get_stored_node(self, endpoint_url: str):
+        stored = self.raw_by_url.get(endpoint_url)
+        if stored is None:
+            return None
+        return type("StoredNode", (), {"raw_id": stored.get("raw_id", "raw-existing"), "endpoint_url": endpoint_url, "response": stored["response"]})()
+
     def list_refresh_nodes(self, *, category: str, node_type: str, limit: int) -> list[object]:
         return self.refresh_nodes[:limit]
 
@@ -163,6 +169,9 @@ class AsyncFakeStore(FakeStore):
 
     async def has_response(self, endpoint_url: str) -> bool:
         return super().has_response(endpoint_url)
+
+    async def get_stored_node(self, endpoint_url: str):
+        return super().get_stored_node(endpoint_url)
 
     async def list_refresh_nodes(self, *, category: str, node_type: str, limit: int) -> list[object]:
         return super().list_refresh_nodes(category=category, node_type=node_type, limit=limit)
@@ -562,6 +571,38 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(client.calls, [action_url])
         self.assertIn(action_url, store.raw_by_url)
         self.assertEqual(store.finished, ("completed", 1, None))
+
+    def test_backfill_descendants_reuses_stored_parents_and_fetches_missing_children(self) -> None:
+        bill_list = _load("example_bill.md")
+        bill_detail = _load("example_billdetail.md")
+        actions = _load("example_bill_action.md")
+        bill_list["pagination"]["next"] = ""
+        bill_detail["bill"]["amendments"]["url"] = ""
+        bill_detail["bill"]["committees"]["url"] = ""
+        bill_detail["bill"]["cosponsors"]["url"] = ""
+        bill_detail["bill"]["relatedBills"]["url"] = ""
+        bill_detail["bill"]["subjects"]["url"] = ""
+        bill_detail["bill"]["summaries"]["url"] = ""
+        bill_detail["bill"]["textVersions"]["url"] = ""
+        bill_detail["bill"]["titles"]["url"] = ""
+        bill_detail["bill"]["committeeReports"] = []
+        actions["pagination"]["next"] = ""
+        actions["pagination"]["prev"] = ""
+
+        seed_url = with_query_params("https://api.congress.gov/v3/bill?format=json", {"limit": 250})
+        detail_url = canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml")
+        action_url = canonicalize_congress_api_url("https://api.congress.gov/v3/bill/117/hr/3076/actions?format=json&limit=250")
+        client = FakeClient({action_url: actions})
+        store = FakeStore()
+        store.raw_by_url[seed_url] = {"response": bill_list, "raw_id": "raw-seed"}
+        store.raw_by_url[detail_url] = {"response": bill_detail, "raw_id": "raw-detail"}
+
+        crawler = SpecCrawler(base_url="https://api.congress.gov/v3", spec=self.spec, client=client, store=store)
+        crawler.run(CrawlOptions(mode="backfill_descendants", max_pages=1))
+
+        self.assertEqual(client.calls, [action_url])
+        self.assertIn(action_url, store.raw_by_url)
+        self.assertTrue(any(event["outcome"] == "skipped_existing_backfill" for event in store.fetch_events))
 
     def test_failed_request_is_recorded_and_run_continues(self) -> None:
         bill_list = _load("example_bill.md")

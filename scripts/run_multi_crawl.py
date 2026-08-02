@@ -32,7 +32,7 @@ def parse_args(argv: list[str] | None = None, *, project_root: Path | None = Non
     available_categories = discover_spec_categories(resolved_project_root / "specs")
     parser = argparse.ArgumentParser(description="Run a full multi-category raw crawl in one process")
     parser.add_argument("--categories", nargs="*", choices=available_categories, default=available_categories)
-    parser.add_argument("--mode", default="full", choices=["full", "incremental", "refresh", "resume", "refresh_descendants"])
+    parser.add_argument("--mode", default="full", choices=["full", "incremental", "refresh", "resume", "refresh_descendants", "backfill_descendants"])
     parser.add_argument("--from-datetime")
     parser.add_argument("--to-datetime")
     parser.add_argument("--max-pages", type=int)

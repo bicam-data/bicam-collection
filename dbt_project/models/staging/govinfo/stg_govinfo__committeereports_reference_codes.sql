@@ -45,9 +45,7 @@ contents_unnested as (
 )
 
 select
-    row_number() over (
-        order by package_id, reference_ordinality, content_ordinality
-    )::bigint as report_code_id,
+    {{ hash_to_uuid("package_id || '|usc|' || reference_ordinality::text || '|' || content_ordinality::text") }} as report_code_id,
     report_id,
     report_set_id,
     package_id,

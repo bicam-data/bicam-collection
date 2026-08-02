@@ -2,6 +2,9 @@
 
 with detail as (
     select
+        id as raw_id,
+        endpoint_url,
+        raw_response_version_id,
         response -> 'hearing' as hearing_json
     from {{ source('raw', 'raw_responses') }}
     where source = 'congress'
@@ -10,6 +13,9 @@ with detail as (
 ),
 base as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         hearing_json,
         lower({{ json_text('hearing_json', 'chamber') }}) as chamber,
         coalesce({{ json_text('hearing_json', 'part') }}, '0') as hearing_part
@@ -17,6 +23,9 @@ base as (
 )
 
 select
+    raw_id,
+    endpoint_url,
+    raw_response_version_id,
     lower(left(chamber, 1))
     || 'hrg'
     || {{ json_bigint('hearing_json', 'jacketNumber') }}::text

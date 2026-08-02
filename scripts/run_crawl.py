@@ -184,7 +184,7 @@ def parse_args(argv: list[str] | None = None, *, project_root: Path | None = Non
         required=True,
         help=f"Spec category from specs/*.yaml. Available: {', '.join(available_categories)}",
     )
-    parser.add_argument("--mode", required=True, choices=["full", "incremental", "refresh", "resume", "refresh_descendants"])
+    parser.add_argument("--mode", required=True, choices=["full", "incremental", "refresh", "resume", "refresh_descendants", "backfill_descendants"])
     parser.add_argument("--from-datetime")
     parser.add_argument("--to-datetime")
     parser.add_argument("--max-pages", type=int)

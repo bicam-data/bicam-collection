@@ -4,6 +4,7 @@ with detail as (
     select
         id as raw_id,
         endpoint_url,
+        raw_response_version_id,
         response -> 'amendment' as amendment_json
     from {{ source('raw', 'raw_responses') }}
     where source = 'congress'
@@ -14,6 +15,7 @@ with detail as (
 select
     raw_id,
     endpoint_url,
+    raw_response_version_id,
     {{ build_custom_id([
         "lower(" ~ json_text('amendment_json', 'type') ~ ")",
         json_text('amendment_json', 'number')

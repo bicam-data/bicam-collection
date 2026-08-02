@@ -2,6 +2,9 @@
 
 with detail as (
     select
+        id as raw_id,
+        endpoint_url,
+        raw_response_version_id,
         response -> 'committeeMeeting' as meeting_json
     from {{ source('raw', 'raw_responses') }}
     where source = 'congress'
@@ -10,6 +13,9 @@ with detail as (
 ),
 base as (
     select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
         meeting_json,
         meeting_json -> 'location' as location_json,
         case
@@ -24,6 +30,9 @@ base as (
 )
 
 select
+    raw_id,
+    endpoint_url,
+    raw_response_version_id,
     {{ json_text('meeting_json', 'eventId') }}
     || '-'
     || {{ json_int('meeting_json', 'congress') }}::text as meeting_id,

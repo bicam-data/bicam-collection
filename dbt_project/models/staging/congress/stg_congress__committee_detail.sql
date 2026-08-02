@@ -33,7 +33,10 @@ committee_list_latest as (
 ),
 committee_detail as (
     select
-        raw.response -> 'committee' as committee_json
+        raw.response -> 'committee' as committee_json,
+        raw.id as raw_id,
+        raw.endpoint_url,
+        raw.raw_response_version_id
     from {{ source('raw', 'raw_responses') }} as raw
     where raw.source = 'congress'
       and raw.category = 'committees'
@@ -41,6 +44,9 @@ committee_detail as (
 )
 
 select
+    committee_detail.raw_id,
+    committee_detail.endpoint_url,
+    committee_detail.raw_response_version_id,
     {{ json_text('committee_json', 'systemCode') }} as committee_id,
     regexp_replace({{ json_text('committee_json', 'systemCode') }}, '[0-9]', '', 'g') as system_code,
     nullif(regexp_replace({{ json_text('committee_json', 'systemCode') }}, '[^0-9]', '', 'g'), '') as system_number,

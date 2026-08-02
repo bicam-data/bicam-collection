@@ -1,13 +1,16 @@
 # bicam-collection
 
-Spec-driven raw crawler and dbt staging foundation for Congress.gov data.
+Spec-driven raw crawler, source staging, and bounded reconciliation foundation
+for Congress.gov and GovInfo data.
 
 ## Current Truth
 
 - The crawler is generic over YAML specs in `specs/`; current implemented categories are `bills`, `members`, `congresses`, `committees`, `amendments`, `committee-reports`, `committee-prints`, `hearings`, `committee-meetings`, `nominations`, and `treaties`.
 - The crawler now also has its first GovInfo category, `govinfo-committee-reports`, which traverses collection updates -> package summary -> granules -> granule summary for `CRPT`.
 - Raw crawl storage is centered on `raw_responses`, `crawl_runs`, and `crawl_run_fetches`.
-- dbt is initialized for staging models only; marts and GovInfo are still out of scope.
+- dbt includes source staging, reconciliation intermediates, and bill/committee-report marts.
+- Congress.gov is authoritative for amendments, nominations, committees, and committee meetings; those categories are cleaned and ingested without cross-source identity matching.
+- GovInfo bulk collections can bootstrap selected bill and report evidence, but they are not a complete replacement for Congress.gov API collection.
 - Member sponsored and cosponsored legislation can include amendments; dbt now exposes separate sponsored/cosponsored amendment staging views and derives amendment `type` from the amendment URL when the source `type` is null.
 - Committee staging currently includes committee detail, committee history, committee bills, committee reports, and committee nominations. Communications are intentionally excluded for now.
 - Amendment staging currently includes amendment detail, sponsors, committee sponsors, on-behalf-of sponsors, cosponsors, actions, amendments-to-amendment, texts, and three detail-derived amended-* mapping tables.
@@ -37,6 +40,7 @@ Start the database:
 
 ```bash
 make up
+make migrate
 ```
 
 Start the database plus the backup sidecar:
@@ -48,7 +52,7 @@ make up-ops
 Run the crawler inside the stack:
 
 ```bash
-make crawl ARGS="--mode full --category-workers 2 --concurrency 5"
+make crawl-bounded
 ```
 
 Run dbt inside the stack:
@@ -59,6 +63,12 @@ make dbt-test
 ```
 
 The app containers build against the local [`rotisserie`](/home/rdelano/bicam/rotisserie) checkout, so the Docker image uses the same dependency source as local `uv`.
+
+`make crawl-bounded` runs the declared Congress working scope with a three-page
+ceiling, page size 250, one category at a time, and three in-flight requests per
+category. Expand a partition or concurrency only as an explicit reviewed
+operation. GovInfo evidence is collected separately by the bounded reconciliation
+targets below.
 
 Common shortcuts are defined in [Makefile](/home/rdelano/bicam/bicam-collection/Makefile). Run `make help` to see the available targets.
 
@@ -85,6 +95,7 @@ Modes:
 - `refresh`: explicit refetch mode without automatic high-water-mark lookup
 - `resume`: uses the stored high-water mark when `--from-datetime` is omitted and skips URLs already present in `raw_responses`
 - `refresh_descendants`: uses a category's configured refresh root node and refetches its stored child collection URLs without revisiting the seed
+- `backfill_descendants`: follows stored parent payloads and fetches only missing or failed descendants; it does not refetch an existing payload unless explicitly selected by the crawl spec.
 
 The crawler reads source-specific API keys plus `DATABASE_URL` from the environment. If they are not set, it will also read them from a local `.env` file.
 
@@ -116,10 +127,15 @@ schema feature:
 make migrate
 ```
 
-`001_raw_response_versions.sql` creates an append-only record of each distinct
-payload observed at an endpoint. `raw_responses` remains the current-state
-table, while `raw_response_versions` preserves source evidence for repeatable
-transformations and reconciliation.
+`000_initial_schema.sql` owns the baseline tables, `001_raw_response_versions.sql`
+creates an append-only record of each distinct payload observed at an endpoint,
+`002_raw_response_current.sql` exposes a compatibility view for dbt, and
+`003_backfill_fetch_version_links.sql` repairs historical fetch lineage where an
+endpoint has only one retained version. The
+`raw_responses` interface remains current-state, while
+`raw_response_versions` preserves source evidence for repeatable transformations
+and reconciliation. The crawler does not run DDL on startup; apply migrations
+explicitly before first use.
 
 ## Committee-report reconciliation
 

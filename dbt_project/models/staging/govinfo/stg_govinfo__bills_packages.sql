@@ -2,6 +2,9 @@
 
 with package_detail as (
     select
+        id as raw_id,
+        endpoint_url,
+        raw_response_version_id,
         response as bill_json
     from {{ source('raw', 'raw_responses') }}
     where source = 'govinfo'
@@ -10,6 +13,9 @@ with package_detail as (
 )
 
 select
+    raw_id,
+    endpoint_url,
+    raw_response_version_id,
     {{ json_text('bill_json', 'packageId') }} as package_id,
     lower({{ json_text('bill_json', 'billType') }}) as bill_type,
     {{ json_int('bill_json', 'billNumber') }} as bill_number,
