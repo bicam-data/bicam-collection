@@ -11,6 +11,8 @@ class EdgeSpec:
     target: str
     url_path: str
     follow_mode: str
+    fallback_url_suffix: str | None = None
+    url_normalizer: str | None = None
 
 
 @dataclass(slots=True)
@@ -31,6 +33,7 @@ class NodeSpec:
 class SeedSpec:
     path: str
     node_type: str
+    requires_partition: bool = False
 
 
 @dataclass(slots=True)
@@ -46,14 +49,21 @@ class CrawlSpec:
 def _load_edges(raw_edges: list[dict[str, str]] | None) -> list[EdgeSpec]:
     if not raw_edges:
         return []
-    return [
+    edges = [
         EdgeSpec(
             target=edge["target"],
             url_path=edge["url_path"],
             follow_mode=edge["follow_mode"],
+            fallback_url_suffix=edge.get("fallback_url_suffix"),
+            url_normalizer=edge.get("url_normalizer"),
         )
         for edge in raw_edges
     ]
+    supported_normalizers = {None, "congress_treaty_committees"}
+    for edge in edges:
+        if edge.url_normalizer not in supported_normalizers:
+            raise ValueError(f"unsupported edge URL normalizer: {edge.url_normalizer!r}")
+    return edges
 
 
 def load_spec(path: Path) -> CrawlSpec:
@@ -73,6 +83,15 @@ def load_spec(path: Path) -> CrawlSpec:
             child_edges=_load_edges(raw_node.get("child_edges")),
             linked_item_edges=_load_edges(raw_node.get("linked_item_edges")),
         )
+    if payload["seed"]["node_type"] not in nodes:
+        raise ValueError(f"seed node type is not defined: {payload['seed']['node_type']}")
+    refresh_root_node_type = payload.get("refresh_root_node_type")
+    if refresh_root_node_type and refresh_root_node_type not in nodes:
+        raise ValueError(f"refresh root node type is not defined: {refresh_root_node_type}")
+    for node_name, node in nodes.items():
+        for edge in [*node.child_edges, *node.linked_item_edges]:
+            if edge.target not in nodes:
+                raise ValueError(f"node '{node_name}' references undefined child node '{edge.target}'")
     return CrawlSpec(
         category=payload["category"],
         source=payload["source"],
@@ -80,8 +99,9 @@ def load_spec(path: Path) -> CrawlSpec:
         seed=SeedSpec(
             path=payload["seed"]["path"],
             node_type=payload["seed"]["node_type"],
+            requires_partition=bool(payload["seed"].get("requires_partition", False)),
         ),
-        refresh_root_node_type=payload.get("refresh_root_node_type"),
+            refresh_root_node_type=refresh_root_node_type,
         nodes=nodes,
     )
 
