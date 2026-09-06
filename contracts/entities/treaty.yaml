@@ -1,0 +1,24 @@
+entity: treaty
+identity:
+  components:
+    - congress_received
+    - treaty_number
+    - suffix
+  canonical_format: "td{congress_received}-{treaty_number}{suffix}"
+  canonical_column: canonical_treaty_part_id
+sources:
+  congress:
+    model: stg_congress__treaty_detail
+    natural_key: treaty_part_id
+  govinfo:
+    model: stg_govinfo__treaty_documents_packages
+    natural_key: treaty_id
+matching:
+  automatic_rule: exact_treaty_identity
+  corroborating_fields: [package_id, document_class]
+  fuzzy_match_requires_review: true
+workflow: reconciliation
+quality:
+  max_missing_canonical_identity: 0
+  max_duplicate_canonical_identity: 0
+version: 1

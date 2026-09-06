@@ -5,6 +5,7 @@ identity:
     - bill_number
     - congress
   canonical_format: "{bill_type}{bill_number}-{congress}"
+  canonical_column: canonical_bill_id
 sources:
   congress:
     model: stg_congress__bill_detail
@@ -16,6 +17,7 @@ matching:
   automatic_rule: exact_canonical_identity
   corroborating_fields: [title, origin_chamber, introduced_at]
   fuzzy_match_requires_review: true
+workflow: reconciliation
 quality:
   max_competing_accepted_matches: 0
   max_missing_canonical_identity: 0

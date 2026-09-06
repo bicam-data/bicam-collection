@@ -1,0 +1,25 @@
+category: bound-congressional-record
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /bound-congressional-record
+  node_type: bound_congressional_record_list
+refresh_root_node_type: bound_congressional_record_detail
+nodes:
+  bound_congressional_record_list:
+    item_path: $.boundCongressionalRecord[*]
+    high_water_mark_path: $.boundCongressionalRecord[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: bound_congressional_record_detail
+        url_path: $.boundCongressionalRecord[*].url
+        follow_mode: recurse
+  bound_congressional_record_detail:
+    item_path: $.boundCongressionalRecord[*]
+    high_water_mark_path: $.boundCongressionalRecord[*].updateDate
+    data_path: $.boundCongressionalRecord

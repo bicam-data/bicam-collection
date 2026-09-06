@@ -1,0 +1,13 @@
+category: congressional-record
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /congressional-record
+  node_type: congressional_record_list
+nodes:
+  congressional_record_list:
+    item_path: $.Results.Issues[*]
+    default_query_params:
+      format: json
+      limit: 250

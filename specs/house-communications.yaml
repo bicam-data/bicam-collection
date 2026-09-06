@@ -1,0 +1,29 @@
+category: house-communications
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /house-communication
+  node_type: house_communication_list
+refresh_root_node_type: house_communication_detail
+nodes:
+  house_communication_list:
+    item_path: $.houseCommunications[*]
+    high_water_mark_path: $.houseCommunications[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: house_communication_detail
+        url_path: $.houseCommunications[*].url
+        follow_mode: recurse
+  house_communication_detail:
+    data_path: $.houseCommunication
+    child_edges:
+      - target: house_requirement_detail
+        url_path: $.houseCommunication.matchingRequirements[*].url
+        follow_mode: item_only
+  house_requirement_detail:
+    data_path: $.houseRequirement

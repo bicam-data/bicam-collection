@@ -1,0 +1,23 @@
+category: laws
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /law
+  node_type: law_list
+  requires_partition: true
+refresh_root_node_type: law_detail
+nodes:
+  law_list:
+    item_path: $.bills[*]
+    high_water_mark_path: $.bills[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    # List rows point to the ordinary bill endpoint, not the documented law
+    # detail route. The law-detail backfill constructs /law/{congress}/
+    # {pub|priv}/{lawNumber} from each row's embedded laws array.
+  law_detail:
+    data_path: $.bill

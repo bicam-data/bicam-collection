@@ -1,0 +1,14 @@
+entity: nomination
+identity:
+  components: [nomination_number, nomination_part, congress]
+  canonical_format: "pn{nomination_number}-{nomination_part}-{congress}"
+  canonical_column: canonical_nomination_id
+sources:
+  congress:
+    model: stg_congress__nomination_detail
+    natural_key: nomination_part_id
+workflow: ingestion_only
+quality:
+  max_missing_canonical_identity: 0
+  max_duplicate_canonical_identity: 0
+version: 1

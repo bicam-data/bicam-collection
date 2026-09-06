@@ -15,6 +15,12 @@ categories:
     workflow: reconciliation
     secondary_sources: [govinfo-bills]
     bulk_bootstrap: optional_incomplete
+  summaries:
+    entity: bill
+    authoritative_source: congress
+    workflow: evidence_ingestion
+    secondary_sources: []
+    bulk_bootstrap: false
   committee-meetings:
     entity: committee_meeting
     authoritative_source: congress
@@ -24,8 +30,8 @@ categories:
   committee-prints:
     entity: committee_print
     authoritative_source: congress
-    workflow: ingestion_only
-    secondary_sources: []
+    workflow: reconciliation
+    secondary_sources: [govinfo-committee-prints]
     bulk_bootstrap: optional_incomplete
   committee-reports:
     entity: committee_report
@@ -39,12 +45,42 @@ categories:
     workflow: ingestion_only
     secondary_sources: []
     bulk_bootstrap: false
-  congresses:
-    entity: congress
+  bound-congressional-record:
+    entity: bound_congressional_record
     authoritative_source: congress
     workflow: ingestion_only
     secondary_sources: []
     bulk_bootstrap: false
+  congressional-record:
+    entity: congressional_record
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  crs-reports:
+    entity: crs_report
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  daily-congressional-record:
+    entity: daily_congressional_record
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  congresses:
+    entity: congress
+    authoritative_source: congress
+    workflow: reconciliation
+    secondary_sources: [govinfo-congressional-directories]
+    bulk_bootstrap: optional_incomplete
+  govinfo-congressional-directories:
+    entity: congress
+    authoritative_source: govinfo
+    workflow: evidence_ingestion
+    secondary_sources: [congresses]
+    bulk_bootstrap: optional_incomplete
   govinfo-bills:
     entity: bill
     authoritative_source: govinfo
@@ -57,12 +93,48 @@ categories:
     workflow: evidence_ingestion
     secondary_sources: [committee-reports]
     bulk_bootstrap: optional_incomplete
+  govinfo-hearings:
+    entity: hearing
+    authoritative_source: govinfo
+    workflow: evidence_ingestion
+    secondary_sources: [hearings]
+    bulk_bootstrap: optional_incomplete
+  govinfo-committee-prints:
+    entity: committee_print
+    authoritative_source: govinfo
+    workflow: evidence_ingestion
+    secondary_sources: [committee-prints]
+    bulk_bootstrap: optional_incomplete
   hearings:
     entity: hearing
     authoritative_source: congress
+    workflow: reconciliation
+    secondary_sources: [govinfo-hearings]
+    bulk_bootstrap: optional_incomplete
+  house-votes:
+    entity: house_vote
+    authoritative_source: congress
     workflow: ingestion_only
     secondary_sources: []
-    bulk_bootstrap: optional_incomplete
+    bulk_bootstrap: false
+  house-communications:
+    entity: house_communication
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  house-requirements:
+    entity: house_requirement
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
+  laws:
+    entity: law
+    authoritative_source: congress
+    workflow: ingestion_only
+    secondary_sources: []
+    bulk_bootstrap: false
   members:
     entity: member
     authoritative_source: congress
@@ -75,9 +147,21 @@ categories:
     workflow: ingestion_only
     secondary_sources: []
     bulk_bootstrap: false
-  treaties:
-    entity: treaty
+  senate-communications:
+    entity: senate_communication
     authoritative_source: congress
     workflow: ingestion_only
     secondary_sources: []
+    bulk_bootstrap: false
+  treaties:
+    entity: treaty
+    authoritative_source: congress
+    workflow: reconciliation
+    secondary_sources: [govinfo-treaty-documents]
+    bulk_bootstrap: optional_incomplete
+  govinfo-treaty-documents:
+    entity: treaty
+    authoritative_source: govinfo
+    workflow: evidence_ingestion
+    secondary_sources: [treaties]
     bulk_bootstrap: optional_incomplete

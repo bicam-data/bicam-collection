@@ -1,0 +1,377 @@
+contract_version: 3
+contract_kind: public_product_schema
+product:
+  name: bicam
+  postgres_schema: bicam
+  release: 2025
+  description: >-
+    The public, relational BICAM product. Main relations are plural nouns;
+    child relations use the plural main-table name as their prefix.
+  reference_documents:
+    - title: "Bulk Ingestion of Congressional Actions and Materials Dataset"
+      doi: 10.1038/s41597-025-05737-8
+      url: https://doi.org/10.1038/s41597-025-05737-8
+      use: >-
+        Defines the eleven components, CSV/sub-component delivery convention,
+        official Congress.gov/GovInfo source policy, and external-linkage scope.
+  legacy_crosswalk_policy: >-
+    Legacy identifier crosswalks are not part of the core product. They remain
+    explicitly named relations so a future external-crosswalk release can add
+    them without changing the core table names or grains.
+naming:
+  main_table_count: 11
+  main_tables:
+    - bills
+    - amendments
+    - committees
+    - committee_meetings
+    - committee_prints
+    - committee_reports
+    - congresses
+    - hearings
+    - members
+    - nominations
+    - treaties
+  child_table_rule: "<main_table>_<published_csv_suffix>"
+source_policy:
+  archive_release: 2025
+  archive_directory: /tmp/bicam-published
+  archive_format: zip containing UTF-8 CSV files
+  authoritative_source: Congress.gov and GovInfo APIs
+  compatibility_reference: >-
+    The published 2025 archives define the public feature set, table names,
+    column order, stable identifier forms, and relational grains. They are a
+    compatibility reference rather than a row-for-row ceiling on the updated
+    product.
+  row_policy: >-
+    Publish the canonical union of current official-source records at the
+    published grains. Preserve source nulls and documented one-sided records;
+    do not remove newer API rows merely to reproduce 2025 archive counts. Do
+    not manufacture joins from legacy identifiers; relationships are
+    represented only by source evidence, declared foreign keys, or a deferred
+    external crosswalk.
+  provenance_columns: >-
+    The loader must retain archive release, archive filename, source CSV name,
+    and load timestamp in ingestion metadata (these are not repeated in every
+    public relation).
+materialization:
+  target: PostgreSQL
+  schema: bicam
+  expectation: >-
+    Materialize each relation below as a durable table (not an ephemeral view),
+    preserving declared columns and keys. Upsert roots and children by their
+    declared key; retain source history in ingestion storage.
+  identifier_policy: >-
+    Published *_id, *_code, and *_number values are source identifiers and are
+    not replaced by generated UUIDs. A composite key is used where a CSV has no
+    single row identifier.
+  feature_status_semantics:
+    core-now: >-
+      Publish the relation as a durable bicam table in the current product;
+      source nulls remain nullable and source history remains in ingestion
+      storage.
+    deferred-external-crosswalk: >-
+      Capture the CSV as source evidence, but do not expose it as a core public
+      table until the required legacy/external identifier crosswalk is reviewed.
+  timestamp_policy: "Use timestamptz for *_at and updated_at; use date for calendar dates."
+families:
+  - name: bills
+    table: bills
+    source_archive: bills.zip
+    source_file: bills.csv
+    purpose: Introduced bills and resolutions and their published bill metadata.
+    grain: one published bill identified by bill_id
+    primary_key: [bill_id]
+    required_columns: [bill_id, bill_type, bill_number, congress]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns:
+      bill_id: text
+      bill_type: text
+      bill_number: numeric
+      congress: integer
+      title: text
+      origin_chamber: text
+      current_chamber: text
+      version_code: text
+      introduced_at: timestamptz
+      constitutional_authority_statement: text
+      is_law: boolean
+      is_appropriation: boolean
+      is_private: boolean
+      policy_area: text
+      pages: integer
+      actions_count: integer
+      amendments_count: integer
+      committees_count: integer
+      cosponsors_count: integer
+      summaries_count: integer
+      subjects_count: integer
+      titles_count: integer
+      texts_count: integer
+      updated_at: timestamptz
+    children:
+      - {table: bills_actions, source_file: bills_actions.csv, purpose: Bill actions, grain: one action, primary_key: [action_id], required_columns: [action_id, bill_id], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {action_id: text, bill_id: text, action_code: text, action_date: date, text: text, action_type: text, source_system: text, source_system_code: text, calendar: text, calendar_number: integer}}
+      - {table: bills_actions_committees, source_file: bills_actions_committees.csv, purpose: Committees named on an action, grain: one action-to-committee edge, primary_key: [action_id, committee_code], required_columns: [action_id, bill_id, committee_code], foreign_keys: {action_id: bills_actions.action_id, bill_id: bills.bill_id, committee_code: committees.committee_code}, feature_status: core-now, columns: {action_id: text, bill_id: text, committee_code: text}}
+      - {table: bills_actions_recorded_votes, source_file: bills_actions_recorded_votes.csv, purpose: Recorded vote associated with an action, grain: one action-to-roll-call observation, primary_key: [action_id, chamber, congress, session, roll_number], required_columns: [action_id, bill_id, chamber, congress, session, roll_number], foreign_keys: {action_id: bills_actions.action_id, bill_id: bills.bill_id}, feature_status: core-now, columns: {action_id: text, bill_id: text, chamber: text, congress: integer, date: date, roll_number: integer, session: integer, url: text}}
+      - {table: bills_cbocostestimates, source_file: bills_cbocostestimates.csv, purpose: CBO cost estimate, grain: one bill estimate document, primary_key: [bill_id, url], required_columns: [bill_id, url], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, description: text, pub_date: date, title: text, url: text}}
+      - {table: bills_cosponsors, source_file: bills_cosponsors.csv, purpose: Bill cosponsor edge, grain: one bill-to-member edge, primary_key: [bill_id, bioguide_id], required_columns: [bill_id, bioguide_id], foreign_keys: {bill_id: bills.bill_id, bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {bill_id: text, bioguide_id: text}}
+      - {table: bills_laws, source_file: bills_laws.csv, purpose: Bill-to-law reference, grain: one bill-to-law edge, primary_key: [bill_id, law_id], required_columns: [bill_id, law_id], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, law_id: text, law_number: text, law_type: text}}
+      - {table: bills_lobbied, source_file: bills_lobbied.csv, purpose: Published lobbying filing linkage, grain: one filing-to-bill edge, primary_key: [filing_uuid, bill_id], required_columns: [filing_uuid, bill_id], foreign_keys: {bill_id: bills.bill_id}, feature_status: deferred-external-crosswalk, materialization: {mode: deferred, expectation: retain source evidence; withhold from core public schema pending an authoritative LDA source and stable bill crosswalk}, columns: {filing_uuid: text, general_issue_code: text, bill_id: text, is_implementation: boolean}}
+      - {table: bills_metadata, source_file: bills_metadata.csv, purpose: GovInfo and legacy metadata for a bill, grain: one bill metadata record, primary_key: [bill_id], required_columns: [bill_id], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, govinfo_package_id: text, su_doc_class_number: text, migrated_doc_id: text, stock_number: text, child_ils_system_id: text, parent_ils_system_id: text, govinfo_collection_code: text}}
+      - {table: bills_notes, source_file: bills_notes.csv, purpose: Bill note, grain: one numbered note per bill, primary_key: [bill_id, note_number], required_columns: [bill_id, note_number], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, note_number: integer, note_text: text, updated_at: timestamptz}}
+      - {table: bills_notes_links, source_file: bills_notes_links.csv, purpose: Link embedded in a bill note, grain: one note link, primary_key: [bill_id, note_number, link_url], required_columns: [bill_id, note_number, link_url], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, note_number: integer, link_name: text, link_url: text, updated_at: timestamptz}}
+      - {table: bills_reference_codes, source_file: bills_reference_codes.csv, purpose: Bill reference-code mapping, grain: one bill code reference, primary_key: [bill_code_id], required_columns: [bill_code_id, bill_id], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_code_id: text, bill_id: text, reference_code: text}}
+      - {table: bills_reference_codes_sections, source_file: bills_reference_codes_sections.csv, purpose: Section of a reference-code mapping, grain: one code-section row, primary_key: [bill_code_id, code_section], required_columns: [bill_code_id, code_section], foreign_keys: {bill_code_id: bills_reference_codes.bill_code_id}, feature_status: core-now, columns: {bill_code_id: text, code_section: text}}
+      - {table: bills_reference_laws, source_file: bills_reference_laws.csv, purpose: Bill law reference mapping, grain: one bill-to-law reference, primary_key: [bill_id, law_id, law_type], required_columns: [bill_id, law_id, law_type], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, law_id: text, law_type: text}}
+      - {table: bills_reference_statutes, source_file: bills_reference_statutes.csv, purpose: Bill statute reference mapping, grain: one bill statute reference, primary_key: [bill_statute_id], required_columns: [bill_statute_id, bill_id], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_statute_id: text, bill_id: text, reference_statute: text}}
+      - {table: bills_reference_statutes_pages, source_file: bills_reference_statutes_pages.csv, purpose: Page or page range in a statute reference, grain: one statute-reference page expression, primary_key: [bill_statute_id, page], required_columns: [bill_statute_id, page], foreign_keys: {bill_statute_id: bills_reference_statutes.bill_statute_id}, feature_status: core-now, columns: {bill_statute_id: text, page: text}}
+      - {table: bills_related_bills, source_file: bills_related_bills.csv, purpose: Related bill edge, grain: one bill-to-related-bill edge, primary_key: [bill_id, related_bill_id], required_columns: [bill_id, related_bill_id], foreign_keys: {bill_id: bills.bill_id, related_bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, related_bill_id: text, identification_entity: text}}
+      - {table: bills_sponsors, source_file: bills_sponsors.csv, purpose: Bill sponsor edge, grain: one bill-to-member sponsor edge, primary_key: [bill_id, bioguide_id], required_columns: [bill_id, bioguide_id], foreign_keys: {bill_id: bills.bill_id, bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {bill_id: text, bioguide_id: text}}
+      - {table: bills_subjects, source_file: bills_subjects.csv, purpose: Bill subject, grain: one subject assigned to a bill, primary_key: [bill_id, subject], required_columns: [bill_id, subject], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, subject: text, updated_at: timestamptz}}
+      - {table: bills_summaries, source_file: bills_summaries.csv, purpose: Bill summary, grain: one summary version per bill, primary_key: [bill_id, version_code], required_columns: [bill_id, version_code, text], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, action_date: date, action_desc: text, text: text, version_code: text}}
+      - {table: bills_texts, source_file: bills_texts.csv, purpose: Bill text rendition, grain: one source text rendition observation; date may be unavailable and the published columns do not uniquely identify every historical rendition, key_semantics: grouping, grouping_key: [bill_id, type], export_order: [bill_id, type, date, formatted_text, raw_text, pdf, xml], required_columns: [bill_id, type], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, date: date, type: text, raw_text: text, formatted_text: text, pdf: text, xml: text}}
+      - {table: bills_titles, source_file: bills_titles.csv, purpose: Bill title, grain: one typed title per bill, primary_key: [bill_id, title_type, title], required_columns: [bill_id, title_type, title], foreign_keys: {bill_id: bills.bill_id}, feature_status: core-now, columns: {bill_id: text, title: text, title_type: text, bill_text_version_code: text, bill_text_version_name: text, chamber: text, title_type_code: text}}
+
+  - name: amendments
+    table: amendments
+    source_archive: amendments.zip
+    source_file: amendments.csv
+    purpose: Proposed amendments and amendment metadata.
+    grain: one published amendment identified by amendment_id
+    primary_key: [amendment_id]
+    required_columns: [amendment_id, amendment_type, amendment_number, congress]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {amendment_id: text, amendment_type: text, amendment_number: integer, congress: integer, chamber: text, purpose: text, description: text, proposed_at: timestamptz, submitted_at: timestamptz, is_bill_amendment: boolean, is_treaty_amendment: boolean, is_amendment_amendment: boolean, notes: text, actions_count: integer, cosponsors_count: integer, amendments_to_amendment_count: integer, updated_at: timestamptz}
+    children:
+      - {table: amendments_actions, source_file: amendments_actions.csv, purpose: Amendment action, grain: one action, primary_key: [action_id], required_columns: [action_id, amendment_id], foreign_keys: {amendment_id: amendments.amendment_id}, feature_status: core-now, columns: {action_id: text, amendment_id: text, action_code: text, action_date: date, text: text, action_type: text, source_system: text, source_system_code: text}}
+      - {table: amendments_actions_recorded_votes, source_file: amendments_actions_recorded_votes.csv, purpose: Recorded vote associated with amendment action, grain: one action-to-roll-call observation, primary_key: [action_id, chamber, congress, session, roll_number], required_columns: [action_id, amendment_id, chamber, congress, session, roll_number], foreign_keys: {action_id: amendments_actions.action_id, amendment_id: amendments.amendment_id}, feature_status: core-now, columns: {action_id: text, amendment_id: text, chamber: text, congress: integer, date: date, roll_number: integer, session: integer, url: text}}
+      - {table: amendments_amended_amendments, source_file: amendments_amended_amendments.csv, purpose: Amendment-to-amendment edge, grain: one amendment edge, primary_key: [amendment_id, amended_amendment_id], required_columns: [amendment_id, amended_amendment_id], foreign_keys: {amendment_id: amendments.amendment_id, amended_amendment_id: amendments.amendment_id}, feature_status: core-now, columns: {amendment_id: text, amended_amendment_id: text}}
+      - {table: amendments_amended_bills, source_file: amendments_amended_bills.csv, purpose: Amendment-to-bill edge, grain: one amendment-to-bill edge, primary_key: [amendment_id, bill_id], required_columns: [amendment_id, bill_id], foreign_keys: {amendment_id: amendments.amendment_id, bill_id: bills.bill_id}, feature_status: core-now, columns: {amendment_id: text, bill_id: text}}
+      - {table: amendments_amended_treaties, source_file: amendments_amended_treaties.csv, purpose: Amendment-to-treaty edge, grain: one amendment-to-treaty edge, primary_key: [amendment_id, treaty_id], required_columns: [amendment_id, treaty_id], foreign_keys: {amendment_id: amendments.amendment_id, treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {amendment_id: text, treaty_id: text}}
+      - {table: amendments_cosponsors, source_file: amendments_cosponsors.csv, purpose: Amendment cosponsor edge, grain: one amendment-to-member edge, primary_key: [amendment_id, bioguide_id], required_columns: [amendment_id, bioguide_id], foreign_keys: {amendment_id: amendments.amendment_id, bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {amendment_id: text, bioguide_id: text}}
+      - {table: amendments_sponsors, source_file: amendments_sponsors.csv, purpose: Amendment sponsor edge, grain: one amendment-to-member edge, primary_key: [amendment_id, bioguide_id], required_columns: [amendment_id, bioguide_id], foreign_keys: {amendment_id: amendments.amendment_id, bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {amendment_id: text, bioguide_id: text}}
+      - {table: amendments_texts, source_file: amendments_texts.csv, purpose: Amendment text rendition, grain: one source text rendition observation; the published columns do not uniquely identify every historical rendition, key_semantics: grouping, grouping_key: [amendment_id, type], export_order: [amendment_id, type, date, html, raw_text, pdf], required_columns: [amendment_id, type], foreign_keys: {amendment_id: amendments.amendment_id}, feature_status: core-now, columns: {amendment_id: text, date: date, type: text, raw_text: text, pdf: text, html: text}}
+
+  - name: committees
+    table: committees
+    source_archive: committees.zip
+    source_file: committees.csv
+    purpose: Congressional committees and current summary metadata.
+    grain: one committee or subcommittee identified by committee_code
+    primary_key: [committee_code]
+    required_columns: [committee_code, name, chamber]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {committee_code: text, name: text, chamber: text, is_subcommittee: boolean, is_current: boolean, bills_count: integer, reports_count: integer, nominations_count: integer, updated_at: timestamptz}
+    children:
+      - {table: committees_bills, source_file: committees_bills.csv, purpose: Committee bill listing, grain: one committee-to-bill edge, primary_key: [committee_code, bill_id], required_columns: [committee_code, bill_id], foreign_keys: {committee_code: committees.committee_code, bill_id: bills.bill_id}, feature_status: core-now, columns: {committee_code: text, bill_id: text, relationship_type: text, committee_action_date: date, updated_at: timestamptz}}
+      - {table: committees_committeereports, source_file: committees_committeereports.csv, purpose: Committee report listing, grain: one committee-to-report edge, primary_key: [committee_code, report_id], required_columns: [committee_code, report_id], foreign_keys: {committee_code: committees.committee_code, report_id: committee_reports.report_id}, feature_status: core-now, columns: {committee_code: text, report_id: text}}
+      - {table: committees_history, source_file: committees_history.csv, purpose: Committee name and authority history, grain: one committee historical interval, primary_key: [committee_code, started_at], required_columns: [committee_code, started_at], foreign_keys: {committee_code: committees.committee_code}, feature_status: core-now, columns: {committee_code: text, name: text, loc_name: text, started_at: date, ended_at: date, committee_type: text, establishing_authority: text, su_doc_class_number: text, nara_id: text, loc_linked_data_id: text, updated_at: timestamptz}}
+      - {table: committees_subcommittees, source_file: committees_subcommittees.csv, purpose: Committee hierarchy edge, grain: one parent-to-subcommittee edge, primary_key: [committee_code, subcommittee_code], required_columns: [committee_code, subcommittee_code], foreign_keys: {committee_code: committees.committee_code, subcommittee_code: committees.committee_code}, feature_status: core-now, columns: {committee_code: text, subcommittee_code: text}}
+
+  - name: committee_meetings
+    table: committee_meetings
+    source_archive: committeemeetings.zip
+    source_file: committeemeetings.csv
+    purpose: Scheduled congressional committee meetings and associated documents.
+    grain: one published meeting identified by meeting_id
+    primary_key: [meeting_id]
+    required_columns: [meeting_id, title, chamber, congress, date]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {meeting_id: text, title: text, meeting_type: text, chamber: text, congress: integer, date: timestamptz, room: text, street_address: text, building: text, city: text, state: text, zip_code: text, meeting_status: text, updated_at: timestamptz}
+    children:
+      - {table: committee_meetings_associated_bills, source_file: committeemeetings_associated_bills.csv, purpose: Meeting bill association, grain: one meeting-to-bill edge, primary_key: [meeting_id, bill_id], required_columns: [meeting_id, bill_id], foreign_keys: {meeting_id: committee_meetings.meeting_id, bill_id: bills.bill_id}, feature_status: core-now, columns: {meeting_id: text, bill_id: text}}
+      - {table: committee_meetings_associated_hearings, source_file: committeemeetings_associated_hearings.csv, purpose: Meeting hearing association, grain: one meeting-to-hearing edge, primary_key: [meeting_id, hearing_id], required_columns: [meeting_id, hearing_id], foreign_keys: {meeting_id: committee_meetings.meeting_id, hearing_id: hearings.hearing_id}, feature_status: core-now, columns: {meeting_id: text, hearing_id: text}}
+      - {table: committee_meetings_associated_nominations, source_file: committeemeetings_associated_nominations.csv, purpose: Meeting nomination association, grain: one meeting-to-nomination edge, primary_key: [meeting_id, nomination_id], required_columns: [meeting_id, nomination_id], foreign_keys: {meeting_id: committee_meetings.meeting_id, nomination_id: nominations.nomination_id}, feature_status: core-now, columns: {meeting_id: text, nomination_id: text}}
+      - {table: committee_meetings_associated_treaties, source_file: committeemeetings_associated_treaties.csv, purpose: Meeting treaty association, grain: one meeting-to-treaty edge, primary_key: [meeting_id, treaty_id], required_columns: [meeting_id, treaty_id], foreign_keys: {meeting_id: committee_meetings.meeting_id, treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {meeting_id: text, treaty_id: text}}
+      - {table: committee_meetings_committees, source_file: committeemeetings_committees.csv, purpose: Meeting committee association, grain: one meeting-to-committee edge, primary_key: [meeting_id, committee_code], required_columns: [meeting_id, committee_code], foreign_keys: {meeting_id: committee_meetings.meeting_id, committee_code: committees.committee_code}, feature_status: core-now, columns: {meeting_id: text, committee_code: text}}
+      - {table: committee_meetings_meeting_documents, source_file: committeemeetings_meeting_documents.csv, purpose: Meeting document, grain: one document attached to a meeting, primary_key: [meeting_id, url], required_columns: [meeting_id, url], foreign_keys: {meeting_id: committee_meetings.meeting_id}, feature_status: core-now, columns: {meeting_id: text, name: text, document_type: text, description: text, url: text}}
+      - {table: committee_meetings_witness_documents, source_file: committeemeetings_witness_documents.csv, purpose: Witness document, grain: one witness document attached to a meeting, primary_key: [meeting_id, url], required_columns: [meeting_id, url], foreign_keys: {meeting_id: committee_meetings.meeting_id}, feature_status: core-now, columns: {meeting_id: text, document_type: text, url: text}}
+      - {table: committee_meetings_witnesses, source_file: committeemeetings_witnesses.csv, purpose: Meeting witness, grain: one named witness at a meeting, primary_key: [meeting_id, name], required_columns: [meeting_id, name], foreign_keys: {meeting_id: committee_meetings.meeting_id}, feature_status: core-now, columns: {meeting_id: text, name: text, position: text, organization: text}}
+
+  - name: committee_prints
+    table: committee_prints
+    source_archive: committeeprints.zip
+    source_file: committeeprints.csv
+    purpose: Congressional committee prints and their GovInfo metadata/text.
+    grain: one committee print identified by print_id
+    primary_key: [print_id]
+    required_columns: [print_id, print_jacketnumber, congress]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {print_id: text, print_jacketnumber: text, congress: integer, session: integer, chamber: text, title: text, pages: integer, print_number: text, citation: text, updated_at: timestamptz}
+    children:
+      - {table: committee_prints_associated_bills, source_file: committeeprints_associated_bills.csv, purpose: Committee print bill association, grain: one print-to-bill edge, primary_key: [print_id, bill_id], required_columns: [print_id, bill_id], foreign_keys: {print_id: committee_prints.print_id, bill_id: bills.bill_id}, feature_status: core-now, columns: {print_id: text, bill_id: text}}
+      - {table: committee_prints_committees, source_file: committeeprints_committees.csv, purpose: Committee print committee association, grain: one print-to-committee edge, primary_key: [print_id, committee_code], required_columns: [print_id, committee_code], foreign_keys: {print_id: committee_prints.print_id, committee_code: committees.committee_code}, feature_status: core-now, columns: {print_id: text, committee_code: text}}
+      - {table: committee_prints_metadata, source_file: committeeprints_metadata.csv, purpose: Committee print GovInfo metadata, grain: one print metadata record, primary_key: [print_id], required_columns: [print_id], foreign_keys: {print_id: committee_prints.print_id}, feature_status: core-now, columns: {print_id: text, govinfo_package_id: text, su_doc_class_number: text, migrated_doc_id: text, govinfo_collection_code: text}}
+      - {table: committee_prints_metadata_granules, source_file: committeeprints_metadata_granules.csv, purpose: Committee print GovInfo granule metadata, grain: one print-to-granule edge, primary_key: [print_id, govinfo_granule_id], required_columns: [print_id, govinfo_granule_id], foreign_keys: {print_id: committee_prints.print_id}, feature_status: core-now, columns: {print_id: text, govinfo_package_id: text, govinfo_granule_id: text}}
+      - {table: committee_prints_texts, source_file: committeeprints_texts.csv, purpose: Committee print text rendition, grain: one print text rendition, primary_key: [print_id], required_columns: [print_id], foreign_keys: {print_id: committee_prints.print_id}, feature_status: core-now, columns: {print_id: text, raw_text: text, formatted_text: text, pdf: text, html: text, xml: text, png: text}}
+
+  - name: committee_reports
+    table: committee_reports
+    source_archive: committeereports.zip
+    source_file: committeereports.csv
+    purpose: Congressional committee reports and GovInfo metadata/text.
+    grain: one published committee report identified by report_id
+    primary_key: [report_id]
+    required_columns: [report_id, report_type, report_number, congress]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {report_id: text, report_type: text, report_number: integer, report_part: integer, congress: integer, session: integer, title: text, subtitle: text, chamber: text, citation: text, is_conference_report: boolean, issued_at: date, pages: integer, texts_count: integer, updated_at: timestamptz}
+    children:
+      - {table: committee_reports_associated_bills, source_file: committeereports_associated_bills.csv, purpose: Committee report bill association, grain: one report-to-bill edge, primary_key: [report_id, bill_id], required_columns: [report_id, bill_id], foreign_keys: {report_id: committee_reports.report_id, bill_id: bills.bill_id}, feature_status: core-now, columns: {report_id: text, bill_id: text}}
+      - {table: committee_reports_associated_treaties, source_file: committeereports_associated_treaties.csv, purpose: Committee report treaty association, grain: one report-to-treaty edge, primary_key: [report_id, treaty_id], required_columns: [report_id, treaty_id], foreign_keys: {report_id: committee_reports.report_id, treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {report_id: text, treaty_id: text}}
+      - {table: committee_reports_members, source_file: committeereports_members.csv, purpose: Committee report member association, grain: one report-to-member edge, primary_key: [report_id, bioguide_id], required_columns: [report_id, bioguide_id], foreign_keys: {report_id: committee_reports.report_id, bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {report_id: text, bioguide_id: text}}
+      - {table: committee_reports_metadata, source_file: committeereports_metadata.csv, purpose: Committee report GovInfo metadata, grain: one report metadata record, primary_key: [report_id], required_columns: [report_id], foreign_keys: {report_id: committee_reports.report_id}, feature_status: core-now, columns: {report_id: text, govinfo_package_id: text, su_doc_class_number: text, migrated_doc_id: text, govinfo_collection_code: text}}
+      - {table: committee_reports_metadata_granules, source_file: committeereports_metadata_granules.csv, purpose: Committee report GovInfo granule metadata, grain: one report-to-granule edge, primary_key: [report_id, govinfo_granule_id], required_columns: [report_id, govinfo_granule_id], foreign_keys: {report_id: committee_reports.report_id}, feature_status: core-now, columns: {report_id: text, govinfo_package_id: text, govinfo_granule_id: text}}
+      - {table: committee_reports_texts, source_file: committeereports_texts.csv, purpose: Committee report text rendition, grain: one report text rendition, primary_key: [report_id], required_columns: [report_id], foreign_keys: {report_id: committee_reports.report_id}, feature_status: core-now, columns: {report_id: text, raw_text: text, formatted_text: text, formatted_text_is_errata: boolean, pdf: text, pdf_is_errata: boolean}}
+
+  - name: congresses
+    table: congresses
+    source_archive: congresses.zip
+    source_file: congresses.csv
+    purpose: Congresses, sessions, and congressional directory metadata.
+    grain: one Congress identified by congress_number
+    primary_key: [congress_number]
+    required_columns: [congress_number, name, start_year, end_year]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {congress_number: integer, name: text, start_year: integer, end_year: integer, updated_at: timestamptz}
+    children:
+      - {table: congresses_directories, source_file: congresses_directories.csv, purpose: Congressional directory, grain: one directory publication per Congress, primary_key: [congress_number, title], required_columns: [congress_number, title], foreign_keys: {congress_number: congresses.congress_number}, feature_status: core-now, columns: {congress_number: integer, title: text, issued_at: date, govinfo_package_id: text, su_doc_class_number: text, migrated_doc_id: text, ils_system_id: text, govinfo_collection_code: text, government_author1: text, government_author2: text, publisher: text, last_modified: date}}
+      - {table: congresses_directories_isbn, source_file: congresses_directories_isbn.csv, purpose: ISBN observation for a Congressional Directory package, grain: one package-level directory ISBN observation, primary_key: [congress_number, govinfo_package_id, isbn], required_columns: [congress_number, govinfo_package_id, isbn], foreign_keys: {congress_number: congresses.congress_number}, feature_status: core-now, columns: {congress_number: integer, govinfo_package_id: text, isbn: text}}
+      - {table: congresses_sessions, source_file: congresses_sessions.csv, purpose: Congress session, grain: one chamber session per Congress, primary_key: [congress_number, session, chamber], required_columns: [congress_number, session, chamber], foreign_keys: {congress_number: congresses.congress_number}, feature_status: core-now, columns: {congress_number: integer, session: integer, chamber: text, type: text, start_date: date, end_date: date}}
+
+  - name: hearings
+    table: hearings
+    source_archive: hearings.zip
+    source_file: hearings.csv
+    purpose: Congressional hearings and associated participants, text, and GovInfo metadata.
+    grain: one published hearing identified by hearing_id
+    primary_key: [hearing_id]
+    required_columns: [hearing_id, congress, chamber]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {hearing_id: text, hearing_jacketnumber: text, loc_id: text, title: text, congress: integer, session: integer, chamber: text, is_appropriation: boolean, hearing_number: text, part_number: text, citation: text, pages: integer, updated_at: timestamptz}
+    children:
+      - {table: hearings_bills, source_file: hearings_bills.csv, purpose: Hearing bill association, grain: one hearing-to-bill edge, primary_key: [hearing_id, bill_id], required_columns: [hearing_id, bill_id], foreign_keys: {hearing_id: hearings.hearing_id, bill_id: bills.bill_id}, feature_status: core-now, columns: {hearing_id: text, bill_id: text}}
+      - {table: hearings_committees, source_file: hearings_committees.csv, purpose: Hearing committee association, grain: one hearing-to-committee edge, primary_key: [hearing_id, committee_code], required_columns: [hearing_id, committee_code], foreign_keys: {hearing_id: hearings.hearing_id, committee_code: committees.committee_code}, feature_status: core-now, columns: {hearing_id: text, committee_code: text, committee_name: text}}
+      - {table: hearings_dates, source_file: hearings_dates.csv, purpose: Hearing date, grain: one date for a hearing, primary_key: [hearing_id, hearing_date], required_columns: [hearing_id, hearing_date], foreign_keys: {hearing_id: hearings.hearing_id}, feature_status: core-now, columns: {hearing_id: text, hearing_date: date}}
+      - {table: hearings_members, source_file: hearings_members.csv, purpose: Hearing member association, grain: one hearing-to-member edge, primary_key: [hearing_id, bioguide_id], required_columns: [hearing_id, bioguide_id], foreign_keys: {hearing_id: hearings.hearing_id, bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {hearing_id: text, bioguide_id: text}}
+      - {table: hearings_metadata, source_file: hearings_metadata.csv, purpose: Hearing GovInfo metadata, grain: one hearing metadata record, primary_key: [hearing_id], required_columns: [hearing_id], foreign_keys: {hearing_id: hearings.hearing_id}, feature_status: core-now, columns: {hearing_id: text, govinfo_package_id: text, su_doc_class_number: text, migrated_doc_id: text, govinfo_collection_code: text}}
+      - {table: hearings_metadata_granules, source_file: hearings_metadata_granules.csv, purpose: Hearing GovInfo granule metadata, grain: one hearing-to-granule edge, primary_key: [hearing_id, govinfo_granule_id], required_columns: [hearing_id, govinfo_granule_id], foreign_keys: {hearing_id: hearings.hearing_id}, feature_status: core-now, columns: {hearing_id: text, govinfo_package_id: text, govinfo_granule_id: text}}
+      - {table: hearings_texts, source_file: hearings_texts.csv, purpose: Hearing text rendition, grain: one hearing text rendition, primary_key: [hearing_id], required_columns: [hearing_id], foreign_keys: {hearing_id: hearings.hearing_id}, feature_status: core-now, columns: {hearing_id: text, raw_text: text, pdf: text, formatted_text: text}}
+      - {table: hearings_witnesses, source_file: hearings_witnesses.csv, purpose: Hearing witness, grain: one named witness at a hearing, primary_key: [hearing_id, witness], required_columns: [hearing_id, witness], foreign_keys: {hearing_id: hearings.hearing_id}, feature_status: core-now, columns: {hearing_id: text, witness: text}}
+
+  - name: members
+    table: members
+    source_archive: members.zip
+    source_file: members.csv
+    purpose: Legislators and their terms, party, leadership, and source metadata.
+    grain: one legislator identified by bioguide_id
+    primary_key: [bioguide_id]
+    required_columns: [bioguide_id, normalized_name]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {bioguide_id: text, icpsr: text, normalized_name: text, direct_order_name: text, inverted_order_name: text, honorific_prefix: text, first_name: text, middle_name: text, last_name: text, suffix: text, nickname: text, party: text, state: text, district: text, birth_year: integer, death_year: integer, official_url: text, office_address: text, office_city: text, office_district: text, office_zip: text, office_phone: text, sponsored_legislation_count: integer, cosponsored_legislation_count: integer, depiction_image_url: text, depiction_attribution: text, is_current_member: boolean, updated_at: timestamptz}
+    children:
+      - {table: members_leadership_roles, source_file: members_leadership_roles.csv, purpose: Member leadership role, grain: one leadership role per member, Congress, and chamber, primary_key: [bioguide_id, role, congress, chamber], required_columns: [bioguide_id, role, congress, chamber], foreign_keys: {bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {bioguide_id: text, role: text, congress: integer, chamber: text, is_current: boolean}}
+      - {table: members_metadata, source_file: members_metadata.csv, purpose: Member and directory source identifiers, grain: one Congressional Directory granule observation (member, frontmatter, or other directory granule), primary_key: [govinfo_granule_id], required_columns: [govinfo_granule_id], foreign_keys: {bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {bioguide_id: text, govinfo_granule_id: text, govinfo_package_id: text, gpo_id: text, authority_id: text}}
+      - {table: members_party_history, source_file: members_party_history.csv, purpose: Member party interval, grain: one party interval per member, primary_key: [bioguide_id, party_code, start_year], required_columns: [bioguide_id, party_code, start_year], foreign_keys: {bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {bioguide_id: text, party_code: text, party_name: text, start_year: integer, end_year: integer}}
+      - {table: members_terms, source_file: members_terms.csv, purpose: Member term, grain: one member term in a chamber and Congress, primary_key: [bioguide_id, congress, chamber, start_year], required_columns: [bioguide_id, congress, chamber, start_year], foreign_keys: {bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {bioguide_id: text, member_type: text, chamber: text, congress: integer, start_year: integer, end_year: integer, state_name: text, state_code: text, district: text, title: text, biography: text, population: integer, twitter_url: text, instagram_url: text, facebook_url: text, youtube_url: text, other_url: text}}
+
+  - name: nominations
+    table: nominations
+    source_archive: nominations.zip
+    source_file: nominations.csv
+    purpose: Presidential nominations and their actions, nominees, positions, and committee activity.
+    grain: one published nomination identified by nomination_id
+    primary_key: [nomination_id]
+    required_columns: [nomination_id, nomination_number, congress]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {nomination_id: text, nomination_number: integer, part_number: integer, congress: integer, description: text, is_privileged: boolean, is_civilian: boolean, received_at: date, authority_date: date, executive_calendar_number: integer, citation: text, committees_count: integer, actions_count: integer, updated_at: timestamptz}
+    children:
+      - {table: nominations_actions, source_file: nominations_actions.csv, purpose: Nomination action, grain: one nomination action, primary_key: [action_id], required_columns: [action_id, nomination_id], foreign_keys: {nomination_id: nominations.nomination_id}, feature_status: core-now, columns: {action_id: text, nomination_id: text, action_code: text, action_type: text, action_date: date, text: text}}
+      - {table: nominations_actions_committees, source_file: nominations_actions_committees.csv, purpose: Committee named on a nomination action, grain: one action-to-committee edge, primary_key: [action_id, committee_code], required_columns: [action_id, nomination_id, committee_code], foreign_keys: {action_id: nominations_actions.action_id, nomination_id: nominations.nomination_id, committee_code: committees.committee_code}, feature_status: core-now, columns: {action_id: text, nomination_id: text, committee_code: text}}
+      - {table: nominations_associated_hearings, source_file: nominations_associated_hearings.csv, purpose: Nomination hearing association, grain: one nomination-to-hearing edge, primary_key: [nomination_id, hearing_id], required_columns: [nomination_id, hearing_id], foreign_keys: {nomination_id: nominations.nomination_id, hearing_id: hearings.hearing_id}, feature_status: core-now, columns: {nomination_id: text, hearing_id: text}}
+      - {table: nominations_committeeactivities, source_file: nominations_committeeactivities.csv, purpose: Nomination committee activity, grain: one committee activity for a nomination, primary_key: [nomination_id, committee_code, activity_date, activity_name], required_columns: [nomination_id, committee_code, activity_date, activity_name], foreign_keys: {nomination_id: nominations.nomination_id, committee_code: committees.committee_code}, feature_status: core-now, columns: {nomination_id: text, committee_code: text, activity_name: text, activity_date: date}}
+      - {table: nominations_nominees, source_file: nominations_nominees.csv, purpose: Nominee on a nomination, grain: one nominee observation at a nomination position (ordinal is not person-unique), key_semantics: grouping, grouping_key: [nomination_id, ordinal], export_order: [nomination_id, ordinal, first_name, middle_name, last_name, prefix, suffix, state, effective_date, predecessor_name, corps_code], required_columns: [nomination_id, ordinal], foreign_keys: {nomination_id: nominations.nomination_id}, feature_status: core-now, columns: {nomination_id: text, ordinal: integer, first_name: text, middle_name: text, last_name: text, prefix: text, suffix: text, state: text, effective_date: date, predecessor_name: text, corps_code: text}}
+      - {table: nominations_positions, source_file: nominations_positions.csv, purpose: Position on a nomination, grain: one ordinal position, primary_key: [nomination_id, ordinal, position_title], required_columns: [nomination_id, ordinal, position_title], foreign_keys: {nomination_id: nominations.nomination_id}, feature_status: core-now, columns: {nomination_id: text, ordinal: integer, position_title: text, organization: text, intro_text: text, nominee_count: integer}}
+
+  - name: treaties
+    table: treaties
+    source_archive: treaties.zip
+    source_file: treaties.csv
+    purpose: Treaties and their actions, parties, terms, titles, and GovInfo metadata.
+    grain: one published treaty identified by treaty_id
+    primary_key: [treaty_id]
+    required_columns: [treaty_id, treaty_number, congress_received]
+    feature_status: core-now
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns: {treaty_id: text, treaty_number: integer, suffix: text, congress_received: integer, congress_received_session: integer, congress_considered: integer, topic: text, transmitted_at: date, in_force_at: date, resolution_text: text, summary: text, pages: integer, parts_count: integer, actions_count: integer, old_number: text, old_number_display_name: text, updated_at: timestamptz}
+    children:
+      - {table: treaties_actions, source_file: treaties_actions.csv, purpose: Treaty action, grain: one treaty action, primary_key: [action_id], required_columns: [action_id, treaty_id], foreign_keys: {treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {action_id: text, treaty_id: text, action_code: text, action_date: date, text: text, action_type: text}}
+      - {table: treaties_country_parties, source_file: treaties_country_parties.csv, purpose: Treaty country party, grain: one treaty-to-country edge, primary_key: [treaty_id, country], required_columns: [treaty_id, country], foreign_keys: {treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {treaty_id: text, country: text}}
+      - {table: treaties_index_terms, source_file: treaties_index_terms.csv, purpose: Treaty index term, grain: one index term assigned to a treaty, primary_key: [treaty_id, index_term], required_columns: [treaty_id, index_term], foreign_keys: {treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {treaty_id: text, index_term: text}}
+      - {table: treaties_metadata, source_file: treaties_metadata.csv, purpose: Treaty GovInfo metadata, grain: one treaty metadata record, primary_key: [treaty_id], required_columns: [treaty_id], foreign_keys: {treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {treaty_id: text, govinfo_package_id: text, su_doc_class_number: text, migrated_doc_id: text, govinfo_collection_code: text}}
+      - {table: treaties_metadata_granules, source_file: treaties_metadata_granules.csv, purpose: Treaty GovInfo granule metadata, grain: one treaty-to-granule edge, primary_key: [treaty_id, govinfo_granule_id], required_columns: [treaty_id, govinfo_granule_id], foreign_keys: {treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {treaty_id: text, govinfo_package_id: text, govinfo_granule_id: text}}
+      - {table: treaties_titles, source_file: treaties_titles.csv, purpose: Treaty title, grain: one typed title per treaty, primary_key: [treaty_id, title_type, title], required_columns: [treaty_id, title_type, title], foreign_keys: {treaty_id: treaties.treaty_id}, feature_status: core-now, columns: {treaty_id: text, title: text, title_type: text}}
+
+# Supplemental relations are deliberately outside the eleven published
+# families.  They are release-facing tables with a stable, documented grain,
+# but do not alter the feature-parity archive contract above.
+supplemental_relations:
+  - table: bills_versions
+    source_file: null
+    purpose: >-
+      Every GovInfo BILLS package/version linked to the canonical bill. This
+      preserves version-level evidence while the core bills table exposes one
+      representative version code; authenticated GovInfo HTML URLs and their
+      extracted visible text are retained when published.
+    grain: one GovInfo bill package/version
+    primary_key: [govinfo_package_id]
+    required_columns: [govinfo_package_id, bill_id, version_code]
+    foreign_keys: {bill_id: bills.bill_id}
+    feature_status: supplemental
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns:
+      bill_id: text
+      govinfo_package_id: text
+      version_code: text
+      version_variant: integer
+      formatted_text: text
+      raw_text: text
+      title: text
+      short_title: text
+      issued_at: date
+      last_modified: timestamptz
+      is_representative_package: boolean
+  - table: bills_version_links
+    source_file: null
+    purpose: >-
+      Deterministic links from Congress.gov bill titles, text renditions, and
+      explicitly version-labelled actions to GovInfo bill versions. Congress
+      summary version codes are intentionally not treated as bill-text
+      version codes and are therefore excluded.
+    grain: one source child row-to-version link
+    primary_key: [link_id]
+    required_columns: [link_id, source_table, source_row_key, bill_id, link_status]
+    foreign_keys: {bill_id: bills.bill_id}
+    feature_status: supplemental
+    materialization: {mode: table, expectation: durable current row plus ingestion history}
+    columns:
+      link_id: text
+      source_table: text
+      source_row_key: text
+      bill_id: text
+      source_version_code: text
+      source_version_name: text
+      govinfo_package_id: text
+      govinfo_version_code: text
+      link_status: text
+      link_rule: text
+      link_confidence: numeric

@@ -1,0 +1,35 @@
+category: house-requirements
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /house-requirement
+  node_type: house_requirement_list
+refresh_root_node_type: house_requirement_detail
+nodes:
+  house_requirement_list:
+    item_path: $.houseRequirements[*]
+    high_water_mark_path: $.houseRequirements[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: house_requirement_detail
+        url_path: $.houseRequirements[*].url
+        follow_mode: recurse
+  house_requirement_detail:
+    data_path: $.houseRequirement
+    child_edges:
+      - target: house_requirement_matching_communications
+        url_path: $.houseRequirement.matchingCommunications.url
+        fallback_url_suffix: matching-communications
+        follow_mode: recurse
+  house_requirement_matching_communications:
+    item_path: $.matchingCommunications[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

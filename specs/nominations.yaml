@@ -61,3 +61,8 @@ nodes:
       limit: 250
   nomination_nominee_detail:
     item_path: $.nominees[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

@@ -1,0 +1,31 @@
+category: crs-reports
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+# Congress.gov publishes CRS products independently of a Congress partition.
+# This is a source/documented-coverage category, not a claim of 1789 coverage.
+coverage:
+  scope: documented_api
+  completeness: observed_source_catalog
+  notes: CRS products are catalogued by product publication/update dates; do not infer full historical coverage from Congress partitions.
+seed:
+  path: /crsreport
+  node_type: crs_report_list
+refresh_root_node_type: crs_report_detail
+nodes:
+  crs_report_list:
+    item_path: $.CRSReports[*]
+    high_water_mark_path: $.CRSReports[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+    child_edges:
+      - target: crs_report_detail
+        url_path: $.CRSReports[*].url
+        follow_mode: recurse
+  crs_report_detail: {}

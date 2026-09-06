@@ -1,0 +1,35 @@
+category: daily-congressional-record
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /daily-congressional-record
+  node_type: daily_congressional_record_list
+refresh_root_node_type: daily_congressional_record_detail
+nodes:
+  daily_congressional_record_list:
+    item_path: $.dailyCongressionalRecord[*]
+    high_water_mark_path: $.dailyCongressionalRecord[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: daily_congressional_record_detail
+        url_path: $.dailyCongressionalRecord[*].url
+        follow_mode: recurse
+  daily_congressional_record_detail:
+    data_path: $.issue
+    high_water_mark_path: $.issue.updateDate
+    child_edges:
+      - target: daily_congressional_record_articles
+        url_path: $.issue.fullIssue.articles.url
+        follow_mode: recurse
+  daily_congressional_record_articles:
+    item_path: $.articles[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

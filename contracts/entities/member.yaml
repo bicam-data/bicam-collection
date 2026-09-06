@@ -1,0 +1,14 @@
+entity: member
+identity:
+  components: [bioguide_id]
+  canonical_format: "{bioguide_id}"
+  canonical_column: canonical_member_id
+sources:
+  congress:
+    model: stg_congress__member_detail
+    natural_key: bioguide_id
+workflow: ingestion_only
+quality:
+  max_missing_canonical_identity: 0
+  max_duplicate_canonical_identity: 0
+version: 1

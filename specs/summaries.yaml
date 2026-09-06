@@ -1,0 +1,58 @@
+category: summaries
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+# This is a documented, date-filtered evidence feed that overlaps the
+# summaries child of each bill.  It is not a second bill entity or a new
+# reconciliation source; the nested bill object is retained for attribution
+# and a source-neutral join to the canonical bill staging model.
+coverage:
+  scope: documented_api
+  completeness: observed_source_catalog
+  notes: >-
+    Standalone summaries are sorted by last update and support bounded
+    fromDateTime/toDateTime windows.  Coverage is measured against the API's
+    returned catalog and must not be inferred to mean complete bill-summary
+    history for every Congress.  The endpoint overlaps bills.bill_summaries.
+seed:
+  path: /summaries
+  node_type: summary_list
+refresh_root_node_type: summary_list
+nodes:
+  summary_list:
+    item_path: $.summaries[*]
+    high_water_mark_path: $.summaries[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+  # The API also documents filtered forms of the same list.  They retain the
+  # same response contract and are exposed as explicit seedable nodes for
+  # targeted audits; the normal historical runner uses the date-windowed
+  # unfiltered endpoint to avoid a bill-type fan-out.
+  summary_congress_list:
+    item_path: $.summaries[*]
+    high_water_mark_path: $.summaries[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
+  summary_bill_type_list:
+    item_path: $.summaries[*]
+    high_water_mark_path: $.summaries[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime

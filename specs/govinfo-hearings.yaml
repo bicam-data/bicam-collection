@@ -1,0 +1,39 @@
+category: govinfo-hearings
+source: govinfo
+url_allowlist_hosts:
+  - api.govinfo.gov
+seed:
+  path: /collections/CHRG/{from_datetime}/{to_datetime}
+  node_type: govinfo_hearing_package_list
+refresh_root_node_type: govinfo_hearing_package_detail
+nodes:
+  govinfo_hearing_package_list:
+    item_path: $.packages[*]
+    high_water_mark_path: $.packages[*].lastModified
+    pagination_path: $
+    next_page_path: $.nextPage
+    default_query_params:
+      offsetMark: "*"
+      pageSize: 100
+    child_edges:
+      - target: govinfo_hearing_package_detail
+        url_path: $.packages[*].packageLink
+        follow_mode: recurse
+  govinfo_hearing_package_detail:
+    high_water_mark_path: $.lastModified
+    child_edges:
+      - target: govinfo_hearing_granule_list
+        url_path: $.granulesLink
+        follow_mode: recurse
+  govinfo_hearing_granule_list:
+    item_path: $.granules[*]
+    pagination_path: $
+    next_page_path: $.nextPage
+    default_query_params:
+      offsetMark: "*"
+      pageSize: 100
+    child_edges:
+      - target: govinfo_hearing_granule_detail
+        url_path: $.granules[*].granuleLink
+        follow_mode: recurse
+  govinfo_hearing_granule_detail: {}

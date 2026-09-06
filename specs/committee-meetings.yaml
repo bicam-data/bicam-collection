@@ -15,6 +15,9 @@ nodes:
     default_query_params:
       format: json
       limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
     child_edges:
       - target: committee_meeting_detail
         url_path: $.committeeMeetings[*].url

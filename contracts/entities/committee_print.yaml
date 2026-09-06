@@ -1,0 +1,28 @@
+entity: committee_print
+identity:
+  components:
+    - print_type
+    - print_jacketnumber
+    - congress
+  canonical_format: "{print_type}{print_jacketnumber}-{congress}"
+  canonical_column: canonical_print_id
+classification:
+  chamber:
+    allowed_values: [house, senate, joint, nochamber]
+    joint_is_separate_entity: false
+sources:
+  congress:
+    model: stg_congress__committee_print_detail
+    natural_key: print_id
+  govinfo:
+    model: stg_govinfo__committee_prints_packages
+    natural_key: package_id
+matching:
+  automatic_rule: exact_canonical_identity
+  corroborating_fields: [title, chamber, issued_at]
+  fuzzy_match_requires_review: true
+workflow: reconciliation
+quality:
+  max_competing_accepted_matches: 0
+  max_missing_canonical_identity: 0
+version: 1

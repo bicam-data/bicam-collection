@@ -1,0 +1,14 @@
+entity: committee
+identity:
+  components: [committee_id]
+  canonical_format: "{committee_id}"
+  canonical_column: canonical_committee_id
+sources:
+  congress:
+    model: stg_congress__committee_detail
+    natural_key: committee_id
+workflow: ingestion_only
+quality:
+  max_missing_canonical_identity: 0
+  max_duplicate_canonical_identity: 0
+version: 1

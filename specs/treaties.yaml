@@ -15,6 +15,9 @@ nodes:
     default_query_params:
       format: json
       limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
     child_edges:
       - target: treaty_detail
         url_path: $.treaties[*].url
@@ -28,6 +31,8 @@ nodes:
       - target: treaty_committees
         url_path: $.treaty[*].committees.url
         follow_mode: recurse
+        fallback_url_suffix: committees
+        url_normalizer: congress_treaty_committees
   treaty_actions:
     item_path: $.actions[*]
     pagination_path: $.pagination

@@ -1,0 +1,14 @@
+entity: committee_meeting
+identity:
+  components: [event_id, congress]
+  canonical_format: "{event_id}-{congress}"
+  canonical_column: canonical_committee_meeting_id
+sources:
+  congress:
+    model: stg_congress__committee_meeting_detail
+    natural_key: meeting_id
+workflow: ingestion_only
+quality:
+  max_missing_canonical_identity: 0
+  max_duplicate_canonical_identity: 0
+version: 1

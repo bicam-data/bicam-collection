@@ -1,0 +1,14 @@
+entity: amendment
+identity:
+  components: [amendment_type, amendment_number, congress]
+  canonical_format: "{amendment_type}{amendment_number}-{congress}"
+  canonical_column: canonical_amendment_id
+sources:
+  congress:
+    model: stg_congress__amendment_detail
+    natural_key: amendment_id
+workflow: ingestion_only
+quality:
+  max_missing_canonical_identity: 0
+  max_duplicate_canonical_identity: 0
+version: 1

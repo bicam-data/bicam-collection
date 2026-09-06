@@ -1,0 +1,28 @@
+entity: hearing
+identity:
+  components:
+    - hearing_type
+    - hearing_jacketnumber
+    - congress
+  canonical_format: "{hearing_type}{hearing_jacketnumber}-{congress}"
+  canonical_column: canonical_hearing_id
+classification:
+  chamber:
+    allowed_values: [house, senate, joint]
+    joint_is_separate_entity: false
+sources:
+  congress:
+    model: stg_congress__hearing_detail
+    natural_key: hearing_id
+  govinfo:
+    model: stg_govinfo__hearings_packages
+    natural_key: package_id
+matching:
+  automatic_rule: exact_hearing_identity
+  corroborating_fields: [title, chamber, issued_at]
+  fuzzy_match_requires_review: true
+workflow: reconciliation
+quality:
+  max_competing_accepted_matches: 0
+  max_missing_canonical_identity: 0
+version: 1

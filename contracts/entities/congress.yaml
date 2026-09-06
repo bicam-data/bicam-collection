@@ -1,0 +1,21 @@
+entity: congress
+identity:
+  components: [congress_number]
+  canonical_format: "{congress_number}"
+  canonical_column: canonical_congress_id
+sources:
+  congress:
+    model: stg_congress__congress_detail
+    natural_key: congress_number
+  govinfo:
+    model: stg_govinfo__congressional_directories
+    natural_key: congress_number
+matching:
+  automatic_rule: exact_congress_number
+  corroborating_fields: [title, issued_at]
+  fuzzy_match_requires_review: true
+workflow: reconciliation
+quality:
+  max_missing_canonical_identity: 0
+  max_duplicate_canonical_identity: 0
+version: 1

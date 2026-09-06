@@ -15,6 +15,9 @@ nodes:
     default_query_params:
       format: json
       limit: 250
+    incremental_query_params:
+      - fromDateTime
+      - toDateTime
     child_edges:
       - target: committee_detail
         url_path: $.committees[*].url
@@ -31,6 +34,9 @@ nodes:
         follow_mode: recurse
       - target: committee_nominations
         url_path: $.committee.nominations.url
+        follow_mode: recurse
+      - target: committee_communications
+        url_path: $.committee.communications.url
         follow_mode: recurse
   committee_bills:
     data_path: $.committee-bills
@@ -49,6 +55,15 @@ nodes:
       limit: 250
   committee_nominations:
     item_path: $.nominations[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  committee_communications:
+    # The source container is chamber-specific (``houseCommunications`` or
+    # ``senateCommunications``). The crawler only needs the shared pagination
+    # contract here; staging normalizes both arrays explicitly.
     pagination_path: $.pagination
     next_page_path: $.pagination.next
     default_query_params:

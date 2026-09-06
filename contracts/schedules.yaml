@@ -1,0 +1,30 @@
+version: 1
+
+# These are deliberately conservative defaults. A scheduler may select a job,
+# but must not silently widen its declared limits.
+lock_key: bicam_collection_scheduled_batch
+jobs:
+  bounded_congress:
+    categories:
+      - bills
+      - amendments
+      - members
+      - congresses
+      - hearings
+      - committees
+      - committee-meetings
+      - committee-prints
+      - committee-reports
+      - treaties
+      - nominations
+    mode: incremental
+    overlap_hours: 24
+    max_pages: 1000
+    page_size: 250
+    concurrency: 3
+    category_workers: 1
+    dbt_select: +fct_collection_coverage
+    quality_gate: true
+    max_open_exceptions: 0
+    max_unsatisfied_fetches: 0
+    max_missing_full_scope_partitions: 0

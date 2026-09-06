@@ -1,0 +1,64 @@
+category: house-votes
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+# The current beta endpoint documents only legislation-related House roll
+# call votes in Congresses 118 and 119. It must never be represented as an
+# all-Congress (1789-present) collection.
+coverage:
+  scope: documented_beta
+  congresses: [118, 119]
+  completeness: full_within_documented_scope
+  notes: Non-legislation-related votes and Congresses 1-117 are outside the current beta source scope.
+seed:
+  path: /house-vote
+  node_type: house_vote_list
+refresh_root_node_type: house_vote_detail
+nodes:
+  house_vote_list:
+    item_path: $.houseRollCallVotes[*]
+    high_water_mark_path: $.houseRollCallVotes[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: house_vote_detail
+        url_path: $.houseRollCallVotes[*].url
+        follow_mode: recurse
+  # These two list nodes make the documented filtered endpoints targetable
+  # with --seed-path/--seed-node-type while retaining one canonical list
+  # shape. The historical runner uses /house-vote/{congress}, which covers
+  # both sessions for each supported Congress.
+  house_vote_congress_list:
+    item_path: $.houseRollCallVotes[*]
+    high_water_mark_path: $.houseRollCallVotes[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  house_vote_session_list:
+    item_path: $.houseRollCallVotes[*]
+    high_water_mark_path: $.houseRollCallVotes[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+  house_vote_detail:
+    data_path: $.houseRollCallVote
+    high_water_mark_path: $.houseRollCallVote.updateDate
+    child_edges:
+      - target: house_vote_members
+        url_path: $.houseRollCallVote.members.url
+        fallback_url_suffix: members
+        follow_mode: recurse
+  house_vote_members:
+    item_path: $.houseRollCallVoteMemberVotes.results[*]
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250

@@ -1,0 +1,23 @@
+category: senate-communications
+source: congress
+url_allowlist_hosts:
+  - api.congress.gov
+seed:
+  path: /senate-communication
+  node_type: senate_communication_list
+refresh_root_node_type: senate_communication_detail
+nodes:
+  senate_communication_list:
+    item_path: $.senateCommunications[*]
+    high_water_mark_path: $.senateCommunications[*].updateDate
+    pagination_path: $.pagination
+    next_page_path: $.pagination.next
+    default_query_params:
+      format: json
+      limit: 250
+    child_edges:
+      - target: senate_communication_detail
+        url_path: $.senateCommunications[*].url
+        follow_mode: recurse
+  senate_communication_detail:
+    data_path: $.senateCommunication
