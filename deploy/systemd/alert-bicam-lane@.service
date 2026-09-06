@@ -1,0 +1,9 @@
+[Unit]
+Description=BICAM lane failure alert for %i
+# Started by OnFailure= from bicam-.service.d/10-lane-status.conf with the
+# failed unit's full name as the instance.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/rdelano/bicam/bicam-collection
+ExecStart=/home/rdelano/bicam/bicam-collection/.venv/bin/python /home/rdelano/bicam/bicam-collection/scripts/alert_lane_failure.py --unit %i

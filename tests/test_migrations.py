@@ -31,6 +31,7 @@ class MigrationTests(unittest.TestCase):
                 "013_html_text_versions.sql",
                 "014_html_text_successful_current.sql",
                 "015_committee_report_text_lineage.sql",
+                "016_lane_runs.sql",
             ],
         )
         self.assertIn("raw_responses", migrations[0].sql)
@@ -45,6 +46,7 @@ class MigrationTests(unittest.TestCase):
         self.assertIn("html_text_versions", migrations[13].sql)
         self.assertIn("html_text_successful_current", migrations[14].sql)
         self.assertIn("report_source_raw_response_version_id", migrations[15].sql)
+        self.assertIn("lane_runs", migrations[16].sql)
 
 
 if __name__ == "__main__":
