@@ -2,8 +2,12 @@ COMPOSE := docker compose
 TOOLS_PROFILE := --profile tools
 OPS_PROFILE := --profile ops
 TOOLS_RUN := $(COMPOSE) $(TOOLS_PROFILE) run --build --rm
+TEST_PROFILE := --profile test
+# Matches the postgres-test service in docker-compose.yaml.  The storage tests
+# only honor this variable from the process environment, never from .env.
+BICAM_TEST_DATABASE_URL ?= postgresql://admin:test-password@localhost:5434/bicam_collection_test
 
-.PHONY: help init-env build up up-ops down logs psql migrate recover-stale quality-gate schedule reconcile reconcile-committee-reports reconcile-bills reconcile-bill-details release-manifest export-snapshot release-check archive-parity html-text html-text-progress source-gap-report crawl crawl-bounded crawl-one benchmark-crawl dbt-run dbt-test crawler-shell dbt-shell
+.PHONY: help init-env build up up-ops down logs psql migrate test-db-up test-db-down test-db recover-stale quality-gate schedule reconcile reconcile-committee-reports reconcile-bills reconcile-bill-details release-manifest export-snapshot release-check archive-parity html-text html-text-progress source-gap-report crawl crawl-bounded crawl-one benchmark-crawl dbt-run dbt-test crawler-shell dbt-shell
 
 help:
 	@printf "Available targets:\n"
@@ -15,6 +19,9 @@ help:
 	@printf "  logs          Tail Postgres logs\n"
 	@printf "  psql          Open psql against the compose Postgres instance\n"
 	@printf "  migrate       Apply ordered SQL migrations inside the crawler image\n"
+	@printf "  test-db-up    Start the disposable test Postgres and wait until it is healthy\n"
+	@printf "  test-db-down  Stop and remove the disposable test Postgres\n"
+	@printf "  test-db       Migrate the test Postgres, then run pytest against it; pass ARGS=\"...\"\n"
 	@printf "  recover-stale Inspect stale runs; pass ARGS=\"--apply\" to mark them abandoned\n"
 	@printf "  quality-gate Check stale runs, reconciliation quality, open exceptions, and coverage\n"
 	@printf "  schedule      Run a lock-protected bounded job; pass ARGS=\"--job ...\"\n"
@@ -25,8 +32,8 @@ help:
 	@printf "  release-manifest Write a reproducible main-11 coverage/reconciliation manifest\n"
 	@printf "  export-snapshot Write an immutable CSV/GZIP main-11 research snapshot\n"
 	@printf "  release-check  Verify snapshot integrity, freshness, and quality gates\n"
-  @printf "  html-text      Fetch a bounded, resumable batch of Congress.gov HTML text\n"
-  @printf "  html-text-progress Write per-table HTML extraction progress\n"
+	@printf "  html-text      Fetch a bounded, resumable batch of Congress.gov HTML text\n"
+	@printf "  html-text-progress Write per-table HTML extraction progress\n"
 	@printf "  source-gap-report Write the reconciliation source-gap queue report\n"
 	@printf "  archive-parity Compare current bicam counts with published contract archives\n"
 	@printf "  crawl         Run scripts/run_multi_crawl.py inside the crawler container; pass ARGS=\"...\"\n"
@@ -61,6 +68,20 @@ psql:
 
 migrate:
 	$(TOOLS_RUN) crawler uv run python scripts/run_migrations.py
+
+test-db-up:
+	$(COMPOSE) $(TEST_PROFILE) up -d --wait postgres-test
+
+# Never `down` here: that would also remove the production postgres service.
+test-db-down:
+	$(COMPOSE) $(TEST_PROFILE) stop postgres-test
+	$(COMPOSE) $(TEST_PROFILE) rm -f postgres-test
+
+# run_migrations.py reads DATABASE_URL (Settings.from_env); the storage tests
+# read only BICAM_TEST_DATABASE_URL.  Both point at the disposable database.
+test-db: test-db-up
+	DATABASE_URL=$(BICAM_TEST_DATABASE_URL) uv run python scripts/run_migrations.py
+	BICAM_TEST_DATABASE_URL=$(BICAM_TEST_DATABASE_URL) uv run pytest -q $(ARGS)
 
 recover-stale:
 	$(TOOLS_RUN) crawler uv run python scripts/recover_stale_runs.py $(ARGS)

@@ -266,6 +266,37 @@ reproducible dependency version. CI currently pins the last published
 Rotisserie commit; update that SHA after the sibling checkout's pending changes
 are committed and reviewed.
 
+## Run the tests
+
+The unit suite runs with no database:
+
+```bash
+uv run pytest -q
+```
+
+The storage integration tests in `tests/test_storage.py` need a real Postgres
+and are skipped unless `BICAM_TEST_DATABASE_URL` is set. They deliberately
+never fall back to `.env` or `DATABASE_URL`, so operational credentials cannot
+be used by accident. The compose file provides a disposable `postgres-test`
+service under the `test` profile: same image and init SQL as production,
+tmpfs-backed, on host port 5434. `make test-db` starts it, applies the
+migrations to it, and runs the full suite against it:
+
+```bash
+make test-db
+make test-db-down
+```
+
+`make test-db-up` starts the test database on its own; `make test-db-down`
+stops and removes only that container, so the production `postgres` service
+is untouched. The default `docker compose up -d` does not start the test
+service. To run pytest by hand against it, export the DSN from `.env.example`:
+
+```bash
+export BICAM_TEST_DATABASE_URL=postgresql://admin:test-password@localhost:5434/bicam_collection_test
+uv run pytest -q
+```
+
 ## Run dbt
 
 ```bash

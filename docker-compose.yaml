@@ -94,6 +94,36 @@ services:
       retries: 12
       start_period: 15s
 
+  # Disposable database for the storage integration tests.  It mirrors the CI
+  # service (same image, init SQL, and credentials) but keeps its data on tmpfs
+  # so `make test-db-down` leaves nothing behind.  Port 5434 keeps it clear of
+  # the production instance on 5433.
+  postgres-test:
+    image: postgres:16
+    container_name: bicam-collection-postgres-test
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: bicam_collection_test
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: test-password
+      PGDATA: /var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    ports:
+      - "5434:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d bicam_collection_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
   postgres-backup:
     image: postgres:16
     container_name: bicam-collection-postgres-backup
