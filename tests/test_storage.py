@@ -5,33 +5,39 @@ import os
 import unittest
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 import psycopg
 
-from bicam_collection.config import Settings
 from bicam_collection.storage import AsyncPostgresStore
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+def _explicit_test_database_url(environ: dict[str, str] | None = None) -> str | None:
+    """Return only the explicitly supplied disposable-test DSN."""
+
+    values = os.environ if environ is None else environ
+    value = values.get("BICAM_TEST_DATABASE_URL")
+    return value or None
 
 
 @unittest.skipUnless(
-    (PROJECT_ROOT / ".env").exists() or os.getenv("BICAM_TEST_DATABASE_URL"),
-    "requires a configured Postgres test database",
+    _explicit_test_database_url(),
+    "requires BICAM_TEST_DATABASE_URL for an isolated Postgres test database",
 )
 class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        os.environ.pop("DATABASE_URL", None)
-        self.settings = Settings.from_env(PROJECT_ROOT)
-        self.store = AsyncPostgresStore(self.settings.database_url)
+        # Never fall back to the project .env or DATABASE_URL here.  The
+        # integration suite must be explicitly pointed at a disposable test
+        # database so a developer's operational credentials cannot be used by
+        # accident.
+        self.database_url = os.environ["BICAM_TEST_DATABASE_URL"]
+        self.store = AsyncPostgresStore(self.database_url)
         self.test_suffix = uuid.uuid4().hex
         self.test_category = f"storage-test-{self.test_suffix}"
         self.test_urls: list[str] = []
         self.run_ids: list[str] = []
 
     async def asyncTearDown(self) -> None:
-        with psycopg.connect(self.settings.database_url) as conn:
+        with psycopg.connect(self.database_url) as conn:
             if self.test_urls:
                 conn.execute("DELETE FROM crawl_run_fetches WHERE endpoint_url = ANY(%s)", (self.test_urls,))
                 conn.execute("DELETE FROM failed_requests WHERE endpoint_url = ANY(%s)", (self.test_urls,))
@@ -66,6 +72,22 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(refresh_nodes), 1)
         self.assertEqual(refresh_nodes[0].raw_id, response_ref.raw_response_id)
         self.assertEqual(refresh_nodes[0].endpoint_url, url)
+        self.assertEqual(
+            refresh_nodes[0].raw_response_version_id,
+            response_ref.raw_response_version_id,
+        )
+
+        with self.assertRaisesRegex(ValueError, "raw_response_version_id is required"):
+            await self.store.record_fetch(
+                crawl_run_id=run_id,
+                endpoint_url=url,
+                raw_response_id=response_ref.raw_response_id,
+                parent_endpoint_url=None,
+                node_type="detail",
+                follow_mode="recurse",
+                http_status=200,
+                outcome="fetched",
+            )
 
         await self.store.record_fetch(
             crawl_run_id=run_id,
@@ -101,7 +123,7 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await self.store.get_latest_high_water_mark(self.test_category), high_water_mark)
 
-        with psycopg.connect(self.settings.database_url) as conn:
+        with psycopg.connect(self.database_url) as conn:
             fetch_row = conn.execute(
                 """
                 SELECT outcome, duration_ms, attempt_count, rate_limit_attempts,
@@ -174,7 +196,7 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
         await self.store.finish_run(run_a, "completed", 1)
         await self.store.finish_run(run_b, "completed", 1)
 
-        with psycopg.connect(self.settings.database_url) as conn:
+        with psycopg.connect(self.database_url) as conn:
             rows = conn.execute(
                 """
                 SELECT cf.crawl_run_id, version.response ->> 'version'
@@ -195,19 +217,67 @@ class AsyncPostgresStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current, ("b",))
         self.assertNotEqual(ref_a.raw_response_version_id, ref_b.raw_response_version_id)
 
+    async def test_refresh_keyset_is_stable_when_an_earlier_root_is_updated(self) -> None:
+        run_a = await self.store.start_run(self.test_category, "refresh")
+        run_b = await self.store.start_run(self.test_category, "refresh")
+        self.run_ids.extend([run_a, run_b])
+        urls = [
+            f"https://example.test/keyset/{self.test_suffix}/{ordinal:03d}"
+            for ordinal in range(1, 4)
+        ]
+        self.test_urls.extend(urls)
+        for endpoint_url in urls:
+            await self.store.upsert_response(
+                endpoint_url=endpoint_url,
+                source="congress",
+                category=self.test_category,
+                node_type="detail",
+                parent_id=None,
+                response={"endpoint": endpoint_url, "revision": 1},
+                latest_crawl_run_id=run_a,
+            )
 
-@unittest.skipUnless((PROJECT_ROOT / ".env").exists(), "requires local .env-backed Postgres")
+        first_page = await self.store.list_refresh_nodes(
+            category=self.test_category,
+            node_type="detail",
+            limit=2,
+        )
+        self.assertEqual([node.endpoint_url for node in first_page], urls[:2])
+
+        await self.store.upsert_response(
+            endpoint_url=urls[0],
+            source="congress",
+            category=self.test_category,
+            node_type="detail",
+            parent_id=None,
+            response={"endpoint": urls[0], "revision": 2},
+            latest_crawl_run_id=run_b,
+        )
+        second_page = await self.store.list_refresh_nodes(
+            category=self.test_category,
+            node_type="detail",
+            limit=2,
+            after_endpoint_url=first_page[-1].endpoint_url,
+        )
+
+        self.assertEqual([node.endpoint_url for node in second_page], urls[2:])
+        self.assertIsNotNone(second_page[0].raw_response_version_id)
+
+
+@unittest.skipUnless(
+    _explicit_test_database_url(),
+    "requires BICAM_TEST_DATABASE_URL for an isolated Postgres test database",
+)
 class AsyncPostgresStoreAsyncioRunTests(unittest.TestCase):
     def setUp(self) -> None:
-        os.environ.pop("DATABASE_URL", None)
-        self.settings = Settings.from_env(PROJECT_ROOT)
+        self.database_url = os.environ["BICAM_TEST_DATABASE_URL"]
         self.test_suffix = uuid.uuid4().hex
         self.test_category = f"storage-test-{self.test_suffix}"
         self.test_url = f"https://example.test/asyncio-run/{self.test_suffix}"
         self.run_id: str | None = None
 
     def tearDown(self) -> None:
-        with psycopg.connect(self.settings.database_url) as conn:
+        with psycopg.connect(self.database_url) as conn:
             conn.execute("DELETE FROM crawl_run_fetches WHERE endpoint_url = %s", (self.test_url,))
             conn.execute("DELETE FROM failed_requests WHERE endpoint_url = %s", (self.test_url,))
             conn.execute("DELETE FROM raw_response_versions WHERE endpoint_url = %s", (self.test_url,))
@@ -218,7 +288,7 @@ class AsyncPostgresStoreAsyncioRunTests(unittest.TestCase):
 
     def test_async_store_can_be_driven_via_asyncio_run(self) -> None:
         async def scenario() -> tuple[bool, str]:
-            store = AsyncPostgresStore(self.settings.database_url)
+            store = AsyncPostgresStore(self.database_url)
             run_id = await store.start_run(self.test_category, "full")
             await store.upsert_response(
                 endpoint_url=self.test_url,
@@ -243,7 +313,7 @@ class AsyncPostgresStoreAsyncioRunTests(unittest.TestCase):
         test_categories = [f"{self.test_category}-a", f"{self.test_category}-b"]
 
         async def scenario() -> list[str]:
-            stores = [AsyncPostgresStore(self.settings.database_url), AsyncPostgresStore(self.settings.database_url)]
+            stores = [AsyncPostgresStore(self.database_url), AsyncPostgresStore(self.database_url)]
             try:
                 started_run_ids = await asyncio.gather(*(store.start_run(category, "full") for store, category in zip(stores, test_categories, strict=True)))
                 await asyncio.gather(*(store.finish_run(run_id, "completed", 0) for store, run_id in zip(stores, started_run_ids, strict=True)))
@@ -254,9 +324,22 @@ class AsyncPostgresStoreAsyncioRunTests(unittest.TestCase):
         run_ids = asyncio.run(scenario())
         self.run_id = run_ids[0]
 
-        with psycopg.connect(self.settings.database_url) as conn:
+        with psycopg.connect(self.database_url) as conn:
             conn.execute("DELETE FROM crawl_runs WHERE id = ANY(%s::uuid[])", (run_ids,))
             conn.commit()
 
         self.run_id = None
         self.assertEqual(len(run_ids), 2)
+
+
+def test_storage_guard_ignores_runtime_database_url_without_explicit_test_dsn() -> None:
+    assert _explicit_test_database_url({"DATABASE_URL": "postgresql://operational"}) is None
+
+
+def test_storage_guard_uses_explicit_test_dsn_only() -> None:
+    assert _explicit_test_database_url(
+        {
+            "DATABASE_URL": "postgresql://operational",
+            "BICAM_TEST_DATABASE_URL": "postgresql://disposable",
+        }
+    ) == "postgresql://disposable"

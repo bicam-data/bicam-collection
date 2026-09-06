@@ -37,6 +37,11 @@ class CommitteeExampleContractTests(unittest.TestCase):
         payload = load_example_payload(EXAMPLES_DIR / "example_committee_nominations.json")
         self.assertEqual(len(select(payload, "$.nominations[*]")), 1)
 
+    def test_committee_communications_contract(self) -> None:
+        payload = load_example_payload(EXAMPLES_DIR / "example_committee_communications.json")
+        self.assertEqual(len(select(payload, "$.houseCommunications[*]")), 1)
+        self.assertTrue(select_one(payload, SPEC.nodes["committee_communications"].next_page_path))
+
 
 if __name__ == "__main__":
     unittest.main()

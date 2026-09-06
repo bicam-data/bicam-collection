@@ -39,6 +39,19 @@ class BackfillGovinfoCommitteeReportsTests(unittest.TestCase):
         self.assertTrue(args.granules_for_unmatched)
         self.assertEqual(args.concurrency, 3)
         self.assertEqual(args.limit, 1000)
+        self.assertEqual(args.retry_404_after_hours, 168.0)
+
+    def test_retry_404_window_must_be_positive(self) -> None:
+        script = _load_module()
+
+        with self.assertRaises(ValueError):
+            script.load_report_sets(
+                database_url="postgresql://unused",
+                congresses=[119],
+                limit=1,
+                refresh=False,
+                retry_404_after_hours=0,
+            )
 
 
 if __name__ == "__main__":

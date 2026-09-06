@@ -79,7 +79,9 @@ class NominationCrawlerTests(unittest.TestCase):
         actions_url = canonicalize_congress_api_url("https://api.congress.gov/v3/nomination/118/1980/actions?format=json&limit=250")
         committees_url = canonicalize_congress_api_url("https://api.congress.gov/v3/nomination/118/1980/committees?format=json&limit=250")
         hearings_url = canonicalize_congress_api_url("https://api.congress.gov/v3/nomination/118/1980/hearings?format=json&limit=250")
-        nominee_url = canonicalize_congress_api_url("https://api.congress.gov/v3/nomination/118/1980/1?format=json")
+        nominee_url = canonicalize_congress_api_url(
+            "https://api.congress.gov/v3/nomination/118/1980/1?format=json&limit=250"
+        )
 
         client = FakeClient(
             {

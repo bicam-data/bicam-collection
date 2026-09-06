@@ -1,0 +1,8 @@
+case_id,entity,report_type,report_number,congress,report_part,is_errata,bill_type,bill_number,expected_canonical_id,expected_decision,source_presence,notes
+committee_report_exact,committee_report,HRPT,715,118,1,false,,,hrpt715-118-1,accepted,both,Exact package/detail identity
+committee_report_multipart,committee_report,HRPT,715,118,2,false,,,hrpt715-118-2,accepted,both,Multipart report part remains distinct
+committee_report_errata,committee_report,HRPT,715,118,1,true,,,hrpt715-118-1e,accepted,both,Errata suffix is identity-bearing
+committee_report_missing_govinfo,committee_report,SRPT,126,103,1,false,,,srpt126-103-1,unmatched,congress_only,Source gap is reviewable
+committee_report_ambiguous,committee_report,HRPT,1,119,1,false,,,hrpt1-119-1,ambiguous,both_duplicate,Duplicate candidates require review
+bill_exact,bill,,,118,,,hr,1,hr1-118,accepted,both,Exact bill identity
+bill_missing_govinfo,bill,,,118,,,s,2,s2-118,unmatched,congress_only,No inferred secondary match

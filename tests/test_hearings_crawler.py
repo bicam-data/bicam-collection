@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+import requests
+
 from bicam_collection.crawler import CrawlOptions, SpecCrawler
 from bicam_collection.examples import load_example_payload
 from bicam_collection.spec_loader import load_spec
@@ -23,6 +25,31 @@ class FakeClient:
         if url not in self.payloads:
             raise AssertionError(f"Unexpected URL fetch: {url}")
         return self.payloads[url], 200
+
+
+class HearingSourceFallbackClient(FakeClient):
+    """Fail the canonical spelling once, then serve the legacy spelling."""
+
+    def __init__(self, canonical_url: str, fallback_url: str, payload: dict) -> None:
+        super().__init__({})
+        self.canonical_url = canonical_url
+        self.fallback_url = fallback_url
+        self.payload = payload
+
+    def get_json(self, url: str) -> tuple[dict, int]:
+        self.calls.append(url)
+        if url == self.canonical_url:
+            response = requests.Response()
+            response.status_code = 500
+            response.url = url
+            raise requests.HTTPError(
+                "500 Server Error source_error=no_reverse_match", response=response
+            )
+        if url == self.fallback_url:
+            return self.payload, 200
+        if url in self.payloads:
+            return self.payloads[url], 200
+        raise AssertionError(f"Unexpected URL fetch: {url}")
 
 
 class FakeStore:
@@ -83,6 +110,42 @@ class HearingCrawlerTests(unittest.TestCase):
         crawler.run(CrawlOptions(mode="full"))
 
         self.assertEqual(set(store.raw_by_url), {seed_url, detail_url})
+
+    def test_hearing_list_retries_known_source_error_with_legacy_query_order(self) -> None:
+        hearing_list = {
+            "hearings": [],
+            "pagination": {"count": 0, "next": "", "prev": ""},
+            "request": {"format": "json"},
+        }
+        seed_url = with_query_params(
+            "https://api.congress.gov/v3/hearing?format=json", {"limit": 250}
+        )
+        canonical_url = (
+            "https://api.congress.gov/v3/hearing?format=json&limit=250&offset=34250"
+        )
+        fallback_url = (
+            "https://api.congress.gov/v3/hearing?offset=34250&limit=250&format=json"
+        )
+        seed_payload = dict(hearing_list)
+        seed_payload["pagination"] = {
+            "count": 0,
+            "next": fallback_url,
+            "prev": "",
+        }
+        client = HearingSourceFallbackClient(canonical_url, fallback_url, hearing_list)
+        client.payloads[seed_url] = seed_payload
+        store = FakeStore()
+        crawler = SpecCrawler(
+            base_url="https://api.congress.gov/v3",
+            spec=self.spec,
+            client=client,
+            store=store,
+        )
+
+        crawler.run(CrawlOptions(mode="full", max_pages=2))
+
+        self.assertEqual(client.calls, [seed_url, canonical_url, fallback_url])
+        self.assertIn(canonical_url, store.raw_by_url)
 
 
 if __name__ == "__main__":

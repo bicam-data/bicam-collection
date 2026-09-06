@@ -99,6 +99,41 @@ class TreatyCrawlerTests(unittest.TestCase):
         self.assertIn(actions_url, store.raw_by_url)
         self.assertIn(committees_url, store.raw_by_url)
 
+    def test_treaty_crawl_constructs_committees_url_when_detail_omits_link(self) -> None:
+        treaty_list = _load("example_treaty.json")
+        treaty_detail = _load("example_treatydetail.json")
+        treaty_actions = _load("example_treaty_action.json")
+        treaty_committees = _load("example_treaty_committee.json")
+        treaty_detail["treaty"][0].pop("committees", None)
+        treaty_list["pagination"]["next"] = ""
+
+        seed_url = with_query_params("https://api.congress.gov/v3/treaty?format=json", {"limit": 250})
+        detail_url = canonicalize_congress_api_url("https://api.congress.gov/v3/treaty/119/3/A?format=json")
+        actions_url = canonicalize_congress_api_url("https://api.congress.gov/v3/treaty/119/3/A/actions?format=json&limit=250")
+        committees_url = canonicalize_congress_api_url(
+            "https://api.congress.gov/v3/treaty/119/3/A/committees?format=json&limit=250"
+        )
+
+        client = FakeClient(
+            {
+                seed_url: treaty_list,
+                detail_url: treaty_detail,
+                actions_url: treaty_actions,
+                committees_url: treaty_committees,
+            }
+        )
+        store = FakeStore()
+        crawler = SpecCrawler(
+            base_url="https://api.congress.gov/v3",
+            spec=self.spec,
+            client=client,
+            store=store,
+        )
+
+        crawler.run(CrawlOptions(mode="full"))
+
+        self.assertIn(committees_url, store.raw_by_url)
+
 
 if __name__ == "__main__":
     unittest.main()

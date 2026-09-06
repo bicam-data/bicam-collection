@@ -50,6 +50,10 @@ class NominationExampleContractTests(unittest.TestCase):
         payload = load_example_payload(EXAMPLES_DIR / "example_nomination_nominee.json")
         self.assertEqual(len(select(payload, "$.nominees[*]")), 1)
         self.assertEqual(select_one(payload, "$.nominees[*].lastName"), "Doe")
+        node = SPEC.nodes["nomination_nominee_detail"]
+        self.assertEqual(node.pagination_path, "$.pagination")
+        self.assertEqual(node.next_page_path, "$.pagination.next")
+        self.assertEqual(node.default_query_params, {"format": "json", "limit": 250})
 
 
 if __name__ == "__main__":

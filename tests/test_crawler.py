@@ -94,6 +94,7 @@ class FakeStore:
         self.latest_high_water_mark = latest_high_water_mark
         self.raw_by_url: dict[str, dict] = {}
         self.fetch_events: list[dict] = []
+        self.expected_fetches: list[dict] = []
         self.failed_requests: list[dict] = []
         self.finished: tuple[str, int, datetime | None] | None = None
         self.refresh_nodes: list[object] = []
@@ -125,6 +126,9 @@ class FakeStore:
 
     def record_fetch(self, **kwargs) -> None:
         self.fetch_events.append(kwargs)
+
+    def record_expected_fetch(self, **kwargs) -> None:
+        self.expected_fetches.append(kwargs)
 
     def record_failed_request(self, **kwargs) -> None:
         self.failed_requests.append(kwargs)
@@ -182,6 +186,9 @@ class AsyncFakeStore(FakeStore):
     async def record_fetch(self, **kwargs) -> None:
         super().record_fetch(**kwargs)
 
+    async def record_expected_fetch(self, **kwargs) -> None:
+        super().record_expected_fetch(**kwargs)
+
     async def record_failed_request(self, **kwargs) -> None:
         super().record_failed_request(**kwargs)
 
@@ -193,6 +200,18 @@ def _load(name: str) -> dict:
 class CrawlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.spec = load_spec(PROJECT_ROOT / "specs" / "bills.yaml")
+
+    def test_partition_required_seed_rejects_bare_law_route(self) -> None:
+        spec = load_spec(PROJECT_ROOT / "specs" / "laws.yaml")
+        crawler = SpecCrawler(
+            base_url="https://api.congress.gov/v3",
+            spec=spec,
+            client=FakeClient({}),
+            store=FakeStore(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires an explicit partitioned seed path"):
+            crawler.run(CrawlOptions(mode="full"))
 
     def test_recursive_crawl_only_follows_collection_urls(self) -> None:
         bill_list = _load("example_bill.md")
@@ -265,11 +284,11 @@ class CrawlerTests(unittest.TestCase):
         first_page = _load("example_bill.md")
         second_page = {"bills": [], "pagination": {"count": 425279, "next": "", "prev": ""}, "request": {"format": "json"}}
         first_page["bills"] = []
-        first_page["pagination"]["next"] = "https://api.congress.gov/v3/bill?offset=20&limit=250&format=json"
+        first_page["pagination"]["next"] = "https://api.congress.gov/v3/bill?format=json&limit=250&offset=20"
 
         payloads = {
             "https://api.congress.gov/v3/bill?format=json&limit=250": first_page,
-            "https://api.congress.gov/v3/bill?offset=20&limit=250&format=json": second_page,
+            "https://api.congress.gov/v3/bill?format=json&limit=250&offset=20": second_page,
         }
         client = FakeClient(payloads)
         store = FakeStore()
@@ -306,9 +325,9 @@ class CrawlerTests(unittest.TestCase):
             payload["bill"]["textVersions"]["url"] = ""
             payload["bill"]["titles"]["url"] = ""
             payload["bill"]["committeeReports"] = []
-        actions_one_page_one = {"actions": [], "pagination": {"count": 2, "next": "https://api.congress.gov/v3/bill/119/hr/1/actions?offset=20&limit=250&format=json", "prev": ""}, "request": {"format": "json"}}
+        actions_one_page_one = {"actions": [], "pagination": {"count": 2, "next": "https://api.congress.gov/v3/bill/119/hr/1/actions?format=json&limit=250&offset=20", "prev": ""}, "request": {"format": "json"}}
         actions_one_page_two = {"actions": [], "pagination": {"count": 2, "next": "", "prev": ""}, "request": {"format": "json"}}
-        actions_two_page_one = {"actions": [], "pagination": {"count": 2, "next": "https://api.congress.gov/v3/bill/119/hr/2/actions?offset=20&limit=250&format=json", "prev": ""}, "request": {"format": "json"}}
+        actions_two_page_one = {"actions": [], "pagination": {"count": 2, "next": "https://api.congress.gov/v3/bill/119/hr/2/actions?format=json&limit=250&offset=20", "prev": ""}, "request": {"format": "json"}}
         actions_two_page_two = {"actions": [], "pagination": {"count": 2, "next": "", "prev": ""}, "request": {"format": "json"}}
 
         payloads = {
@@ -316,9 +335,9 @@ class CrawlerTests(unittest.TestCase):
             "https://api.congress.gov/v3/bill/119/hr/1?format=json": detail_one,
             "https://api.congress.gov/v3/bill/119/hr/2?format=json": detail_two,
             "https://api.congress.gov/v3/bill/119/hr/1/actions?format=json&limit=250": actions_one_page_one,
-            "https://api.congress.gov/v3/bill/119/hr/1/actions?offset=20&limit=250&format=json": actions_one_page_two,
+            "https://api.congress.gov/v3/bill/119/hr/1/actions?format=json&limit=250&offset=20": actions_one_page_two,
             "https://api.congress.gov/v3/bill/119/hr/2/actions?format=json&limit=250": actions_two_page_one,
-            "https://api.congress.gov/v3/bill/119/hr/2/actions?offset=20&limit=250&format=json": actions_two_page_two,
+            "https://api.congress.gov/v3/bill/119/hr/2/actions?format=json&limit=250&offset=20": actions_two_page_two,
         }
         client = FakeClient(payloads)
         store = FakeStore()
@@ -331,8 +350,8 @@ class CrawlerTests(unittest.TestCase):
 
         crawler.run(CrawlOptions(mode="full", max_pages=2))
 
-        self.assertIn("https://api.congress.gov/v3/bill/119/hr/1/actions?offset=20&limit=250&format=json", client.calls)
-        self.assertIn("https://api.congress.gov/v3/bill/119/hr/2/actions?offset=20&limit=250&format=json", client.calls)
+        self.assertIn("https://api.congress.gov/v3/bill/119/hr/1/actions?format=json&limit=250&offset=20", client.calls)
+        self.assertIn("https://api.congress.gov/v3/bill/119/hr/2/actions?format=json&limit=250&offset=20", client.calls)
 
     def test_incremental_params_only_applied_to_supported_nodes(self) -> None:
         bill_list = _load("example_bill.md")
@@ -354,7 +373,7 @@ class CrawlerTests(unittest.TestCase):
         committees["committees"][0]["url"] = ""
         committees["committees"][0]["subcommittees"][0]["url"] = ""
         payloads = {
-            "https://api.congress.gov/v3/bill?format=json&limit=250&fromDateTime=2026-01-01T00%3A00%3A00Z": bill_list,
+            "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-01T00%3A00%3A00Z&limit=250": bill_list,
             canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml"): bill_detail,
             canonicalize_congress_api_url("https://api.congress.gov/v3/bill/117/hr/3076/committees?format=json&limit=250"): committees,
         }
@@ -378,7 +397,7 @@ class CrawlerTests(unittest.TestCase):
         bill_detail = _load("example_billdetail.md")
         bill_list["pagination"]["next"] = ""
 
-        seed_url = "https://api.congress.gov/v3/bill?format=json&limit=250&fromDateTime=2026-01-01T00%3A00%3A00Z"
+        seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-01T00%3A00%3A00Z&limit=250"
         detail_url = canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml")
         client = FakeClient({seed_url: bill_list, detail_url: bill_detail})
         store = FakeStore(existing_urls={detail_url})
@@ -422,7 +441,7 @@ class CrawlerTests(unittest.TestCase):
         bill_detail["bill"]["titles"]["url"] = ""
         bill_detail["bill"]["committeeReports"] = []
 
-        seed_url = "https://api.congress.gov/v3/bill?format=json&limit=250&fromDateTime=2026-01-01T00%3A00%3A00Z"
+        seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-01T00%3A00%3A00Z&limit=250"
         detail_url = canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml")
         client = FakeClient({seed_url: bill_list, detail_url: bill_detail})
         store = FakeStore(existing_urls={detail_url})
@@ -438,12 +457,44 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(client.calls, [seed_url, detail_url])
         self.assertIn(detail_url, store.raw_by_url)
 
+    def test_incremental_does_not_rewalk_unchanged_detail_children(self) -> None:
+        bill_list = _load("example_bill.md")
+        bill_detail = _load("example_billdetail.md")
+        bill_list["pagination"]["next"] = ""
+        seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-01T00%3A00%3A00Z&limit=250"
+        detail_url = canonicalize_congress_api_url(
+            "http://api.congress.gov/v3/bill/119/s/3281?format=xml"
+        )
+        client = FakeClient({seed_url: bill_list, detail_url: bill_detail})
+        store = FakeStore()
+        store.raw_by_url[detail_url] = {
+            "raw_id": "raw-existing-detail",
+            "endpoint_url": detail_url,
+            "response": bill_detail,
+        }
+        crawler = SpecCrawler(
+            base_url="https://api.congress.gov/v3",
+            spec=self.spec,
+            client=client,
+            store=store,
+        )
+
+        crawler.run(
+            CrawlOptions(
+                mode="incremental",
+                from_datetime="2026-01-01T00:00:00Z",
+                max_pages=1,
+            )
+        )
+
+        self.assertEqual(client.calls, [seed_url, detail_url])
+
     def test_incremental_uses_latest_high_water_mark_when_from_datetime_is_omitted(self) -> None:
         bill_list = _load("example_bill.md")
         bill_list["bills"] = []
         bill_list["pagination"]["next"] = ""
         latest_high_water_mark = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
-        seed_url = "https://api.congress.gov/v3/bill?format=json&limit=250&fromDateTime=2026-01-02T03%3A04%3A05Z"
+        seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-02T03%3A04%3A05Z&limit=250"
 
         client = FakeClient({seed_url: bill_list})
         store = FakeStore(latest_high_water_mark=latest_high_water_mark)
@@ -463,7 +514,7 @@ class CrawlerTests(unittest.TestCase):
         bill_list["bills"] = []
         bill_list["pagination"]["next"] = ""
         latest_high_water_mark = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
-        seed_url = "https://api.congress.gov/v3/bill?format=json&limit=250&fromDateTime=2026-01-02T03%3A04%3A05Z"
+        seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-02T03%3A04%3A05Z&limit=250"
 
         client = FakeClient({seed_url: bill_list})
         store = FakeStore(latest_high_water_mark=latest_high_water_mark)
@@ -484,7 +535,7 @@ class CrawlerTests(unittest.TestCase):
         bill_list["bills"][0]["updateDate"] = "2026-03-28"
         bill_list["pagination"]["next"] = ""
 
-        seed_url = "https://api.congress.gov/v3/bill?format=json&limit=250&fromDateTime=2026-03-28T18%3A00%3A00Z"
+        seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-03-28T18%3A00%3A00Z&limit=250"
         detail_url = canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml")
         detail_payload = _load("example_billdetail.md")
         detail_payload["bill"]["actions"]["url"] = ""
@@ -528,6 +579,58 @@ class CrawlerTests(unittest.TestCase):
         crawler.run(CrawlOptions(mode="full", max_pages=1, page_size=25))
 
         self.assertEqual(client.calls, ["https://api.congress.gov/v3/bill?format=json&limit=25"])
+
+    def test_page_size_overrides_limit_in_explicit_seed_path(self) -> None:
+        cosponsor_list = {
+            "cosponsors": [],
+            "pagination": {"count": 0, "next": "", "prev": ""},
+            "request": {"format": "json"},
+        }
+        expected_url = (
+            "https://api.congress.gov/v3/bill/117/hr/1/cosponsors"
+            "?format=json&limit=25"
+        )
+        client = FakeClient({expected_url: cosponsor_list})
+        store = FakeStore()
+        crawler = SpecCrawler(
+            base_url="https://api.congress.gov/v3",
+            spec=self.spec,
+            client=client,
+            store=store,
+        )
+
+        crawler.run(
+            CrawlOptions(
+                mode="refresh",
+                seed_path="/bill/117/hr/1/cosponsors?format=json&limit=250",
+                seed_node_type="bill_cosponsors",
+                max_pages=1,
+                page_size=25,
+            )
+        )
+
+        self.assertEqual(client.calls, [expected_url])
+
+    def test_page_size_override_preserves_govinfo_next_page_cursor(self) -> None:
+        spec = load_spec(PROJECT_ROOT / "specs" / "govinfo-congressional-directories.yaml")
+        crawler = SpecCrawler(
+            base_url="https://api.govinfo.gov",
+            spec=spec,
+            client=FakeClient({}),
+            store=FakeStore(),
+        )
+        node = spec.nodes["govinfo_congressional_directory_package_list"]
+
+        augmented = crawler._augment_url(
+            "https://api.govinfo.gov/collections/CDIR/1900-01-01/2026-08-31"
+            "?offsetMark=next-cursor&pageSize=100",
+            node,
+            CrawlOptions(mode="full", page_size=25),
+        )
+
+        self.assertIn("offsetMark=next-cursor", augmented)
+        self.assertIn("pageSize=25", augmented)
+        self.assertNotIn("offsetMark=%2A", augmented)
 
     def test_refresh_descendants_uses_stored_bill_details_as_roots(self) -> None:
         bill_detail = _load("example_billdetail.md")
@@ -686,6 +789,16 @@ class CrawlerTests(unittest.TestCase):
         self.assertEqual(fetch["rate_limit_attempts"], 1)
         self.assertEqual(fetch["api_key_name"], "alpha")
         self.assertEqual(fetch["pool_allocation"], {"endpoint_name": "bills", "selected_key_name": "alpha"})
+        self.assertIn(
+            {
+                "crawl_run_id": "run-1",
+                "endpoint_url": seed_url,
+                "parent_endpoint_url": None,
+                "node_type": "bill_list",
+                "follow_mode": "recurse",
+            },
+            store.expected_fetches,
+        )
 
 
 if __name__ == "__main__":
@@ -693,8 +806,41 @@ if __name__ == "__main__":
 
 
 class AsyncCrawlerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_page_size_override_preserves_govinfo_next_page_cursor(self) -> None:
+        spec = load_spec(PROJECT_ROOT / "specs" / "govinfo-congressional-directories.yaml")
+        crawler = AsyncSpecCrawler(
+            base_url="https://api.govinfo.gov",
+            spec=spec,
+            client=AsyncFakeClient({}),
+            store=AsyncFakeStore(),
+        )
+        node = spec.nodes["govinfo_congressional_directory_package_list"]
+
+        augmented = crawler._augment_url(
+            "https://api.govinfo.gov/collections/CDIR/1900-01-01/2026-08-31"
+            "?offsetMark=next-cursor&pageSize=100",
+            node,
+            CrawlOptions(mode="full", page_size=25),
+        )
+
+        self.assertIn("offsetMark=next-cursor", augmented)
+        self.assertIn("pageSize=25", augmented)
+        self.assertNotIn("offsetMark=%2A", augmented)
+
     def setUp(self) -> None:
         self.spec = load_spec(PROJECT_ROOT / "specs" / "bills.yaml")
+
+    async def test_partition_required_seed_rejects_bare_law_route(self) -> None:
+        spec = load_spec(PROJECT_ROOT / "specs" / "laws.yaml")
+        crawler = AsyncSpecCrawler(
+            base_url="https://api.congress.gov/v3",
+            spec=spec,
+            client=AsyncFakeClient({}),
+            store=AsyncFakeStore(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires an explicit partitioned seed path"):
+            await crawler.run(CrawlOptions(mode="full"))
 
     async def test_async_recursive_crawl_only_follows_collection_urls(self) -> None:
         bill_list = _load("example_bill.md")
@@ -791,6 +937,39 @@ class AsyncCrawlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failed_request["http_status"], 500)
         failed_fetch = next(fetch for fetch in store.fetch_events if fetch["endpoint_url"] == text_url)
         self.assertEqual(failed_fetch["outcome"], "failed")
+
+    async def test_async_incremental_does_not_rewalk_unchanged_detail_children(self) -> None:
+        bill_list = _load("example_bill.md")
+        bill_detail = _load("example_billdetail.md")
+        bill_list["pagination"]["next"] = ""
+        seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-01T00%3A00%3A00Z&limit=250"
+        detail_url = canonicalize_congress_api_url(
+            "http://api.congress.gov/v3/bill/119/s/3281?format=xml"
+        )
+        client = AsyncFakeClient({seed_url: bill_list, detail_url: bill_detail})
+        store = AsyncFakeStore()
+        store.raw_by_url[detail_url] = {
+            "raw_id": "raw-existing-detail",
+            "endpoint_url": detail_url,
+            "response": bill_detail,
+        }
+        crawler = AsyncSpecCrawler(
+            base_url="https://api.congress.gov/v3",
+            spec=self.spec,
+            client=client,
+            store=store,
+            concurrency=3,
+        )
+
+        await crawler.run(
+            CrawlOptions(
+                mode="incremental",
+                from_datetime="2026-01-01T00:00:00Z",
+                max_pages=1,
+            )
+        )
+
+        self.assertEqual(client.calls, [seed_url, detail_url])
 
     async def test_async_crawler_fetches_sibling_families_concurrently_with_cap(self) -> None:
         bill_list = {"bills": [{"url": "https://api.congress.gov/v3/bill/119/hr/1?format=json"}], "pagination": {"count": 1, "next": "", "prev": ""}, "request": {"format": "json"}}

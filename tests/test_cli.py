@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from bicam_collection.config import Settings
 from bicam_collection.spec_loader import discover_spec_categories, resolve_spec_path
+from bicam_collection.target_scope import TARGET_CONGRESS_CATEGORIES
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -48,16 +49,30 @@ class CliTests(unittest.TestCase):
             [
                 "amendments",
                 "bills",
+                "bound-congressional-record",
                 "committee-meetings",
                 "committee-prints",
                 "committee-reports",
                 "committees",
                 "congresses",
+                "congressional-record",
+                "crs-reports",
+                "daily-congressional-record",
                 "govinfo-bills",
+                "govinfo-committee-prints",
                 "govinfo-committee-reports",
+                "govinfo-congressional-directories",
+                "govinfo-hearings",
+                "govinfo-treaty-documents",
                 "hearings",
+                "house-communications",
+                "house-requirements",
+                "house-votes",
+                "laws",
                 "members",
                 "nominations",
+                "senate-communications",
+                "summaries",
                 "treaties",
             ],
         )
@@ -101,12 +116,12 @@ class CliTests(unittest.TestCase):
         with self.assertRaisesRegex(FileNotFoundError, "Spec not found for category 'communications'"):
             resolve_spec_path(PROJECT_ROOT / "specs", "communications")
 
-    def test_sample_parse_args_defaults_to_all_categories_and_bounded_pages(self) -> None:
+    def test_sample_parse_args_defaults_to_target_categories_and_bounded_pages(self) -> None:
         run_sample_crawl = _load_run_sample_crawl_module()
 
         args = run_sample_crawl.parse_args([], project_root=PROJECT_ROOT)
 
-        self.assertEqual(args.categories, discover_spec_categories(PROJECT_ROOT / "specs"))
+        self.assertEqual(args.categories, list(TARGET_CONGRESS_CATEGORIES))
         self.assertEqual(args.max_pages, 3)
         self.assertEqual(args.page_size, 25)
         self.assertFalse(args.use_async)
@@ -176,17 +191,28 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(args.category_workers, 4)
 
-    def test_multi_parse_args_defaults_to_all_categories_without_sample_limits(self) -> None:
+    def test_multi_parse_args_defaults_to_target_categories_without_sample_limits(self) -> None:
         run_multi_crawl = _load_run_multi_crawl_module()
 
         args = run_multi_crawl.parse_args([], project_root=PROJECT_ROOT)
 
-        self.assertEqual(args.categories, discover_spec_categories(PROJECT_ROOT / "specs"))
+        self.assertEqual(args.categories, list(TARGET_CONGRESS_CATEGORIES))
         self.assertIsNone(args.max_pages)
         self.assertIsNone(args.page_size)
         self.assertEqual(args.concurrency, 5)
         self.assertEqual(args.category_workers, 2)
+        self.assertEqual(args.overlap_hours, 0.0)
         self.assertEqual(args.cleanup_stale_hours, 1.0)
+
+    def test_multi_parse_args_supports_incremental_overlap(self) -> None:
+        run_multi_crawl = _load_run_multi_crawl_module()
+
+        args = run_multi_crawl.parse_args(
+            ["--mode", "incremental", "--overlap-hours", "24"],
+            project_root=PROJECT_ROOT,
+        )
+
+        self.assertEqual(args.overlap_hours, 24.0)
 
     def test_multi_main_dispatches_to_async_runner(self) -> None:
         run_multi_crawl = _load_run_multi_crawl_module()
