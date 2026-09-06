@@ -117,9 +117,25 @@ services:
       - |
         set -euo pipefail
         mkdir -p /backups
+        # A crash can leave only a partial archive.  Partial files are never
+        # published as backups, so discard stale remnants before starting.
+        find /backups -type f -name '*.dump.partial' -delete
         while true; do
           ts=$$(date -u +%Y%m%dT%H%M%SZ)
-          pg_dump --format=custom --file="/backups/$${PGDATABASE}_$${ts}.dump" "$${PGDATABASE}"
+          tmp="/backups/.$${PGDATABASE}_$${ts}.dump.partial"
+          final="/backups/$${PGDATABASE}_$${ts}.dump"
+          rm -f "$${tmp}"
+          if ! pg_dump --format=custom --file="$${tmp}" "$${PGDATABASE}"; then
+            rm -f "$${tmp}"
+            echo "pg_dump failed for $${PGDATABASE} at $${ts}" >&2
+            exit 1
+          fi
+          if ! pg_restore --list "$${tmp}" >/dev/null; then
+            rm -f "$${tmp}"
+            echo "backup archive validation failed for $${PGDATABASE} at $${ts}" >&2
+            exit 1
+          fi
+          mv -- "$${tmp}" "$${final}"
           find /backups -type f -name '*.dump' -mtime +"$${BACKUP_RETENTION_DAYS}" -delete
           sleep "$${BACKUP_INTERVAL_SECONDS}"
         done

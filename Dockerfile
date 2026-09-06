@@ -25,6 +25,7 @@ COPY --from=rotisserie / /opt/rotisserie
 COPY pyproject.toml uv.lock README.md /opt/bicam-collection/
 COPY src /opt/bicam-collection/src
 COPY scripts /opt/bicam-collection/scripts
+COPY migrations /opt/bicam-collection/migrations
 COPY specs /opt/bicam-collection/specs
 COPY dbt_project /opt/bicam-collection/dbt_project
 COPY api_schemas /opt/bicam-collection/api_schemas

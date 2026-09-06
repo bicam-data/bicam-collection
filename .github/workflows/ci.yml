@@ -40,6 +40,10 @@ jobs:
         with:
           repository: ryandelano/rotisserie
           path: rotisserie
+          # Keep the editable path dependency reproducible. Update this SHA
+          # only after the corresponding Rotisserie revision is published and
+          # its benchmark result has been reviewed.
+          ref: 6666ed90affaf9dbe5036dc3bfeb2cd529c4ba80
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
         working-directory: bicam-collection
@@ -47,9 +51,128 @@ jobs:
         working-directory: bicam-collection
       - run: uv run python scripts/validate_contracts.py
         working-directory: bicam-collection
+      - run: uv run ruff check src scripts tests
+        working-directory: bicam-collection
+      - run: uv run python scripts/benchmark_async_crawl.py --children 32 --concurrency 4 --delay-ms 20
+        working-directory: bicam-collection
       - run: uv run python scripts/load_ci_fixtures.py
         working-directory: bicam-collection
-      - run: uv run python -m unittest discover -s tests -v
+      - run: uv run pytest -q
         working-directory: bicam-collection
-      - run: uv run dbt build --project-dir dbt_project --select +fct_bill_matches +fct_committee_report_matches +fct_reconciliation_metrics --no-partial-parse
+      - run: uv run dbt parse --project-dir dbt_project --no-partial-parse
         working-directory: bicam-collection
+      # Build the complete public dependency graph in the disposable database.
+      # Seeds are part of that graph: several reconciliation models consume
+      # reviewed override/threshold tables, so omitting them makes a graph
+      # build fail for missing relations rather than exercising model SQL.
+      - run: uv run dbt seed --project-dir dbt_project --full-refresh --no-partial-parse
+        working-directory: bicam-collection
+      # Build the public BICAM graph plus the reconciliation/bridge ancestors
+      # required by the fixture assertions below.  The BICAM schema alone does
+      # not materialize public.fct_reconciliation_metrics or
+      # public.bridge_committees__bills.
+      - run: uv run dbt run --project-dir dbt_project --select '+path:models/marts/bicam' '+fct_reconciliation_metrics' '+fct_congress_internal_reciprocity_metrics' '+fct_root_detail_coverage' '+fct_collection_coverage' '+fct_source_gap_queue' '+bridge_committees__bills' --no-partial-parse
+        working-directory: bicam-collection
+      - run: uv run dbt run --project-dir dbt_project --select +staging --no-partial-parse
+        working-directory: bicam-collection
+      # Exercise the title-selection window on a bounded 300k-row synthetic
+      # workload. The script uses temporary tables only and fails if execution
+      # exceeds the documented isolated-DB threshold.
+      - run: uv run python scripts/benchmark_title_selection.py --bill-count 100000 --observations-per-bill 3 --threshold-ms 5000
+        working-directory: bicam-collection
+      # These assertions are deliberately fixture-safe. Source-coverage and
+      # reviewed-exception gates require the full frozen input and run in the
+      # release workflow; the row-level contract validator below still checks
+      # every relation in this disposable product graph.
+      - run: uv run dbt test --project-dir dbt_project --select incremental_child_windows_are_accumulated complete_empty_child_generation_retires_prior_rows child_selection_normalizes_transport_params child_selection_versions_are_source_backed int_congress_child_response_selections non_paginated_child_arrays_are_complete amendment_cosponsor_query_order_collapses_collection amendment_cosponsors_have_one_current_observation bill_subject_summary_observations_retain_lineage bill_title_observations_retain_lineage bill_action_observations_retain_lineage amendment_action_observations_retain_lineage bill_amendment_observations_retain_lineage bill_committee_observations_retain_lineage committee_bill_observations_retain_lineage committee_report_observations_retain_lineage treaty_action_observations_retain_lineage treaty_committee_observations_retain_lineage committee_communication_observations_retain_lineage committee_nomination_observations_retain_lineage nominee_observations_retain_lineage nomination_action_observations_retain_lineage nomination_hearing_observations_retain_lineage nomination_committee_activity_observations_retain_lineage amendment_amendment_observations_retain_lineage raw_child_parent_lineage_is_unique bill_text_parent_lineage_propagates committee_report_text_formats_preserve_delta_renditions committee_print_text_formats_are_preserved committee_print_direct_renditions_are_preserved amendment_text_formats_preserve_source_positions bills_action_keys_are_preserved amendment_action_keys_are_preserved amendment_action_committee_keys_are_preserved amendment_amendments_to_amendment_keys_are_preserved member_bills_keys_are_preserved member_amendments_keys_are_preserved bills_amendment_keys_are_preserved bills_committee_keys_are_preserved committees_bill_keys_are_preserved committee_reports_keys_are_preserved committee_nominations_keys_are_preserved committee_communications_keys_are_preserved nominations_action_keys_are_preserved nominations_action_committee_keys_are_preserved nominations_hearing_keys_are_preserved nominations_committee_activity_keys_are_preserved nominations_nominees_have_no_repeated_public_rows nominations_nominees_preserve_duplicate_ordinals nominations_nominees_preserve_source_observations nomination_nominee_details_keys_are_preserved treaty_committee_keys_are_preserved treaty_committee_activity_keys_are_preserved treaty_action_keys_are_preserved amendment_text_versions_are_preserved amendment_html_extraction_excludes_congressional_record bills_recorded_vote_keys_are_preserved amendments_recorded_vote_keys_are_preserved bills_action_committee_keys_are_preserved bills_related_bill_keys_are_preserved reconciliation_missing_thresholds_never_pass reconciliation_unexcused_records_never_pass reconciliation_title_corroboration_meets_threshold committee_report_missing_congress_has_probe_endpoint congress_internal_union_preserves_edge_directions congress_internal_reciprocity_has_no_duplicate_edges congress_internal_reciprocity_status_is_consistent congress_internal_reciprocity_metrics_are_fail_closed member_legislation_bridge_preserves_union committee_bill_bridge_preserves_union --no-partial-parse
+        working-directory: bicam-collection
+      - run: uv run dbt test --project-dir dbt_project --select committee_report_congress_union_includes_bill_side --no-partial-parse
+        working-directory: bicam-collection
+      - run: uv run dbt test --project-dir dbt_project --select committee_reports_public_union_preserves_bill_side --no-partial-parse
+        working-directory: bicam-collection
+      - run: uv run dbt test --project-dir dbt_project --select committee_report_candidates_one_per_canonical --no-partial-parse
+        working-directory: bicam-collection
+      - run: uv run python scripts/validate_bicam_product.py --schema bicam --include-supplemental --check-data
+        working-directory: bicam-collection
+      - run: uv run dbt test --project-dir dbt_project --select child_state_gaps_are_actionable --no-partial-parse
+        working-directory: bicam-collection
+      - run: uv run python scripts/export_research_snapshot.py --dry-run --tables bills committee_reports
+        working-directory: bicam-collection
+      # Exercise the real candidate lifecycle in CI, but keep the candidate
+      # and its temporary latest pointer inside the runner's disposable
+      # directory. Production promotion remains a separate authorized step.
+      - name: Export complete disposable candidate
+        working-directory: bicam-collection
+        run: |
+          set -euo pipefail
+          export BICAM_CI_EXPORT_DIR="$RUNNER_TEMP/bicam-exports"
+          rm -rf "$BICAM_CI_EXPORT_DIR"
+          mkdir -p "$BICAM_CI_EXPORT_DIR"
+          uv run python scripts/export_research_snapshot.py \
+            --output-dir "$BICAM_CI_EXPORT_DIR" \
+            --include-supplemental
+          manifest="$(find "$BICAM_CI_EXPORT_DIR" -mindepth 2 -maxdepth 2 -name manifest.json -type f -print -quit)"
+          test -n "$manifest"
+          echo "BICAM_CI_EXPORT_DIR=$BICAM_CI_EXPORT_DIR" >> "$GITHUB_ENV"
+          echo "BICAM_CI_MANIFEST=$manifest" >> "$GITHUB_ENV"
+      - name: Validate and promote disposable candidate
+        working-directory: bicam-collection
+        run: |
+          set -euo pipefail
+          uv run python scripts/promote_research_snapshot.py \
+            --candidate "$BICAM_CI_MANIFEST" \
+            --output-dir "$BICAM_CI_EXPORT_DIR" \
+            --include-supplemental \
+            --dry-run
+          uv run python scripts/promote_research_snapshot.py \
+            --candidate "$BICAM_CI_MANIFEST" \
+            --output-dir "$BICAM_CI_EXPORT_DIR" \
+            --include-supplemental
+          test -L "$BICAM_CI_EXPORT_DIR/latest"
+          test "$(readlink "$BICAM_CI_EXPORT_DIR/latest")" = "$(basename "$(dirname "$BICAM_CI_MANIFEST")")"
+      - name: Compare exact disposable candidate
+        working-directory: bicam-collection
+        run: |
+          set -euo pipefail
+          uv run python scripts/compare_release_candidates.py \
+            --before "$BICAM_CI_MANIFEST" \
+            --after "$BICAM_CI_MANIFEST" \
+            --format json \
+            --output "$BICAM_CI_EXPORT_DIR/self-comparison.json" >/dev/null
+          uv run python - "$BICAM_CI_EXPORT_DIR/self-comparison.json" <<'PY'
+          import json
+          import sys
+          report = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          assert report["inventory"]["exact"] is True
+          assert all(table["diff"]["added_rows"] == 0 for table in report["tables"])
+          assert all(table["diff"]["removed_rows"] == 0 for table in report["tables"])
+          assert all(table["diff"]["changed_keys"] == 0 for table in report["tables"])
+          PY
+      - name: Reject drifted disposable candidate
+        working-directory: bicam-collection
+        run: |
+          set -euo pipefail
+          candidate_dir="$(dirname "$BICAM_CI_MANIFEST")"
+          bad_dir="$BICAM_CI_EXPORT_DIR/invalid-candidate"
+          cp -a "$candidate_dir" "$bad_dir"
+          python - "$bad_dir/manifest.json" <<'PY'
+          import json
+          import sys
+          path = sys.argv[1]
+          manifest = json.loads(open(path, encoding="utf-8").read())
+          manifest["snapshot_directory"] = "invalid-candidate"
+          manifest["tables"][0]["sha256"] = "0" * 64
+          with open(path, "w", encoding="utf-8") as stream:
+              json.dump(manifest, stream, indent=2, sort_keys=True)
+              stream.write("\n")
+          PY
+          accepted="$(readlink "$BICAM_CI_EXPORT_DIR/latest")"
+          if uv run python scripts/promote_research_snapshot.py \
+            --candidate "$bad_dir/manifest.json" \
+            --output-dir "$BICAM_CI_EXPORT_DIR" \
+            --include-supplemental \
+            --dry-run; then
+            echo "drifted candidate unexpectedly validated" >&2
+            exit 1
+          fi
+          test "$(readlink "$BICAM_CI_EXPORT_DIR/latest")" = "$accepted"
