@@ -10,6 +10,7 @@ from uuid import UUID
 
 import psycopg
 
+from bicam_collection.client import fetch_metadata_values
 from bicam_collection.config import Settings
 from bicam_collection.runtime import build_client
 from bicam_collection.spec_loader import load_spec
@@ -104,17 +105,6 @@ def load_bill_texts(
     ]
 
 
-def _metadata_values(metadata: Any) -> dict[str, Any]:
-    return {
-        "status_code": getattr(metadata, "status_code", None),
-        "duration_ms": getattr(metadata, "duration_ms", None),
-        "attempt_count": getattr(metadata, "attempt_count", None),
-        "rate_limit_attempts": getattr(metadata, "rate_limit_attempts", None),
-        "api_key_name": getattr(metadata, "api_key_name", None),
-        "pool_allocation": getattr(metadata, "pool_allocation", None),
-    }
-
-
 async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple[int, int]:
     settings = Settings.from_env(project_root)
     bill_texts = load_bill_texts(
@@ -147,7 +137,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                     endpoint_name="congress-bill-text-targeted-backfill",
                     endpoint_priority=3,
                 )
-            metadata = _metadata_values(result.metadata)
+            metadata = fetch_metadata_values(result.metadata)
             response_ref = await store.upsert_response(
                 endpoint_url=endpoint_url,
                 source="congress",
@@ -178,7 +168,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                 succeeded += 1
         except Exception as exc:
             response = getattr(exc, "response", None)
-            metadata = _metadata_values(getattr(exc, "fetch_metadata", None))
+            metadata = fetch_metadata_values(getattr(exc, "fetch_metadata", None))
             duration_ms = metadata["duration_ms"]
             if duration_ms is None:
                 duration_ms = round((time.perf_counter() - started_at) * 1000)

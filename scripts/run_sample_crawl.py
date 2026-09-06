@@ -10,6 +10,7 @@ import time
 
 from bicam_collection.config import Settings
 from bicam_collection.spec_loader import discover_spec_categories
+from bicam_collection.target_scope import TARGET_CONGRESS_CATEGORIES
 
 
 def _load_run_crawl_main():
@@ -28,8 +29,11 @@ run_single_crawl_main = _load_run_crawl_main()
 def parse_args(argv: list[str] | None = None, *, project_root: Path | None = None) -> argparse.Namespace:
     resolved_project_root = project_root or Path(__file__).resolve().parents[1]
     available_categories = discover_spec_categories(resolved_project_root / "specs")
+    default_categories = [
+        category for category in TARGET_CONGRESS_CATEGORIES if category in available_categories
+    ]
     parser = argparse.ArgumentParser(description="Run a bounded multi-category Congress.gov crawl sample")
-    parser.add_argument("--categories", nargs="*", choices=available_categories, default=available_categories)
+    parser.add_argument("--categories", nargs="*", choices=available_categories, default=default_categories)
     parser.add_argument("--mode", default="full", choices=["full", "incremental", "refresh", "resume", "refresh_descendants"])
     parser.add_argument("--max-pages", type=int, default=3)
     parser.add_argument("--batch-size", type=int)

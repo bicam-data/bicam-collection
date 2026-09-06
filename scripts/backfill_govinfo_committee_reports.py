@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
+import math
 from pathlib import Path
 import time
 from typing import Any
 
 import psycopg
 
+from bicam_collection.client import fetch_metadata_values
 from bicam_collection.config import Settings
 from bicam_collection.runtime import build_client
 from bicam_collection.spec_loader import load_spec
@@ -53,12 +55,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Fetch granule details only for existing packages whose Congress.gov reports remain unmatched.",
     )
     parser.add_argument("--refresh", action="store_true", help="Refetch packages already stored locally.")
+    parser.add_argument(
+        "--retry-404-after-hours",
+        type=float,
+        default=168.0,
+        help="Re-probe a prior GovInfo 404 after this many hours (default: 168).",
+    )
     return parser.parse_args(argv)
 
 
 def load_report_sets(
-    *, database_url: str, congresses: list[int] | None, limit: int, refresh: bool
+    *,
+    database_url: str,
+    congresses: list[int] | None,
+    limit: int,
+    refresh: bool,
+    retry_404_after_hours: float = 168.0,
 ) -> list[ReportSet]:
+    if not math.isfinite(retry_404_after_hours) or retry_404_after_hours <= 0:
+        raise ValueError("retry_404_after_hours must be positive")
     congress_filter = ""
     params: list[Any] = []
     if congresses:
@@ -67,7 +82,7 @@ def load_report_sets(
     params.append(max(1, limit))
     existing_filter = ""
     if not refresh:
-        existing_filter = """
+        existing_filter = f"""
         where not exists (
             select 1
             from raw_responses as existing
@@ -77,6 +92,20 @@ def load_report_sets(
                 || report_sets.report_type
                 || report_sets.report_number::text
                 || '/summary'
+        )
+        and not exists (
+            select 1
+            from failed_requests as prior_failure
+            where prior_failure.endpoint_url =
+                'https://api.govinfo.gov/packages/CRPT-'
+                || report_sets.congress::text
+                || report_sets.report_type
+                || report_sets.report_number::text
+                || '/summary'
+              and prior_failure.category = 'govinfo-committee-reports'
+              and prior_failure.node_type = 'govinfo_committee_report_package_detail'
+              and prior_failure.http_status = 404
+              and prior_failure.failed_at >= now() - interval '{retry_404_after_hours:.6f} hours'
         )
         """
     query = f"""
@@ -146,17 +175,6 @@ def load_existing_granule_detail_urls(*, database_url: str) -> set[str]:
         return {row[0] for row in conn.execute(query, (CATEGORY,)).fetchall()}
 
 
-def _metadata_values(metadata: Any) -> dict[str, Any]:
-    return {
-        "status_code": getattr(metadata, "status_code", None),
-        "duration_ms": getattr(metadata, "duration_ms", None),
-        "attempt_count": getattr(metadata, "attempt_count", None),
-        "rate_limit_attempts": getattr(metadata, "rate_limit_attempts", None),
-        "api_key_name": getattr(metadata, "api_key_name", None),
-        "pool_allocation": getattr(metadata, "pool_allocation", None),
-    }
-
-
 async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple[int, int]:
     settings = Settings.from_env(project_root)
     if args.granules_for_unmatched:
@@ -166,6 +184,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
         congresses=args.congress,
         limit=args.limit,
         refresh=args.refresh,
+        retry_404_after_hours=args.retry_404_after_hours,
     )
     if not report_sets:
         print("no report packages need backfill")
@@ -191,7 +210,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                     endpoint_name="govinfo-committee-report-targeted-backfill",
                     endpoint_priority=3,
                 )
-            metadata = _metadata_values(result.metadata)
+            metadata = fetch_metadata_values(result.metadata)
             response_ref = await store.upsert_response(
                 endpoint_url=endpoint_url,
                 source="govinfo",
@@ -222,7 +241,7 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
                 succeeded += 1
         except Exception as exc:
             response = getattr(exc, "response", None)
-            metadata = _metadata_values(getattr(exc, "fetch_metadata", None))
+            metadata = fetch_metadata_values(getattr(exc, "fetch_metadata", None))
             duration_ms = metadata["duration_ms"]
             if duration_ms is None:
                 duration_ms = round((time.perf_counter() - started_at) * 1000)
@@ -278,7 +297,7 @@ async def run_unmatched_granule_backfill(args: argparse.Namespace, *, settings: 
         try:
             async with semaphore:
                 result = await client.get_json(endpoint_url, endpoint_name="govinfo-committee-report-targeted-granule-backfill", endpoint_priority=3)
-            metadata = _metadata_values(result.metadata)
+            metadata = fetch_metadata_values(result.metadata)
             response_ref = await store.upsert_response(endpoint_url=endpoint_url, source="govinfo", category=CATEGORY, node_type=node_type, parent_id=None, response=result.payload, latest_crawl_run_id=run_id)
             await store.record_fetch(crawl_run_id=run_id, endpoint_url=endpoint_url, raw_response_id=response_ref.raw_response_id, raw_response_version_id=response_ref.raw_response_version_id, parent_endpoint_url=parent_endpoint_url, node_type=node_type, follow_mode="targeted", http_status=metadata["status_code"], outcome="fetched", duration_ms=metadata["duration_ms"], attempt_count=metadata["attempt_count"], rate_limit_attempts=metadata["rate_limit_attempts"], api_key_name=metadata["api_key_name"], pool_allocation=metadata["pool_allocation"])
             async with counter_lock:
@@ -286,7 +305,7 @@ async def run_unmatched_granule_backfill(args: argparse.Namespace, *, settings: 
             return result.payload
         except Exception as exc:
             response = getattr(exc, "response", None)
-            metadata = _metadata_values(getattr(exc, "fetch_metadata", None))
+            metadata = fetch_metadata_values(getattr(exc, "fetch_metadata", None))
             duration_ms = metadata["duration_ms"] or round((time.perf_counter() - started_at) * 1000)
             await store.record_failed_request(crawl_run_id=run_id, category=CATEGORY, node_type=node_type, endpoint_url=endpoint_url, parent_endpoint_url=parent_endpoint_url, http_status=getattr(response, "status_code", metadata["status_code"]), error=str(exc), duration_ms=duration_ms, attempt_count=metadata["attempt_count"], rate_limit_attempts=metadata["rate_limit_attempts"], api_key_name=metadata["api_key_name"], pool_allocation=metadata["pool_allocation"])
             async with counter_lock:
@@ -317,6 +336,8 @@ async def run_unmatched_granule_backfill(args: argparse.Namespace, *, settings: 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not math.isfinite(args.retry_404_after_hours) or args.retry_404_after_hours <= 0:
+        raise SystemExit("retry-404-after-hours must be positive")
     asyncio.run(run_backfill(args, project_root=Path(__file__).resolve().parents[1]))
     return 0
 

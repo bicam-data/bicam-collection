@@ -15,8 +15,7 @@ from tqdm import tqdm
 
 
 class TqdmProgressReporter:
-    def __init__(self, *, category: str, verbose: bool = False, log_every: int = 100) -> None:
-        self._category = category
+    def __init__(self, *, verbose: bool = False, log_every: int = 100) -> None:
         self._verbose = verbose
         self._log_every = log_every
         self._bar: tqdm[Any] | None = None
@@ -187,11 +186,31 @@ def parse_args(argv: list[str] | None = None, *, project_root: Path | None = Non
     parser.add_argument("--mode", required=True, choices=["full", "incremental", "refresh", "resume", "refresh_descendants", "backfill_descendants"])
     parser.add_argument("--from-datetime")
     parser.add_argument("--to-datetime")
+    parser.add_argument(
+        "--seed-path",
+        help="Override the spec seed path for a bounded retry or targeted partition (for example, /bill/21/s/165).",
+    )
+    parser.add_argument(
+        "--seed-node-type",
+        help="Node type for --seed-path when targeting a non-list resource (for example, bill_detail).",
+    )
     parser.add_argument("--max-pages", type=int)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--page-size", type=int)
     parser.add_argument("--async", dest="use_async", action="store_true")
     parser.add_argument("--concurrency", type=int, default=5)
+    parser.add_argument(
+        "--key-wait-timeout",
+        type=float,
+        default=120.0,
+        help="Maximum seconds to wait for a rate-limited API key before failing a request.",
+    )
+    parser.add_argument(
+        "--request-interval",
+        type=float,
+        default=0.1,
+        help="Minimum seconds between requests from this client.",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 
@@ -200,9 +219,15 @@ async def _run_async_crawl(args: argparse.Namespace, *, project_root: Path) -> s
     spec_path = resolve_spec_path(project_root / "specs", args.category)
     settings = Settings.from_env(project_root)
     spec = load_spec(spec_path)
-    client = build_client(spec=spec, env_path=settings.env_path, use_async=True)
+    client = build_client(
+        spec=spec,
+        env_path=settings.env_path,
+        use_async=True,
+        key_wait_timeout=args.key_wait_timeout,
+        request_interval=args.request_interval,
+    )
     store = AsyncPostgresStore(settings.database_url)
-    reporter = TqdmProgressReporter(category=spec.category, verbose=args.verbose)
+    reporter = TqdmProgressReporter(verbose=args.verbose)
     crawler = AsyncSpecCrawler(
         base_url=base_url_for_spec(settings, spec),
         spec=spec,
@@ -217,6 +242,8 @@ async def _run_async_crawl(args: argparse.Namespace, *, project_root: Path) -> s
                 mode=args.mode,
                 from_datetime=args.from_datetime,
                 to_datetime=args.to_datetime,
+                seed_path=args.seed_path,
+                seed_node_type=args.seed_node_type,
                 max_pages=args.max_pages,
                 batch_size=args.batch_size,
                 page_size=args.page_size,
@@ -239,9 +266,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     settings = Settings.from_env(project_root)
     spec = load_spec(spec_path)
-    client = build_client(spec=spec, env_path=settings.env_path, use_async=False)
+    client = build_client(
+        spec=spec,
+        env_path=settings.env_path,
+        use_async=False,
+        key_wait_timeout=args.key_wait_timeout,
+        request_interval=args.request_interval,
+    )
     store = PostgresStore(settings.database_url)
-    reporter = TqdmProgressReporter(category=spec.category, verbose=args.verbose)
+    reporter = TqdmProgressReporter(verbose=args.verbose)
     crawler = SpecCrawler(
         base_url=base_url_for_spec(settings, spec),
         spec=spec,
@@ -254,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode,
             from_datetime=args.from_datetime,
             to_datetime=args.to_datetime,
+            seed_path=args.seed_path,
+            seed_node_type=args.seed_node_type,
             max_pages=args.max_pages,
             batch_size=args.batch_size,
             page_size=args.page_size,
