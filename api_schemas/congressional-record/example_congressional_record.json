@@ -1,0 +1,40 @@
+{
+  "Results": {
+    "IndexStart": 1,
+    "SetSize": 1,
+    "TotalCount": 1,
+    "Issues": [
+    {
+      "Congress": "117",
+      "Id": 26958,
+      "Issue": "109",
+      "Links": {
+        "Digest": {
+          "Label": "Daily Digest",
+          "Ordinal": 1,
+          "PDF": [
+            {
+              "Part": "1",
+              "Url": "https://www.congress.gov/117/crec/2022/06/28/168/109/CREC-2022-06-28-dailydigest.pdf"
+            }
+          ]
+        },
+        "FullRecord": {
+          "Label": "Entire Issue",
+          "Ordinal": 5,
+          "PDF": [
+            {
+              "Part": "1",
+              "Url": "https://www.congress.gov/117/crec/2022/06/28/168/109/CREC-2022-06-28.pdf"
+            }
+          ]
+        }
+      },
+      "PublishDate": "2022-06-28",
+      "Session": "2",
+      "Volume": "168"
+    }
+    ]
+  },
+  "Status": {"Code": 200}
+}

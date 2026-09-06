@@ -1,0 +1,16 @@
+{
+  "houseCommunications": [
+    {
+      "chamber": "House",
+      "communicationType": {"code": "EC", "name": "Executive Communication"},
+      "congressNumber": 119,
+      "number": "3324",
+      "updateDate": "2025-11-21",
+      "url": "https://api.congress.gov/v3/house-communication/119/ec/3324?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/house-communication/119?offset=1&limit=1&format=json"
+  }
+}

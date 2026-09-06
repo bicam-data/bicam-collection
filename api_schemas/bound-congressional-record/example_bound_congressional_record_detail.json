@@ -1,0 +1,29 @@
+{
+  "boundCongressionalRecord": [
+    {
+      "congress": 101,
+      "date": "1990-05-01",
+      "sessionNumber": 2,
+      "updateDate": "2020-10-20",
+      "url": "https://api.congress.gov/v3/bound-congressional-record/1990/5/1?format=json",
+      "volumeNumber": 136,
+      "dailyDigest": {
+        "endPage": "D523",
+        "startPage": "D501",
+        "text": [
+          {
+            "type": "PDF",
+            "url": "https://www.congress.gov/101/crec/1990/05/01/daily.pdf"
+          }
+        ]
+      },
+      "sections": [
+        {
+          "endPage": "S7200",
+          "name": "Senate",
+          "startPage": "S7100"
+        }
+      ]
+    }
+  ]
+}

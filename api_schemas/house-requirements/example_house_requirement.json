@@ -1,0 +1,13 @@
+{
+  "houseRequirements": [
+    {
+      "number": 8070,
+      "updateDate": "2025-11-21",
+      "url": "https://api.congress.gov/v3/house-requirement/8070?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/house-requirement?offset=1&limit=1&format=json"
+  }
+}

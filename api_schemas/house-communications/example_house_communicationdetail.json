@@ -1,0 +1,28 @@
+{
+  "houseCommunication": {
+    "abstract": "A letter from the Director, Regulatory Management Division, transmitting an agency report.",
+    "chamber": "House",
+    "committees": [
+      {
+        "name": "Energy and Commerce Committee",
+        "referralDate": "2025-11-21",
+        "systemCode": "hsif00",
+        "url": "https://api.congress.gov/v3/committee/house/hsif00?format=json"
+      }
+    ],
+    "communicationType": {"code": "EC", "name": "Executive Communication"},
+    "congress": 119,
+    "congressionalRecordDate": "2025-11-21",
+    "isRulemaking": "True",
+    "legalAuthority": "5 U.S.C. 801(a)(1)(A)",
+    "matchingRequirements": [
+      {"number": 8070, "url": "https://api.congress.gov/v3/house-requirement/8070?format=json"}
+    ],
+    "number": 3324,
+    "reportNature": "Agency report",
+    "sessionNumber": 1,
+    "submittingAgency": "Environmental Protection Agency",
+    "submittingOfficial": "Director",
+    "updateDate": "2025-11-21"
+  }
+}

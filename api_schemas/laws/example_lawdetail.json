@@ -1,0 +1,18 @@
+{
+  "bill": {
+    "congress": 119,
+    "introducedDate": "2025-11-21",
+    "latestAction": {
+      "actionDate": "2025-11-21",
+      "text": "Became Public Law No: 119-37."
+    },
+    "laws": [{"number": "119-37", "type": "Public Law"}],
+    "number": "2808",
+    "originChamber": "House",
+    "originChamberCode": "H",
+    "title": "Homebuyers Privacy Protection Act",
+    "type": "HR",
+    "updateDate": "2025-11-21",
+    "url": "https://api.congress.gov/v3/law/119/hr/2808?format=json"
+  }
+}

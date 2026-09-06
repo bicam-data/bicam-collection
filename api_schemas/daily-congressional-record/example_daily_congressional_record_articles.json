@@ -1,0 +1,27 @@
+{
+  "articles": [
+    {
+      "name": "Daily Digest",
+      "sectionArticles": [
+        {
+          "endPage": "D12",
+          "startPage": "D1",
+          "text": [
+            {
+              "type": "Formatted Text",
+              "url": "https://www.congress.gov/119/crec/2025/01/03/d03ja5-1.htm"
+            }
+          ],
+          "title": "Daily Digest; Congressional Record Vol. 171, No. 1"
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "",
+    "prev": "",
+    "requested": 250,
+    "returned": 1
+  }
+}

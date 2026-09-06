@@ -1,0 +1,37 @@
+{
+  "issue": {
+    "congress": 119,
+    "fullIssue": {
+      "articles": {
+        "count": 315,
+        "url": "https://api.congress.gov/v3/daily-congressional-record/171/1/articles?format=json"
+      },
+      "entireIssue": [
+        {
+          "part": "1",
+          "type": "PDF",
+          "url": "https://www.congress.gov/119/crec/2025/01/03/171/1/CREC-2025-01-03-v171.pdf"
+        }
+      ],
+      "sections": [
+        {
+          "endPage": "D12",
+          "name": "Daily Digest",
+          "startPage": "D1",
+          "text": [
+            {
+              "type": "Formatted Text",
+              "url": "https://www.congress.gov/119/crec/2025/01/03/d03ja5-1.htm"
+            }
+          ]
+        }
+      ]
+    },
+    "issueDate": "2025-01-03T05:00:00Z",
+    "issueNumber": "1",
+    "sessionNumber": 1,
+    "updateDate": "2025-01-04T16:59:21Z",
+    "url": "https://api.congress.gov/v3/daily-congressional-record/171/1?format=json",
+    "volumeNumber": 171
+  }
+}

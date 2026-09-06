@@ -1,0 +1,52 @@
+{
+  "summaries": [
+    {
+      "actionDate": "2021-05-11",
+      "actionDesc": "Introduced in House",
+      "bill": {
+        "congress": 117,
+        "number": "3076",
+        "originChamber": "House",
+        "originChamberCode": "H",
+        "title": "Postal Service Reform Act of 2021",
+        "type": "HR",
+        "updateDateIncludingText": "2021-06-07T20:24:30Z",
+        "url": "https://api.congress.gov/v3/bill/117/hr/3076?format=json"
+      },
+      "currentChamber": "House",
+      "currentChamberCode": "H",
+      "lastSummaryUpdateDate": "2021-06-07T20:24:30Z",
+      "text": "<p><strong>Postal Service Reform Act of 2021</strong></p><p>This bill addresses the finances and operations of the U.S. Postal Service.</p>",
+      "updateDate": "2021-06-07T20:24:30Z",
+      "versionCode": "00"
+    },
+    {
+      "actionDate": "2021-07-16",
+      "actionDesc": "Reported to House, Part I",
+      "bill": {
+        "congress": 117,
+        "number": "3076",
+        "originChamber": "House",
+        "originChamberCode": "H",
+        "title": "Postal Service Reform Act of 2021",
+        "type": "HR",
+        "updateDateIncludingText": "2021-12-28T22:35:24Z",
+        "url": "https://api.congress.gov/v3/bill/117/hr/3076?format=json"
+      },
+      "currentChamber": "House",
+      "currentChamberCode": "H",
+      "lastSummaryUpdateDate": "2021-12-28T22:35:24Z",
+      "text": "<p><strong>Postal Service Reform Act of 2021</strong></p><p>This bill addresses the finances and operations of the U.S. Postal Service.</p>",
+      "updateDate": "2021-12-28T22:35:24Z",
+      "versionCode": "08"
+    }
+  ],
+  "pagination": {
+    "count": 2,
+    "next": "https://api.congress.gov/v3/summaries?format=json&limit=250&offset=250"
+  },
+  "request": {
+    "contentType": "application/json",
+    "format": "json"
+  }
+}

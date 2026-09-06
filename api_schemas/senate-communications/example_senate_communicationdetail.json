@@ -1,0 +1,19 @@
+{
+  "senateCommunication": {
+    "abstract": "A communication from the Board Chairman transmitting an annual report.",
+    "chamber": "Senate",
+    "committees": [
+      {
+        "name": "Agriculture, Nutrition, and Forestry Committee",
+        "referralDate": "2025-11-21",
+        "url": "https://api.congress.gov/v3/committee/senate/ssaf00?format=json"
+      }
+    ],
+    "communicationType": {"code": "EC", "name": "Executive Communication"},
+    "congress": 119,
+    "congressionalRecordDate": "2025-11-21",
+    "number": "1615",
+    "sessionNumber": 1,
+    "updateDate": "2025-11-21"
+  }
+}

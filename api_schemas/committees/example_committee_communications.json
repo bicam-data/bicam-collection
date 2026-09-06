@@ -1,0 +1,20 @@
+{
+  "houseCommunications": [
+    {
+      "chamber": "House",
+      "communicationType": {
+        "code": "EC",
+        "name": "Executive Communication"
+      },
+      "congress": 114,
+      "number": 3262,
+      "referralDate": "2015-10-27",
+      "updateDate": "2018-02-02",
+      "url": "https://api.congress.gov/v3/house-communication/114/ec/3262?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 9515,
+    "next": "https://api.congress.gov/v3/committee/house/hspw00/house-communication?offset=1&limit=1&format=json"
+  }
+}

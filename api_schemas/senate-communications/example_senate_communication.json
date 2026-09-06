@@ -1,0 +1,16 @@
+{
+  "senateCommunications": [
+    {
+      "chamber": "Senate",
+      "communicationType": {"code": "EC", "name": "Executive Communication"},
+      "congress": 119,
+      "number": "1615",
+      "updateDate": "2025-11-21",
+      "url": "https://api.congress.gov/v3/senate-communication/119/ec/1615?format=json"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/senate-communication/119?offset=1&limit=1&format=json"
+  }
+}

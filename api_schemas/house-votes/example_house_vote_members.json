@@ -1,0 +1,19 @@
+{
+  "houseRollCallVoteMemberVotes": {
+    "congress": 119,
+    "identifier": 1191202517,
+    "rollCallNumber": 17,
+    "sessionNumber": 1,
+    "results": [
+      {
+        "bioguideID": "A000055",
+        "firstName": "Robert",
+        "lastName": "Aderholt",
+        "voteCast": "Yea",
+        "voteParty": "R",
+        "voteState": "AL"
+      }
+    ]
+  },
+  "pagination": {"count": 1}
+}

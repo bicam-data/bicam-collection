@@ -1,0 +1,20 @@
+{
+  "dailyCongressionalRecord": [
+    {
+      "congress": "119",
+      "issueDate": "2025-01-03T05:00:00Z",
+      "issueNumber": "1",
+      "sessionNumber": "1",
+      "updateDate": "2025-01-04T16:59:21Z",
+      "url": "https://api.congress.gov/v3/daily-congressional-record/171/1?format=json",
+      "volumeNumber": "171"
+    }
+  ],
+  "pagination": {
+    "count": 1,
+    "next": "https://api.congress.gov/v3/daily-congressional-record?format=json&limit=250&offset=250",
+    "prev": "",
+    "requested": 250,
+    "returned": 1
+  }
+}
