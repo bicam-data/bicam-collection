@@ -2,9 +2,9 @@
 
 with member_raw as (
     select
-        raw.id as raw_id,
+        raw.raw_id as raw_id,
         raw.response -> 'member' as member_json
-    from {{ source('raw', 'raw_responses') }} as raw
+    from {{ ref('int_raw_responses__current') }} as raw
     where raw.node_type = 'member_detail'
 ),
 member_terms as (
@@ -37,7 +37,14 @@ select
     members.bioguide_id,
     {{ json_text('leadership_json', 'type') }} as role,
     {{ json_int('leadership_json', 'congress') }} as congress,
-    member_terms.chamber,
+    coalesce(
+        member_terms.chamber,
+        case
+            when lower({{ json_text('leadership_json', 'type') }}) like '%senate%' then 'senate'
+            when lower({{ json_text('leadership_json', 'type') }}) like '%house%'
+              or lower({{ json_text('leadership_json', 'type') }}) like '%speaker%' then 'house'
+        end
+    ) as chamber,
     {{ json_boolean('leadership_json', 'current', false) }} as is_current
 from leadership_roles
 inner join {{ ref('stg_congress__member_detail') }} as members

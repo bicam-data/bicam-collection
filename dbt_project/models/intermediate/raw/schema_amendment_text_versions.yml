@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: int_congress_amendment_text_versions
+    description: Resolver-selected amendment text-version observations with stable source-array and raw-version evidence.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [text_raw_id, text_version_ordinal]
+    columns:
+      - name: text_version_key
+        data_tests: [not_null, unique]
+      - name: text_raw_id
+        data_tests: [not_null]
+      - name: amendment_id
+        data_tests: [not_null]
+      - name: text_version_ordinal
+        data_tests: [not_null]
+
+  - name: int_congress_amendment_text_formats
+    description: Source format observations expanded from resolver-selected amendment text versions.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [text_version_key, format_ordinal]
+    columns:
+      - name: format_key
+        data_tests: [not_null, unique]
+      - name: text_version_key
+        data_tests: [not_null]
+      - name: amendment_id
+        data_tests: [not_null]

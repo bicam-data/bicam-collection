@@ -1,42 +1,27 @@
 {{ config(tags=["nominations", "staging"]) }}
 
-with committee_responses as (
-    {{ resolve_child('nomination_detail', 'nomination_committees', 'nominations') }}
-),
-unnested_committees as (
+with keyed as (
     select
-        substring(parent_endpoint_url from '/nomination/([0-9]+)/')::integer as congress,
-        substring(parent_endpoint_url from '/nomination/[0-9]+/([0-9]+)') as nomination_number,
-        coalesce(
-            substring(parent_endpoint_url from '/nomination/[0-9]+/[0-9]+/([^/?]+)'),
-            '00'
-        ) as nomination_part,
-        committee.value as committee_json
-    from committee_responses
-    cross join lateral {{ unnest_array('response', 'committees', 'committee') }}
-),
-unnested_activities as (
-    select
-        'pn' || nomination_number || '-' || congress::text as nomination_id,
-        'pn' || nomination_number || '-' || nomination_part || '-' || congress::text as nomination_part_id,
-        committee_json,
-        activity.value as activity_json
-    from unnested_committees
-    cross join lateral jsonb_array_elements(coalesce(committee_json -> 'activities', '[]'::jsonb)) as activity(value)
+        observations.*,
+        row_number() over (
+            partition by observations.nomination_part_id,
+                         observations.committee_id,
+                         observations.activity_name,
+                         observations.activity_date
+            order by observations.source_fetched_at desc nulls last,
+                     observations.source_raw_id desc,
+                     observations.source_ordinal desc,
+                     observations.activity_ordinal desc,
+                     observations.committee_name desc nulls last
+        ) as key_rank,
+        observations.nomination_part_id is not null
+            and observations.committee_id is not null
+            and observations.activity_name is not null
+            and observations.activity_date is not null as key_complete
+    from {{ ref('int_congress_nomination_committee_activity_observations') }} as observations
 )
 
-select
-    nomination_id,
-    nomination_part_id,
-    {{ json_text('committee_json', 'systemCode') }} as committee_id,
-    {{ json_text('committee_json', 'name') }} as committee_name,
-    {{ json_text('committee_json', 'type') }} as committee_type,
-    case
-        when jsonb_typeof(activity_json) = 'string' then nullif(trim(both '"' from activity_json::text), '')
-        else nullif(activity_json ->> 'name', '')
-    end as activity_name,
-    case
-        when jsonb_typeof(activity_json) = 'object' then nullif(activity_json ->> 'date', '')::date
-        else null
-    end as activity_date
-from unnested_activities
+select nomination_id, nomination_part_id, committee_id, committee_name,
+       committee_type, activity_name, activity_date
+from keyed
+where key_rank = 1 or not key_complete

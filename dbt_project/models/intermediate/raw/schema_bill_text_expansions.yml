@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: int_congress_bill_text_versions
+    description: Stable ordinal expansion of bill textVersions arrays after complete-baseline-plus-delta child resolution.
+    columns:
+      - name: text_version_key
+        tests: [not_null, unique]
+      - name: bill_id
+        tests: [not_null]
+      - name: raw_response_version_id
+        tests: [not_null]
+  - name: int_congress_bill_text_formats
+    description: Stable ordinal expansion of bill text format arrays.
+    columns:
+      - name: format_key
+        tests: [not_null, unique]
+      - name: text_version_key
+        tests: [not_null]
+      - name: raw_response_version_id
+        tests: [not_null]

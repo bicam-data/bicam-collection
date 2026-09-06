@@ -10,7 +10,7 @@ with granules as (
 ),
 granule_detail as (
     select response as granule_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'govinfo'
       and category = 'govinfo-committee-reports'
       and node_type = 'govinfo_committee_report_granule_detail'

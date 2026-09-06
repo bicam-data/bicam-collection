@@ -1,6 +1,50 @@
 version: 2
 
 models:
+  - name: stg_govinfo__hearings_packages
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null, unique]
+      - name: raw_response_version_id
+        tests: [not_null]
+      - name: collection_code
+        tests: [not_null]
+
+  - name: stg_govinfo__congressional_directory_members
+    description: Congressional Directory member-page observations, one row per member object in a CDIR granule.
+    columns:
+      - name: source_member_reference_key
+        tests: [not_null, unique]
+      - name: raw_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: granule_id
+        tests: [not_null]
+      - name: granule_class
+        tests: [not_null]
+      - name: bioguide_id_raw
+        description: Bioguide value as supplied by the directory member object; identity enrichment is exposed by downstream bridges.
+      - name: biography
+        description: Directory biography text when supplied at the granule level.
+      - name: population
+        description: Directory population value when supplied at the granule level.
+      - name: online
+        description: Directory online URL when supplied at the granule level.
+
+  - name: stg_govinfo__committee_prints_packages
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null, unique]
+      - name: raw_response_version_id
+        tests: [not_null]
+      - name: collection_code
+        tests: [not_null]
+
   - name: stg_govinfo__bills_packages
     columns:
       - name: package_id
@@ -16,11 +60,22 @@ models:
       - name: collection_code
         tests: [not_null]
 
+  - name: stg_govinfo__committeereports_packages
+    columns:
+      - name: package_id
+        tests: [not_null, unique]
+      - name: raw_id
+        tests: [not_null]
+      - name: raw_response_version_id
+        tests: [not_null]
   - name: stg_govinfo__committeereports
     columns:
       - name: report_id
-        tests: [not_null, unique]
+        # This combined relation contains package and granule rows; report_id
+        # is intentionally repeated across those source records.
+        tests: [not_null]
       - name: package_id
+        # Granule rows repeat their parent package_id by design.
         tests: [not_null]
       - name: report_set_id
         tests: [not_null]
@@ -61,12 +116,22 @@ models:
       - name: package_id
         tests: [not_null]
       - name: committee_id
-        tests: [not_null]
+        description: Canonical Congress.gov committee ID when the GovInfo authority ID is exact or safely verified by O/o-to-zero mapping.
+      - name: committee_id_raw
+        description: Original GovInfo authorityId retained for provenance.
+      - name: committee_id_normalization_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [exact_canonical, verified_o_to_zero, manual_override, reviewed_authority_exception, unmapped_identifier, non_identifier_text]
       - name: committee_name
         tests: [not_null]
 
   - name: stg_govinfo__committeereports_members
     columns:
+      - name: source_member_key
+        tests: [not_null]
       - name: report_id
         tests: [not_null]
       - name: report_set_id
@@ -76,6 +141,118 @@ models:
       - name: package_id
         tests: [not_null]
       - name: parsed_name
+        tests: [not_null]
+      - name: bioguide_id
+        description: >-
+          Canonical linkable Bioguide ID. It uses the GovInfo value or reviewed
+          override when present and otherwise uses a deterministic
+          Congress.gov enrichment. The original source value is retained in
+          source_bioguide_id and bioguide_id_raw.
+      - name: bioguide_id_raw
+      - name: resolved_bioguide_id
+        description: >-
+          Evidence-backed canonical Bioguide ID from the all-category GovInfo
+          member-reference bridge. Null is retained for ambiguous/composite
+          parent records and references that are not Congress members.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: linkable_bioguide_id
+        description: Canonical join-key alias of resolved_bioguide_id.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: source_bioguide_id
+        description: Normalized Bioguide value supplied by GovInfo; null means the source omitted it.
+      - name: link_resolution_status
+        description: Evidence status from bridge_govinfo__member_references for the canonical ID.
+        tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - source_bioguide
+                  - manual_override
+                  - unique_name_context_candidate
+                  - unique_name_global_candidate
+                  - unique_last_name_context_candidate
+                  - multi_legislator_review
+                  - ambiguous_review
+                  - missing_identifier_review
+      - name: member_name_normalized
+      - name: multi_legislator_flag
+        tests: [not_null]
+      - name: identity_context
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [submittedby, member_metadata]
+      - name: bioguide_resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - manual_override
+                  - multi_legislator_review
+                  - missing_source_identifier
+                  - provided_valid
+                  - provided_invalid
+
+  - name: stg_govinfo__member_references
+    description: >-
+      Person-level GovInfo member references across bills, committee reports,
+      and hearings. Ordinary source member objects remain one row; composite
+      objects are represented by one component row per named legislator. Raw
+      parent keys and source IDs remain available, while bioguide_id is the
+      evidence-backed canonical join key.
+    columns:
+      - name: member_reference_person_id
+        tests: [not_null, unique]
+      - name: source_member_reference_key
+        tests: [not_null, unique]
+      - name: parent_source_member_reference_key
+        tests: [not_null]
+      - name: reference_kind
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [member_object, member_component]
+      - name: member_ordinal
+        tests: [not_null]
+      - name: raw_id
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+      - name: node_type
+        tests: [not_null]
+      - name: bioguide_id
+        description: >-
+          Evidence-backed canonical Bioguide join key. It is populated from a
+          source value, deterministic Congress.gov enrichment, or reviewed
+          component evidence. Reviewed non-federal participants remain null.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: source_bioguide_id
+        description: Canonical Bioguide value actually supplied by GovInfo, if any.
+      - name: resolved_bioguide_id
+        description: Evidence-backed ID retained separately from source provenance.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: multi_legislator_flag
+        tests: [not_null]
+      - name: requires_manual_review
         tests: [not_null]
 
   - name: stg_govinfo__committeereports_ils_system_ids
@@ -175,4 +352,30 @@ models:
       - name: package_id
         tests: [not_null]
       - name: topic
+        tests: [not_null]
+
+  - name: stg_govinfo__treaty_documents_packages
+    description: GovInfo TDOC package metadata restricted to Congress.gov treaty identities.
+    columns:
+      - name: treaty_id
+        tests: [not_null, unique]
+      - name: package_id
+        tests: [not_null, unique]
+      - name: congress_received
+        tests: [not_null]
+      - name: treaty_number
+        tests: [not_null]
+
+  - name: stg_govinfo__treaty_documents_granules
+    description: GovInfo TDOC granules joined to their canonical treaty identity.
+    tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [treaty_id, granule_id]
+    columns:
+      - name: treaty_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: granule_id
         tests: [not_null]

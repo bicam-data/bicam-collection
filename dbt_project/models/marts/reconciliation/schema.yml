@@ -7,11 +7,69 @@ models:
         tests: [not_null, unique]
       - name: entity
         tests: [not_null]
+      - name: open_exception_count
+        tests: [not_null]
+      - name: reviewed_exception_count
+        tests: [not_null]
+      - name: authoritative_source_gap_count
+        tests: [not_null]
+      - name: eligible_authoritative_record_count
+        tests: [not_null]
+      - name: eligible_authoritative_accepted_count
+        tests: [not_null]
+      - name: eligible_authoritative_match_rate
+        tests: [not_null]
+      - name: title_comparable_accepted_count
+        tests: [not_null]
+      - name: title_agreement_count
+        tests: [not_null]
+      - name: title_agreement_rate
+      - name: min_title_agreement_rate
+        tests: [not_null]
+      - name: threshold_present
+        tests: [not_null]
+      - name: unexcused_unmatched_count
+        tests: [not_null]
+      - name: unexcused_rejected_count
+        tests: [not_null]
+      - name: unexcused_ambiguous_count
+        tests: [not_null]
       - name: quality_status
         tests:
           - accepted_values:
               arguments:
-                values: [pass, fail_ambiguity, fail_match_rate]
+                values: [pass, fail_missing_threshold, fail_invalid_threshold, fail_exceptions, fail_unexcused_records, fail_ambiguity, fail_match_rate, fail_title_corroboration]
+
+  - name: fct_reconciliation_exceptions
+    columns:
+      - name: exception_id
+        tests: [not_null, unique]
+      - name: entity
+        tests: [not_null]
+      - name: canonical_id
+        tests: [not_null]
+      - name: congress_number
+      - name: expected_missing_endpoint_url
+      - name: missing_source
+        tests:
+          - accepted_values:
+              arguments:
+                values: [congress, govinfo, both]
+      - name: match_decision
+        tests:
+          - accepted_values:
+              arguments:
+                values: [unmatched, rejected, ambiguous]
+      - name: review_disposition
+        tests:
+          - accepted_values:
+              arguments:
+                values: [pending, confirmed_source_gap, out_of_scope, needs_source_refresh, data_error]
+      - name: exception_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [open, reviewed]
 
   - name: int_bills__congress
     columns:
@@ -33,12 +91,35 @@ models:
         tests: [not_null]
       - name: canonical_bill_id
         tests: [not_null]
+  - name: int_bill_title_variants
+    description: >-
+      Exact-normalized Congress.gov title evidence at canonical bill grain,
+      retaining the selected primary title and every distinct title variant.
+    columns:
+      - name: canonical_bill_id
+        tests: [not_null]
+      - name: title
+        tests: [not_null]
+      - name: normalized_title
+        tests: [not_null]
+      - name: title_source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [selected_primary, congress_title_variant]
   - name: int_bill_candidates
     columns:
       - name: candidate_id
         tests: [not_null, unique]
       - name: canonical_bill_id
         tests: [not_null]
+      - name: title_agreement_basis
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [selected_primary, congress_title_variant, no_comparable_govinfo_title, no_exact_title_match, not_applicable]
   - name: fct_bill_matches
     columns:
       - name: match_id
@@ -50,6 +131,577 @@ models:
                 values: [accepted, rejected, ambiguous, unmatched]
       - name: candidate_confidence
         tests: [not_null]
+      - name: title_agreement_basis
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [selected_primary, congress_title_variant, no_comparable_govinfo_title, no_exact_title_match, not_applicable]
+
+  - name: bridge_govinfo__bill_versions
+    description: >-
+      Version-grain bridge retaining every GovInfo BILLS package while linking
+      it to the source-neutral bill identity and Congress.gov bill when present.
+    columns:
+      - name: bill_version_bridge_id
+        tests: [not_null, unique]
+      - name: package_id
+        tests: [not_null, unique]
+      - name: govinfo_source_record_id
+        tests: [not_null, unique]
+      - name: canonical_bill_id
+        tests: [not_null]
+      - name: bill_version
+        tests: [not_null]
+      - name: govinfo_raw_id
+        tests: [not_null]
+      - name: govinfo_raw_response_version_id
+        tests: [not_null]
+      - name: title_agreement_basis
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [selected_primary, congress_title_variant, no_comparable_govinfo_title, no_exact_title_match]
+      - name: is_representative_package
+        tests: [not_null]
+      - name: link_decision
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [accepted, unmatched]
+      - name: link_rule
+        tests: [not_null]
+
+  - name: fct_hearing_matches
+    description: >-
+      GovInfo CHRG hearing reconciliation rows. Meeting evidence includes
+      both ordinary GovInfo hearing-to-meeting links and explicit joint
+      package links; a hearing may still have no committee meeting.
+    columns:
+      - name: match_id
+        tests: [not_null, unique]
+      - name: govinfo_source_record_id
+        tests: [not_null, unique]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate, joint]
+      - name: decision
+        tests:
+          - accepted_values:
+              arguments:
+                values: [accepted, ambiguous, unmatched]
+      - name: decision_rule
+        tests: [not_null]
+      - name: candidate_confidence
+        tests: [not_null]
+      - name: candidate_match_count
+        tests: [not_null]
+      - name: committee_meeting_evidence_count
+        tests: [not_null]
+      - name: committee_meeting_evidence_ids
+        tests: [not_null]
+
+  - name: bridge_hearings__committee_meetings
+    description: >-
+      Source-neutral many-to-many bridge between hearings and committee
+      meetings. Congress.gov associated-meeting and hearingTranscript edges,
+      plus GovInfo CHRG/JHRG evidence, are unioned into one logical pair while
+      retaining every source link, direction, and matching rule. Joint
+      hearings remain a single ``joint`` chamber value.
+    columns:
+      - name: bridge_id
+        tests: [not_null, unique]
+      - name: hearing_key
+        tests: [not_null]
+      - name: canonical_hearing_id
+        description: Congress.gov hearing ID when the source evidence resolves to one; null is retained for source-only package evidence.
+      - name: committee_meeting_id
+        tests: [not_null]
+      - name: meeting_source_system
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [congress]
+      - name: chamber
+        description: Canonical hearing chamber. Route-derived fallback is used for retained source links whose detail payload is unavailable.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate, joint]
+      - name: hearing_source_ids
+        tests: [not_null]
+      - name: hearing_source_systems
+        tests: [not_null]
+      - name: evidence_link_ids
+        tests: [not_null]
+      - name: evidence_relationship_types
+        tests: [not_null]
+      - name: evidence_match_rules
+        tests: [not_null]
+      - name: evidence_count
+        tests: [not_null]
+      - name: has_congress_hearing_evidence
+        tests: [not_null]
+      - name: has_govinfo_hearing_evidence
+        tests: [not_null]
+
+  - name: bridge_bills__committee_reports
+    description: >-
+      Release-facing source-neutral bridge between Congress.gov bill
+      committee-report references and committee-report associated-bill
+      references. Every logical bill/report-part edge is retained once with
+      provenance flags for the two endpoint directions, including report-part
+      and errata identity components.
+    columns:
+      - name: link_id
+        tests: [not_null, unique]
+      - name: bill_id
+        tests: [not_null]
+      - name: canonical_bill_id
+        tests: [not_null]
+      - name: report_id
+        tests: [not_null]
+      - name: report_part_id
+        tests: [not_null]
+      - name: canonical_report_id
+        tests: [not_null]
+      - name: report_type
+        tests: [not_null]
+      - name: report_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: is_errata
+        tests: [not_null]
+      - name: from_bill_side
+        tests: [not_null]
+      - name: from_report_side
+        tests: [not_null]
+      - name: evidence_directions
+        tests: [not_null]
+      - name: evidence_count
+        tests: [not_null]
+      - name: source_raw_ids
+        tests: [not_null]
+      - name: source_raw_response_version_ids
+        tests: [not_null]
+      - name: source_endpoint_urls
+        tests: [not_null]
+
+  - name: bridge_members__legislation
+    description: >-
+      Canonical Congress.gov member-to-bill and member-to-amendment
+      sponsorship bridge. Member-side legislation lists and legislation-side
+      sponsor/cosponsor lists are unioned into one row per relationship, with
+      direction flags and source evidence retained for both downstream
+      categories.
+    columns:
+      - name: bridge_id
+        tests: [not_null, unique]
+      - name: member_id
+        tests: [not_null]
+      - name: legislation_id
+        tests: [not_null]
+      - name: legislation_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [bill, amendment]
+      - name: relationship_role
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [sponsor, cosponsor]
+      - name: member_side_present
+        tests: [not_null]
+      - name: legislation_side_present
+        tests: [not_null]
+      - name: evidence_directions
+        tests: [not_null]
+      - name: evidence_sources
+        tests: [not_null]
+      - name: evidence_count
+        tests: [not_null]
+      - name: reciprocity_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - reciprocal
+                  - left_only_counterpart_unavailable
+                  - right_only_counterpart_unavailable
+                  - left_only_asymmetric_source
+                  - right_only_asymmetric_source
+                  - left_only_contradiction
+                  - right_only_contradiction
+                  - unclassified
+      - name: member_endpoint_available
+        tests: [not_null]
+      - name: legislation_endpoint_available
+        tests: [not_null]
+
+  - name: bridge_committees__bills
+    description: >-
+      Canonical Congress.gov committee-to-bill bridge. Committee-side bill
+      listings and bill-side committee referrals are unioned into one logical
+      edge, preserving endpoint direction, source evidence, and reciprocity
+      classification.
+    columns:
+      - name: bridge_id
+        tests: [not_null, unique]
+      - name: committee_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: committee_side_present
+        tests: [not_null]
+      - name: bill_side_present
+        tests: [not_null]
+      - name: evidence_directions
+        tests: [not_null]
+      - name: evidence_sources
+        tests: [not_null]
+      - name: evidence_count
+        tests: [not_null]
+      - name: reciprocity_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - reciprocal
+                  - left_only_counterpart_unavailable
+                  - right_only_counterpart_unavailable
+                  - left_only_asymmetric_source
+                  - right_only_asymmetric_source
+                  - left_only_contradiction
+                  - right_only_contradiction
+                  - unclassified
+      - name: committee_endpoint_available
+        tests: [not_null]
+      - name: bill_endpoint_available
+        tests: [not_null]
+
+  - name: fct_committee_print_matches
+    description: >-
+      Exact-identity Congress.gov↔GovInfo CPRT print matches. The fact is
+      deliberately conservative: only the normalized chamber/jacket/Congress
+      identity is auto-accepted; source-only and malformed packages remain
+      unmatched for review.
+    columns:
+      - name: match_id
+        tests: [not_null, unique]
+      - name: canonical_print_id
+        tests: [not_null]
+      - name: decision
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [accepted, unmatched]
+      - name: decision_rule
+        tests: [not_null]
+      - name: candidate_confidence
+        tests: [not_null]
+
+  - name: bridge_govinfo__committee_print_packages
+    description: >-
+      Package-grain GovInfo CPRT bridge retaining every package, including
+      legacy suffix variants and packages without a Congress.gov counterpart.
+    columns:
+      - name: committee_print_package_bridge_id
+        tests: [not_null, unique]
+      - name: package_id
+        tests: [not_null, unique]
+      - name: govinfo_source_record_id
+        tests: [not_null, unique]
+      - name: collection_code
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [CPRT]
+      - name: is_representative_package
+        tests: [not_null]
+      - name: link_decision
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [accepted, unmatched]
+      - name: link_rule
+        tests: [not_null]
+
+  - name: fct_committee_print_reconciliation_metrics
+    description: >-
+      Informational CPRT census and Congress.gov overlap metrics. This fact is
+      intentionally separate from the strict reconciliation quality gate until
+      the historical GovInfo-versus-Congress.gov print coverage boundary has a
+      reviewed policy.
+    columns:
+      - name: metric_id
+        tests: [not_null, unique]
+      - name: entity
+        tests:
+          - accepted_values:
+              arguments:
+                values: [committee_print]
+      - name: authoritative_source
+        tests:
+          - accepted_values:
+              arguments:
+                values: [congress]
+      - name: congress_print_count
+        tests: [not_null]
+      - name: govinfo_package_count
+        tests: [not_null]
+      - name: govinfo_representative_count
+        tests: [not_null]
+      - name: exact_match_count
+        tests: [not_null]
+      - name: congress_only_count
+        tests: [not_null]
+      - name: govinfo_only_representative_count
+        tests: [not_null]
+      - name: unparseable_package_count
+        tests: [not_null]
+      - name: duplicate_variant_package_count
+        tests: [not_null]
+      - name: excluded_non_cprt_count
+        tests: [not_null]
+      - name: exact_match_rate
+        tests: [not_null]
+      - name: quality_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [informational_source_boundary_review]
+
+  - name: bridge_govinfo__member_components
+    description: >-
+      Component-level bridge for GovInfo SUBMITTEDBY objects that name more
+      than one legislator. Every component is retained with all candidate
+      Bioguide IDs; source-Bioguide evidence and explicitly reviewed component
+      overrides are promoted to resolved IDs.
+    columns:
+      - name: member_component_bridge_id
+        tests: [not_null, unique]
+      - name: source_member_key
+        tests: [not_null]
+      - name: component_key
+        tests: [not_null, unique]
+      - name: report_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: granule_id
+        tests: [not_null]
+      - name: component_ordinal
+        tests: [not_null]
+      - name: chamber
+        description: GovInfo source chamber retained alongside the component-level identity decision.
+      - name: candidate_id_count
+        tests: [not_null]
+      - name: resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - source_bioguide_evidence
+                  - manual_component_override
+                  - unique_name_congress_candidate
+                  - no_candidate
+                  - ambiguous_candidate
+      - name: bridge_decision
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - source_bioguide_evidence
+                  - manual_component_override
+                  - unique_name_congress_candidate_pending_review
+                  - ambiguous_manual_review
+                  - no_candidate_manual_review
+      - name: requires_manual_review
+        tests: [not_null]
+
+  - name: bridge_govinfo__member_references
+    description: >-
+      Linkable bridge for every nested GovInfo member reference. It retains
+      source and reviewed IDs, deterministic candidate evidence, context
+      conflicts, and explicit review status for composite or ambiguous names.
+    columns:
+      - name: member_reference_bridge_id
+        tests: [not_null, unique]
+      - name: source_member_reference_key
+        tests: [not_null, unique]
+      - name: raw_id
+        tests: [not_null]
+      - name: member_ordinal
+        tests: [not_null]
+      - name: resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - source_bioguide
+                  - manual_override
+                  - unique_name_context_candidate
+                  - unique_name_global_candidate
+                  - unique_last_name_context_candidate
+                  - multi_legislator_review
+                  - ambiguous_review
+                  - missing_identifier_review
+                  - reviewed_non_federal_participant
+      - name: source_bioguide_id
+        description: >-
+          Canonically formatted Bioguide ID supplied by GovInfo (normalized
+          for case and surrounding whitespace). Values that do not match the
+          Bioguide format are left in bioguide_id_raw and exposed as null here;
+          this is intentionally distinct from the linkable ID below.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: authority_id
+        description: Source authority identifier carried by a nested GovInfo member object, when present.
+      - name: gpo_id
+        description: Source GPO identifier carried by a nested GovInfo member object, when present.
+      - name: resolved_bioguide_id
+        description: >-
+          Evidence-backed canonical member ID. It may be source-provided,
+          deterministically inferred from Congress.gov terms, or explicitly
+          reviewed. Null is retained for ambiguous, composite-parent, and
+          non-Congress references.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: review_disposition
+        description: Reviewed non-member disposition for a reference that intentionally has no Bioguide ID.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [reviewed_non_federal_participant]
+      - name: linkable_bioguide_id
+        description: >-
+          The canonical Bioguide join key for this reference. This is an alias
+          of resolved_bioguide_id provided for downstream joins; raw/source
+          provenance remains available in source_bioguide_id.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: bioguide_id
+        description: >-
+          Backwards-compatible canonical member join key. Equal to
+          linkable_bioguide_id/resolved_bioguide_id; it is null only when the
+          reference cannot be assigned safely (for example an ambiguous name,
+          a composite parent object, or a non-Congress witness).
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: requires_manual_review
+        tests: [not_null]
+
+  - name: bridge_govinfo__member_reference_components
+    description: >-
+      Component-level bridge for composite GovInfo member objects. Parent
+      objects remain intact in bridge_govinfo__member_references while each
+      named legislator receives an independently auditable candidate/ID row.
+    columns:
+      - name: member_reference_component_bridge_id
+        tests: [not_null, unique]
+      - name: component_key
+        tests: [not_null, unique]
+      - name: source_member_reference_key
+        tests: [not_null]
+      - name: component_ordinal
+        tests: [not_null]
+      - name: candidate_id_count
+        tests: [not_null]
+      - name: reviewed_bioguide_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - unique_name_context_candidate
+                  - source_bioguide_evidence
+                  - reviewed_component_evidence
+                  - no_candidate
+                  - ambiguous_candidate
+      - name: resolved_bioguide_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_congress__member_detail')
+                field: bioguide_id
+      - name: requires_manual_review
+        tests: [not_null]
+
+  - name: int_hearings__congress
+    columns:
+      - name: hearing_id
+        tests: [not_null, unique]
+      - name: hearing_part_id
+        tests: [not_null, unique]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate, joint]
+      - name: source_chamber
+        tests: [not_null]
+      - name: raw_id
+        tests: [not_null]
+      - name: raw_response_version_id
+        tests: [not_null]
+
+  - name: int_congress_hearing_public_id_map
+    description: >-
+      Maps Congress.gov hearing route identities to stable public CHRG
+      identities using publication package evidence in format URLs. Addendum
+      references resolve to their base package; published package variants
+      retain their suffixes.
+    columns:
+      - name: source_hearing_id
+        tests: [not_null, unique]
+      - name: public_hearing_id
+        tests: [not_null]
+      - name: package_candidate_count
+        tests: [not_null]
+      - name: identity_rule
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [congress_format_url_chrg_package, congress_route_identity_fallback]
 
   - name: int_committee_reports__congress
     columns:
@@ -62,6 +714,13 @@ models:
       - name: canonical_report_id
         tests: [not_null]
   - name: int_committee_reports__govinfo
+    description: >-
+      GovInfo committee-report package/part evidence. CRPT is the modern
+      collection; SERIALSET is retained at source package grain for the
+      historical public-report union. SERIALSET catalog numbers are evidence
+      only: report identity uses documentNumber and Congress. Duplicate
+      package evidence is marked with is_representative_package and only the
+      representative is sent to reconciliation candidates.
     columns:
       - name: source_record_id
         tests: [not_null, unique]
@@ -70,6 +729,22 @@ models:
       - name: source_raw_response_version_id
         tests: [not_null]
       - name: canonical_report_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null]
+      - name: collection_code
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [CRPT, SERIALSET]
+      - name: identity_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [crpt, historical_serialset]
+      - name: is_representative_package
         tests: [not_null]
   - name: int_committee_report_candidates
     columns:

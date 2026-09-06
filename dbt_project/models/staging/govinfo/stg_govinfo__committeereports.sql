@@ -33,11 +33,11 @@ with package_reports as (
 ),
 granule_detail as (
     select
-        id as raw_id,
+        raw_id,
         endpoint_url,
         raw_response_version_id,
         response as granule_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'govinfo'
       and category = 'govinfo-committee-reports'
       and node_type = 'govinfo_committee_report_granule_detail'
@@ -88,6 +88,7 @@ granule_reports as (
     from granule_detail
     left join package_reports packages
       on packages.package_id = {{ json_text('granule_json', 'packageId') }}
+    where packages.report_set_id is not null
 ),
 finalized_granules as (
     select

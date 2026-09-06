@@ -13,6 +13,8 @@ with ranked as (
         congress,
         title,
         {{ normalize_match_text('title') }} as normalized_title,
+        short_title,
+        {{ normalize_match_text('short_title') }} as normalized_short_title,
         {{ normalize_chamber('origin_chamber') }} as origin_chamber,
         issued_at,
         last_modified as source_updated_at,
@@ -35,6 +37,8 @@ select
     congress,
     title,
     normalized_title,
+    short_title,
+    normalized_short_title,
     origin_chamber,
     issued_at,
     source_updated_at

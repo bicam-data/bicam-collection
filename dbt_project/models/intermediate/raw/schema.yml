@@ -1,0 +1,57 @@
+version: 2
+
+models:
+  - name: int_congress_child_response_selections
+    description: Durable selected Congress.gov child response pages with generation completeness and source lineage evidence.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: raw_response_version_id
+        tests: [not_null, unique]
+      - name: category
+        tests: [not_null]
+      - name: node_type
+        tests: [not_null]
+      - name: logical_collection
+        tests: [not_null]
+      - name: endpoint_url
+        tests: [not_null]
+      - name: is_complete_generation
+        tests: [not_null]
+  - name: int_congress_child_response_selection
+    description: Reusable transport-level page and JSON-shape facts for Congress.gov child response reconstruction. Baseline and delta selection remains in resolve_child.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: raw_response_version_id
+        tests: [not_null, unique]
+      - name: category
+        tests: [not_null]
+      - name: node_type
+        tests: [not_null]
+      - name: logical_collection
+        tests: [not_null]
+      - name: logical_endpoint
+        tests: [not_null]
+      - name: page_offset
+        tests: [not_null]
+      - name: is_incremental
+        tests: [not_null]
+  - name: int_raw_responses__current
+    description: Current raw payloads copied from the compatibility view into an incremental, indexed relation.
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: raw_response_version_id
+        tests: [not_null]
+      - name: response_hash
+        tests: [not_null]
+  - name: int_raw_response_versions
+    description: Append-only raw payload versions used for reproducible transformations.
+    columns:
+      - name: raw_response_version_id
+        tests: [not_null, unique]
+      - name: raw_response_id
+        tests: [not_null]
+      - name: response_hash
+        tests: [not_null]

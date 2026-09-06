@@ -1,36 +1,19 @@
 {{ config(tags=["committees", "staging"]) }}
 
-with nomination_responses as (
-    {{ resolve_child('committee_detail', 'committee_nominations', 'committees') }}
-),
-unnested as (
+with keyed as (
     select
-        parent_raw_id,
-        nomination.value as nomination_json
-    from nomination_responses
-    cross join lateral {{ unnest_array('response', 'nominations', 'nomination') }}
-),
-committee_lookup as (
-    select
-        id as raw_id,
-        response -> 'committee' as committee_json
-    from {{ source('raw', 'raw_responses') }}
-    where source = 'congress'
-      and category = 'committees'
-      and node_type = 'committee_detail'
+        observations.*,
+        row_number() over (
+            partition by observations.committee_id, observations.nomination_id
+            order by observations.source_fetched_at desc nulls last,
+                     observations.source_raw_id desc,
+                     observations.source_ordinal desc
+        ) as key_rank,
+        observations.committee_id is not null
+            and observations.nomination_id is not null as key_complete
+    from {{ ref('int_congress_committee_nomination_observations') }} as observations
 )
 
-select
-    {{ json_text('committee_json', 'systemCode') }} as committee_id,
-    'pn'
-    || {{ json_text('nomination_json', 'number') }}
-    || '-'
-    || coalesce({{ json_text('nomination_json', 'partNumber') }}, '00')
-    || '-'
-    || {{ json_int('nomination_json', 'congress') }}::text as nomination_id,
-    {{ json_int('nomination_json', 'number') }} as nomination_number,
-    coalesce({{ json_text('nomination_json', 'partNumber') }}, '00') as nomination_part,
-    {{ json_int('nomination_json', 'congress') }} as congress
-from unnested
-inner join committee_lookup
-    on unnested.parent_raw_id = committee_lookup.raw_id
+select committee_id, nomination_id, nomination_number, nomination_part, congress
+from keyed
+where key_rank = 1 or not key_complete

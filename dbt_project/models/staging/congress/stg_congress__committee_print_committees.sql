@@ -3,7 +3,7 @@
 with detail as (
     select
         response
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'committee-prints'
       and node_type = 'committee_print_detail'

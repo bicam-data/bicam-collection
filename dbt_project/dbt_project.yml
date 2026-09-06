@@ -11,13 +11,46 @@ clean-targets: ["target", "dbt_packages", "logs"]
 
 models:
   bicam_collection:
-    staging:
-      +materialized: view
     intermediate:
       +materialized: table
+      raw:
+        +materialized: incremental
+    staging:
+      +materialized: view
     marts:
       +materialized: table
 
 seeds:
   bicam_collection:
     +quote_columns: false
+    reconciliation:
+      govinfo_committee_id_overrides:
+        +column_types:
+          source_committee_id: text
+          committee_id: text
+          reviewer: text
+          reviewed_at: date
+          reason: text
+          expires_at: date
+      govinfo_committee_id_exceptions:
+        +column_types:
+          source_committee_id: text
+          classification: text
+          reviewer: text
+          reviewed_at: date
+          reason: text
+          expires_at: date
+      govinfo_member_reference_reviews:
+        +column_types:
+          source_member_reference_key: text
+          classification: text
+          reviewer: text
+          reviewed_at: date
+          reason: text
+          expires_at: date
+    bootstrap:
+      bootstrap_congresses_directories_isbn:
+        +column_types:
+          congress_number: integer
+          govinfo_package_id: text
+          isbn: text

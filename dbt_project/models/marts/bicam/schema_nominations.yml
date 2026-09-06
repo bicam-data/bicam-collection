@@ -1,0 +1,81 @@
+version: 2
+
+models:
+  - name: nominations
+    description: Published nomination parts with stable canonical part identities.
+    columns:
+      - name: nomination_id
+        description: Stable lowercase nomination part identifier.
+        tests: [not_null, unique]
+      - name: nomination_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+  - name: nominations_actions
+    description: Actions taken on nomination parts.
+    columns:
+      - name: action_id
+        tests: [not_null, unique]
+      - name: nomination_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('nominations'), field: nomination_id}}
+  - name: nominations_actions_committees
+    description: Committees named on nomination actions.
+    columns:
+      - name: action_id
+        tests: [not_null]
+      - name: nomination_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('nominations'), field: nomination_id}}
+      - name: committee_code
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committees'), field: committee_code}}
+  - name: nominations_associated_hearings
+    description: Nomination part to hearing association edges.
+    columns:
+      - name: nomination_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('nominations'), field: nomination_id}}
+      - name: hearing_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+  - name: nominations_committeeactivities
+    description: Committee activity records for nomination parts.
+    columns:
+      - name: nomination_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('nominations'), field: nomination_id}}
+      - name: committee_code
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committees'), field: committee_code}}
+      - name: activity_date
+        tests: [not_null]
+      - name: activity_name
+        tests: [not_null]
+  - name: nominations_nominees
+    description: Latest reconciled nominee observations nested under a nomination part; ordinal is a position ordinal and is intentionally non-unique.
+    columns:
+      - name: nomination_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('nominations'), field: nomination_id}}
+      - name: ordinal
+        tests: [not_null]
+  - name: nominations_positions
+    description: Positions nested under nomination parts.
+    columns:
+      - name: nomination_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('nominations'), field: nomination_id}}
+      - name: ordinal
+        tests: [not_null]
+      - name: position_title
+        tests: [not_null]

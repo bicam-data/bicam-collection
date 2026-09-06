@@ -1,0 +1,287 @@
+version: 2
+
+models:
+  - name: int_congress_internal_relationship_union
+    description: >-
+      Canonical union of Congress.gov relationship edges. Presence on either
+      source direction is retained once and exposed to both downstream sides.
+    columns:
+      - name: relationship_type
+        tests: [not_null]
+      - name: left_id
+        tests: [not_null]
+      - name: right_id
+        tests: [not_null]
+      - name: left_present
+        tests: [not_null]
+      - name: right_present
+        tests: [not_null]
+      - name: evidence_directions
+        description: API directions contributing the canonical union row.
+        tests: [not_null]
+      - name: evidence_sources
+        description: Source-side entity families contributing evidence.
+        tests: [not_null]
+      - name: evidence_count
+        description: Number of deduplicated source-side evidence rows contributing to the union.
+        tests: [not_null]
+
+  - name: int_congress_internal_relationship_edges
+    description: Materialized source-side edges used by the Congress.gov reciprocity audit.
+    columns:
+      - name: relationship_type
+        tests: [not_null]
+      - name: left_id
+        tests: [not_null]
+      - name: right_id
+        tests: [not_null]
+      - name: left_source
+        tests: [not_null]
+      - name: edge_side
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [left, right]
+
+  - name: int_congress_member_amendment_relationship_edges
+    description: Source-side member↔amendment sponsor and cosponsor edges, including both API directions.
+    columns:
+      - name: relationship_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [member_amendment_sponsor, member_amendment_cosponsor]
+      - name: left_id
+        tests: [not_null]
+      - name: right_id
+        tests: [not_null]
+      - name: left_source
+        tests: [not_null]
+      - name: edge_side
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [left, right]
+  - name: int_govinfo_committee_id_map
+    description: >-
+      Safe GovInfo authorityId mapping. Exact Congress.gov committee codes
+      are retained; O/o-to-zero is accepted only when the resulting value is
+      an observed Congress.gov committee code. Other values remain explicit
+      unresolved exceptions. Reviewed source authorities that are conflated or
+      not one-to-one with a Congress.gov committee use
+      reviewed_authority_exception and retain a null canonical ID.
+    columns:
+      - name: source_committee_id
+        tests: [not_null, unique]
+      - name: normalization_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [exact_canonical, verified_o_to_zero, manual_override, reviewed_authority_exception, unmapped_identifier, non_identifier_text]
+
+  - name: int_govinfo_multi_legislator_candidates
+    description: >-
+      Evidence-only split of GovInfo member objects whose display text names
+      multiple legislators. One row is emitted per named component and every
+      Congress.gov candidate is retained; no ambiguous candidate is applied
+      automatically.
+    columns:
+      - name: source_member_key
+        tests: [not_null]
+      - name: component_key
+        tests: [not_null]
+      - name: component_ordinal
+        tests: [not_null]
+      - name: chamber
+        description: GovInfo source chamber used to constrain Congress.gov candidate evidence.
+      - name: resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - source_bioguide_evidence
+                  - unique_name_congress_candidate
+                  - no_candidate
+                  - ambiguous_candidate
+
+  - name: int_govinfo_member_references
+    description: >-
+      Source-neutral expansion of every nested GovInfo members array in bill
+      package, committee-report granule, hearing granule, and committee-print
+      payloads. Raw member objects, source Bioguide values, name/context
+      fields, array ordinals, and the legacy committee-report key are retained
+      for linkable provenance and review.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: source_member_reference_key
+        tests: [not_null, unique]
+      - name: member_json
+        tests: [not_null]
+      - name: source_issued_at
+        description: Date issued by GovInfo for the package or granule containing this member reference; used as corroborating term-date evidence.
+      - name: authority_id
+        description: Source authority identifier when the nested member object supplies one.
+      - name: gpo_id
+        description: Source GPO identifier when the nested member object supplies one.
+      - name: member_ordinal
+        tests: [not_null]
+      - name: bioguide_resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [provided_valid, provided_invalid, missing_source_identifier]
+      - name: identity_context
+        tests: [not_null]
+
+  - name: int_govinfo_member_reference_candidates
+    description: >-
+      Evidence-only Congress.gov candidate matches for GovInfo member
+      references missing a source Bioguide. Full-name matches may resolve at
+      the person level when source Congress metadata is stale; exact display
+      names repeated on another GovInfo reference with a valid Bioguide are
+      also eligible. Cited bills in committee-report granules can corroborate
+      a name-only SUBMITTEDBY candidate through the Congress.gov sponsor or
+      sponsor edge (preferred over cosponsor-only evidence). A bounded
+      reviewed alias set covers recurring GovInfo
+      transcription and historical-name errors. Surname-only matches require
+      Congress/state/chamber context.
+    columns:
+      - name: source_member_reference_key
+        tests: [not_null]
+      - name: source_issued_at
+        description: GovInfo package or granule issue date carried into candidate evidence.
+      - name: candidate_count
+        tests: [not_null]
+      - name: resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - unique_name_context_candidate
+                  - unique_name_global_candidate
+                  - unique_last_name_context_candidate
+                  - ambiguous_candidate
+                  - no_candidate
+
+  - name: int_govinfo_member_reference_components
+    description: >-
+      Component expansion for composite GovInfo member references across bill,
+      committee-report, and hearing payloads. Each named component retains its
+      parent source key and Congress.gov surname/context candidates.
+    columns:
+      - name: component_key
+        tests: [not_null]
+      - name: source_member_reference_key
+        tests: [not_null]
+      - name: component_ordinal
+        tests: [not_null]
+      - name: candidate_count
+        tests: [not_null]
+      - name: source_bioguide_candidate_count
+        tests: [not_null]
+      - name: matches_source_bioguide
+        tests: [not_null]
+      - name: resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - unique_name_context_candidate
+                  - source_bioguide_evidence
+                  - no_candidate
+                  - ambiguous_candidate
+
+  - name: int_committee_prints__congress
+    description: >-
+      Source-neutral Congress.gov committee-print records. The canonical
+      identity is the API print ID (chamber type, jacket number, and Congress)
+      with raw response lineage retained.
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
+      - name: canonical_print_id
+        tests: [not_null, unique]
+      - name: congress
+        tests: [not_null]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate, joint, nochamber]
+
+  - name: int_committee_prints__govinfo
+    description: >-
+      CPRT package identities, including the published WPRT subtype. Collection-code filtering excludes GPO/GOVPUB
+      package details that have occasionally leaked through the CPRT endpoint;
+      legacy volume/part suffixes are normalized to the base jacket identity,
+      while malformed and unsupported packages remain explicit.
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
+      - name: package_id
+        tests: [not_null, unique]
+      - name: collection_code
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [CPRT]
+      - name: identity_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate, joint, unparseable_package_id, unsupported_package_type]
+      - name: is_representative_package
+        tests: [not_null]
+
+  - name: int_committee_print_public_id_map
+    description: >-
+      Maps Congress.gov NoChamber committee-print routes to the published
+      stable joint-print identity while retaining source identifiers upstream.
+    columns:
+      - name: source_print_id
+        tests: [not_null, unique]
+      - name: public_print_id
+        tests: [not_null]
+      - name: mapping_rule
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [source_identity, nochamber_to_joint]
+
+  - name: int_committee_print_candidates
+    description: >-
+      Evidence-only committee-print candidate pairs. Exact canonical IDs are
+      accepted; source-only, malformed, and unsupported GovInfo packages stay
+      visible as unmatched candidates.
+    columns:
+      - name: candidate_id
+        tests: [not_null, unique]
+      - name: canonical_print_id
+        tests: [not_null]
+      - name: candidate_rule
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [exact_canonical_identity, missing_congress_record, missing_govinfo_record, unparseable_govinfo_package_id]

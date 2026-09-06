@@ -1,35 +1,41 @@
 {{ config(tags=["committee_reports", "staging"]) }}
 
-with detail as (
+with unnested as (
     select
-        id as parent_raw_id,
-        endpoint_url as parent_endpoint_url,
-        response
-    from {{ source('raw', 'raw_responses') }}
-    where source = 'congress'
-      and category = 'committee-reports'
-      and node_type = 'committee_report_detail'
-),
-reports as (
-    select
-        parent_raw_id,
-        parent_endpoint_url,
-        report.value as report_json
-    from detail
-    cross join lateral {{ unnest_array('response', 'committeeReports', 'report') }}
-),
-unnested as (
-    select
-        parent_raw_id,
-        parent_endpoint_url,
+        source_raw_id as parent_raw_id,
+        source_endpoint_url as parent_endpoint_url,
+        reports.report_json,
         committee.value as committee_json
-    from reports
-    cross join lateral {{ unnest_array('report_json', 'committees', 'committee') }}
+    from {{ ref('int_congress_committee_report_records') }} as reports
+    cross join lateral jsonb_array_elements(
+        case
+            when jsonb_typeof(reports.report_json -> 'committees') = 'array'
+                then reports.report_json -> 'committees'
+            else '[]'::jsonb
+        end
+    ) as committee(value)
 )
 
 select
     parent_raw_id,
     parent_endpoint_url,
+    {{ build_custom_id([
+        "lower(" ~ json_text('report_json', 'type') ~ ")",
+        "(" ~ json_text('report_json', 'number') ~ ")::text"
+    ]) }} || '-' || {{ json_int('report_json', 'congress') }}::text as report_id,
+    {{ build_custom_id([
+        "lower(" ~ json_text('report_json', 'type') ~ ")",
+        "(" ~ json_text('report_json', 'number') ~ ")::text"
+    ]) }}
+    || '-'
+    || coalesce(({{ json_int('report_json', 'part') }})::text, '1')
+    || case
+        when {{ json_text('report_json', 'citation') }} ilike '%errata%' then 'e'
+        else ''
+       end
+    || '-'
+    || {{ json_int('report_json', 'congress') }}::text as report_part_id,
+    {{ json_text('committee_json', 'systemCode') }} as committee_id,
     {{ extract_fields('committee_json', [
         ('name', 'text'),
         ('systemCode', 'text', 'system_code'),

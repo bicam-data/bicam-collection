@@ -2,10 +2,10 @@
 
 with detail as (
     select
-        id as parent_raw_id,
+        raw_id as parent_raw_id,
         endpoint_url as parent_endpoint_url,
         response -> 'amendment' as amendment_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'amendments'
       and node_type = 'amendment_detail'

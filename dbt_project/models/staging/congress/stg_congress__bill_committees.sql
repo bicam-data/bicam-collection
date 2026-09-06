@@ -1,26 +1,20 @@
 {{ config(tags=["bills", "staging"]) }}
 
-with committee_responses as (
-    {{ resolve_child('bill_detail', 'bill_committees', 'bills') }}
-),
-bill_detail as (
+with observations as (
+    select *
+    from {{ ref('int_congress_bill_committee_observations') }}
+), keyed as (
     select
-        raw_id,
-        bill_id
-    from {{ ref('stg_congress__bill_detail') }}
-),
-unnested as (
-    select
-        bill_detail.bill_id,
-        committee_item.value as committee_json
-    from committee_responses
-    join bill_detail
-      on committee_responses.parent_raw_id = bill_detail.raw_id
-    cross join lateral {{ unnest_array('response', 'committees', 'committee_item') }}
+        observations.*,
+        row_number() over (
+            partition by bill_id, committee_code
+            order by source_fetched_at desc nulls last,
+                     source_raw_id desc,
+                     committee_name asc nulls last
+        ) as key_rank,
+        bill_id is not null and committee_code is not null as key_complete
+    from observations
 )
-
-select
-    bill_id,
-    nullif(committee_json #>> '{systemCode}', '') as committee_code,
-    nullif(committee_json #>> '{name}', '') as committee_name
-from unnested
+select bill_id, committee_code, committee_name
+from keyed
+where key_rank = 1 or not key_complete

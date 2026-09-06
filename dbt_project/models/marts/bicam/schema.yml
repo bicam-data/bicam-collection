@@ -1,0 +1,668 @@
+version: 2
+
+models:
+  - name: bills_versions
+    description: >-
+      Supplemental version-grain bill relation. It retains every GovInfo BILLS
+      package/version and links it to the canonical public bill ID; the core
+      bills table remains representative-package grain.
+    columns:
+      - name: bill_id
+        data_tests: [not_null]
+      - name: govinfo_package_id
+        data_tests: [not_null, unique]
+      - name: version_code
+        data_tests: [not_null]
+      - name: formatted_text
+        description: GovInfo authenticated HTML rendition URL for this package, when published.
+      - name: raw_text
+        description: Visible text extracted from the authenticated GovInfo HTML rendition.
+      - name: is_representative_package
+        data_tests: [not_null]
+
+  - name: bills_version_links
+    description: Deterministic supplemental links from version-labelled Congress.gov bill child rows to GovInfo bill versions. Summary version codes are not linked because they are CRS-summary identifiers.
+    data_tests:
+      - unique:
+          column_name: link_id
+    columns:
+      - name: link_id
+        data_tests: [not_null]
+      - name: source_table
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['bills_titles', 'bills_texts', 'bills_actions']
+      - name: source_row_key
+        data_tests: [not_null]
+      - name: bill_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('bills'), field: bill_id}
+      - name: link_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['linked', 'no_matching_govinfo_version']
+
+  - name: congresses
+    description: Canonical Congress.gov Congress records.
+    columns:
+      - name: congress_number
+        data_tests: [not_null, unique]
+      - name: name
+        data_tests: [not_null]
+      - name: start_year
+        data_tests: [not_null]
+      - name: end_year
+        data_tests: [not_null]
+
+  - name: congresses_sessions
+    description: Chamber sessions nested in canonical Congress.gov Congress records.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [congress_number, session, chamber]
+    columns:
+      - name: congress_number
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('congresses'), field: congress_number}
+      - name: session
+        data_tests: [not_null]
+      - name: chamber
+        data_tests: [not_null]
+
+  - name: congresses_directories
+    description: >-
+      Published Congressional Directory package surface from harvested GovInfo
+      CDIR package details.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [congress_number, title]
+
+  - name: congresses_directories_isbn
+    description: >-
+      Package-level ISBN observations for Congressional Directory publications.
+      Repeated ISBN values are retained when they occur in distinct GovInfo
+      packages, matching the published archive grain.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [congress_number, govinfo_package_id, isbn]
+
+  - name: members
+    description: Canonical Congress.gov member records without crawler provenance.
+    columns:
+      - name: bioguide_id
+        data_tests: [not_null, unique]
+      - name: normalized_name
+        data_tests: [not_null]
+
+  - name: members_leadership_roles
+    description: Leadership roles nested in canonical Congress.gov member records.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [bioguide_id, role, congress, chamber]
+    columns:
+      - name: bioguide_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('members'), field: bioguide_id}
+      - name: role
+        data_tests: [not_null]
+      - name: congress
+        data_tests: [not_null]
+      - name: chamber
+        data_tests: [not_null]
+
+  - name: members_metadata
+    description: One row per harvested Congressional Directory granule. Member granules carry a resolved Bioguide when available; nonmember and unresolved granules remain with a null Bioguide. GovInfo granule ID is the stable row key.
+    data_tests:
+      - unique:
+          column_name: govinfo_granule_id
+    columns:
+      - name: govinfo_granule_id
+        data_tests:
+          - not_null
+      - name: bioguide_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('members'), field: bioguide_id}
+
+  - name: members_party_history
+    description: Party intervals nested in canonical Congress.gov member records.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [bioguide_id, party_code, start_year]
+    columns:
+      - name: bioguide_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('members'), field: bioguide_id}
+      - name: party_code
+        data_tests: [not_null]
+      - name: start_year
+        data_tests: [not_null]
+
+  - name: members_terms
+    description: Terms nested in canonical Congress.gov member records.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [bioguide_id, congress, chamber, start_year]
+    columns:
+      - name: bioguide_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('members'), field: bioguide_id}
+      - name: congress
+        data_tests: [not_null]
+      - name: chamber
+        data_tests: [not_null]
+      - name: start_year
+        data_tests: [not_null]
+
+  - name: committees
+    description: Canonical Congress.gov committee and subcommittee records.
+    columns:
+      - name: committee_code
+        data_tests: [not_null, unique]
+      - name: name
+        data_tests: [not_null]
+      - name: chamber
+        data_tests: [not_null]
+
+  - name: committees_bills
+    description: Reciprocal union of Congress.gov committee-to-bill observations.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [committee_code, bill_id]
+    columns:
+      - name: committee_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committees'), field: committee_code}
+      - name: bill_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('bills'), field: bill_id}
+
+  - name: committees_committeereports
+    description: Committee-to-report associations from canonical Congress.gov committee records.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [committee_code, report_id]
+    columns:
+      - name: committee_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committees'), field: committee_code}
+      - name: report_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committee_reports'), field: report_id}
+
+  - name: committees_history
+    description: Historical committee names, authorities, and effective intervals.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [committee_code, started_at]
+    columns:
+      - name: committee_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committees'), field: committee_code}
+      - name: started_at
+        data_tests: [not_null]
+
+  - name: committees_subcommittees
+    description: Parent committee to subcommittee hierarchy edges.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [committee_code, subcommittee_code]
+    columns:
+      - name: committee_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committees'), field: committee_code}
+      - name: subcommittee_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committees'), field: committee_code}
+
+  - name: bills
+    description: >-
+      Research-facing canonical bill grain. Congress.gov and GovInfo records
+      are unioned by bill type, number, and Congress; Congress.gov is selected
+      for overlapping descriptive fields. Source URLs, raw IDs, and matching
+      evidence remain internal to the reconciliation layer.
+    columns:
+      - name: bill_id
+        description: Lowercase canonical identifier, for example hr3076-117.
+        tests: [not_null, unique]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
+  - name: bills_actions
+    columns:
+      - name: action_id
+        tests: [not_null, unique]
+      - name: bill_id
+        tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('bills'), field: bill_id}
+  - name: bills_actions_committees
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [action_id, committee_code]
+    columns:
+      - name: action_id
+        tests: [not_null]
+      - name: bill_id
+        tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('bills'), field: bill_id}
+      - name: committee_code
+        tests: [not_null]
+  - name: bills_actions_recorded_votes
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [action_id, chamber, congress, session, roll_number]
+    columns:
+      - name: action_id
+        tests: [not_null]
+      - name: bill_id
+        tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('bills'), field: bill_id}
+  - name: bills_cbocostestimates
+    columns:
+      - name: bill_id
+        tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('bills'), field: bill_id}
+      - name: url
+        tests: [not_null]
+  - name: bills_cosponsors
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: bioguide_id
+        tests: [not_null]
+  - name: bills_laws
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: law_id
+        tests: [not_null]
+  - name: bills_metadata
+    description: GovInfo package metadata at one representative package per canonical bill.
+    columns:
+      - name: bill_id
+        tests: [not_null, unique]
+      - name: govinfo_package_id
+        tests: [not_null, unique]
+      - name: migrated_doc_id
+        description: Migrated document identifier from the GovInfo otherIdentifier object, when supplied.
+      - name: stock_number
+        description: GPO stock number from the GovInfo otherIdentifier object, when supplied.
+      - name: child_ils_system_id
+        description: Child ILS system identifier from the GovInfo otherIdentifier object, when supplied.
+      - name: parent_ils_system_id
+        description: Parent ILS system identifier from the GovInfo otherIdentifier object, when supplied.
+  - name: bills_notes
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: note_number
+        tests: [not_null]
+  - name: bills_notes_links
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: note_number
+        tests: [not_null]
+      - name: link_url
+        tests: [not_null]
+  - name: bills_related_bills
+    description: Canonical Congress.gov related-bill edges; related IDs are retained even when a source-side counterpart is not yet harvested.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [bill_id, related_bill_id]
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: related_bill_id
+        tests: [not_null]
+      - name: identification_entity
+        tests: [not_null]
+  - name: bills_sponsors
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: bioguide_id
+        tests: [not_null]
+  - name: bills_subjects
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: subject
+        tests: [not_null]
+  - name: bills_summaries
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: action_date
+        tests: [not_null]
+      - name: text
+        tests: [not_null]
+      - name: version_code
+        tests: [not_null]
+  - name: bills_texts
+    columns:
+      - name: bill_id
+        tests: [not_null]
+  - name: bills_titles
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: title
+        tests: [not_null]
+  - name: bills_reference_codes
+    description: US Code references parsed from available GovInfo BILLS package metadata; may be empty until package references are harvested.
+    columns:
+      - name: bill_code_id
+        tests: [not_null, unique]
+      - name: bill_id
+        tests: [not_null]
+  - name: bills_reference_codes_sections
+    columns:
+      - name: bill_code_id
+        tests: [not_null]
+      - name: code_section
+        tests: [not_null]
+  - name: bills_reference_laws
+    columns:
+      - name: bill_id
+        tests: [not_null]
+      - name: law_id
+        tests: [not_null]
+  - name: bills_reference_statutes
+    columns:
+      - name: bill_statute_id
+        tests: [not_null, unique]
+      - name: bill_id
+        tests: [not_null]
+  - name: bills_reference_statutes_pages
+    columns:
+      - name: bill_statute_id
+        tests: [not_null]
+      - name: page
+        tests: [not_null]
+
+  - name: committee_meetings
+    description: Canonical Congress.gov committee meetings with normalized location fields.
+    columns:
+      - name: meeting_id
+        description: Event identifier combined with Congress.
+        tests: [not_null, unique]
+      - name: title
+        tests: [not_null]
+      - name: chamber
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+  - name: committee_meetings_associated_bills
+    description: Meeting-to-bill associations published by Congress.gov.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [meeting_id, bill_id]}
+    columns:
+      - name: meeting_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_meetings'), field: meeting_id}}
+      - name: bill_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('bills'), field: bill_id}}
+  - name: committee_meetings_associated_hearings
+    description: Canonical meeting-to-hearing edges from both API relationship directions and GovInfo corroboration.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [meeting_id, hearing_id]}
+    columns:
+      - name: meeting_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_meetings'), field: meeting_id}}
+      - name: hearing_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+  - name: committee_meetings_associated_nominations
+    description: Meeting-to-nomination associations published by Congress.gov.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [meeting_id, nomination_id]}
+    columns:
+      - name: meeting_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_meetings'), field: meeting_id}}
+      - name: nomination_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('nominations'), field: nomination_id}}
+  - name: committee_meetings_associated_treaties
+    description: Meeting-to-treaty associations published by Congress.gov.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [meeting_id, treaty_id]}
+    columns:
+      - name: meeting_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_meetings'), field: meeting_id}}
+      - name: treaty_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('treaties'), field: treaty_id}}
+  - name: committee_meetings_committees
+    description: Committees associated with a scheduled meeting.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [meeting_id, committee_code]}
+    columns:
+      - name: meeting_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_meetings'), field: meeting_id}}
+      - name: committee_code
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committees'), field: committee_code}}
+  - name: committee_meetings_meeting_documents
+    description: Documents attached to a committee meeting.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [meeting_id, url]}
+    columns:
+      - name: meeting_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_meetings'), field: meeting_id}}
+      - name: url
+        tests: [not_null]
+  - name: committee_meetings_witness_documents
+    description: Documents attached to meeting witnesses.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [meeting_id, url]}
+    columns:
+      - name: meeting_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_meetings'), field: meeting_id}}
+      - name: url
+        tests: [not_null]
+  - name: committee_meetings_witnesses
+    description: Named witnesses participating in a committee meeting.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [meeting_id, name]}
+    columns:
+      - name: meeting_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_meetings'), field: meeting_id}}
+      - name: name
+        tests: [not_null]
+
+  - name: hearings
+    description: Canonical Congress.gov hearings reconciled to GovInfo identities where available. Joint hearings remain one row with chamber joint.
+    columns:
+      - name: hearing_id
+        tests: [not_null, unique]
+      - name: title
+        description: Official source title when supplied; four Congress.gov source-gap records currently have no title or citation.
+        tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: congress
+        tests: [not_null]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values: {arguments: {values: [house, senate, joint]}}
+  - name: hearings_bills
+    description: Bills associated with a hearing when supplied by the Congress.gov hearing payload.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [hearing_id, bill_id]}
+    columns:
+      - name: hearing_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+      - name: bill_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('bills'), field: bill_id}}
+  - name: hearings_committees
+    description: Committees associated with a hearing.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [hearing_id, committee_code]}
+    columns:
+      - name: hearing_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+      - name: committee_code
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committees'), field: committee_code}}
+  - name: hearings_dates
+    description: Calendar dates associated with a hearing.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [hearing_id, hearing_date]}
+    columns:
+      - name: hearing_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+      - name: hearing_date
+        tests: [not_null]
+  - name: hearings_members
+    description: Member associations supplied by the Congress.gov hearing payload.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [hearing_id, bioguide_id]}
+    columns:
+      - name: hearing_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+      - name: bioguide_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('members'), field: bioguide_id}}
+  - name: hearings_metadata
+    description: GovInfo package metadata reconciled to a canonical hearing.
+    columns:
+      - name: hearing_id
+        tests:
+          - not_null
+          - unique
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+      - name: govinfo_package_id
+        tests: [not_null, unique]
+  - name: hearings_metadata_granules
+    description: GovInfo granules belonging to a reconciled hearing package.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [hearing_id, govinfo_granule_id]}
+    columns:
+      - name: hearing_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+      - name: govinfo_granule_id
+        tests: [not_null]
+  - name: hearings_texts
+    description: Hearing text renditions supplied by Congress.gov.
+    columns:
+      - name: hearing_id
+        tests:
+          - not_null
+          - unique
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+  - name: hearings_witnesses
+    description: Named witnesses supplied by the Congress.gov hearing payload.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments: {combination_of_columns: [hearing_id, witness]}
+    columns:
+      - name: hearing_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('hearings'), field: hearing_id}}
+      - name: witness
+        tests: [not_null]

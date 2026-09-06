@@ -10,9 +10,9 @@ with reports as (
 ),
 package_detail as (
     select
-        id as raw_id,
+        raw_id,
         response as package_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'govinfo'
       and category = 'govinfo-committee-reports'
       and node_type = 'govinfo_committee_report_package_detail'
@@ -28,7 +28,9 @@ serialset_packages as (
         reports.package_id,
         {{ json_text('package_json', 'serialSet.bagId') }} as bag_id,
         {{ json_text('package_json', 'serialSet.docId') }} as doc_id,
-        {{ json_int('package_json', 'serialSet.serialSetNumber') }} as serialset_number,
+        -- Serial Set identifiers may carry a volume/series suffix (for
+        -- example 12713-2 or 4908-b); retain the source identifier as text.
+        {{ json_text('package_json', 'serialSet.serialSetNumber') }} as serialset_number,
         {{ json_text('package_json', 'agency') }} as agency,
         {{ json_text('package_json', 'volume') }} as volume,
         {{ json_text('package_json', 'parentId') }} as parent_serialset_id,

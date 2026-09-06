@@ -1,0 +1,11 @@
+source_committee_id,committee_id,reviewer,reviewed_at,reason,expires_at
+hsa00,hsas00,codex,2026-08-26,"GovInfo Armed Services committee record; hsas00 is the Congress.gov Armed Services system code.",
+hsapp00,hsap00,codex,2026-08-26,"GovInfo Appropriations committee record; hsap00 is the Congress.gov Appropriations system code.",
+hsba,hsba00,codex,2026-08-26,"GovInfo Financial Services committee record; hsba00 is the Congress.gov Financial Services system code.",
+hsg00,hsgo00,codex,2026-08-26,"GovInfo Government Reform and Oversight committee record; hsgo00 is the Congress.gov system code.",
+hsle00,hlse00,codex,2026-08-26,"GovInfo Elder Abuse/Select Committee record; hlse00 is the Congress.gov Aging (Select) system code.",
+hsmw00,hswm00,codex,2026-08-26,"GovInfo Ways and Means committee record; hswm00 is the Congress.gov system code.",
+jsce00,jcse00,codex,2026-08-26,"GovInfo Helsinki Commission record duplicates jcse00 with transposed system-code letters.",
+spia000,spia00,codex,2026-08-26,"GovInfo Porteous impeachment-trial committee record; spia00 is the Congress.gov system code.",
+ssag00,ssaf00,codex,2026-08-26,"Historical GovInfo Senate Agriculture code and chamber/name evidence map to the Congress.gov Agriculture, Nutrition, and Forestry system code.",
+committee on judiciary,ssju00,codex,2026-08-26,"GovInfo authorityId is a historical committee name rather than a code; Senate type/chamber and committeeName evidence in CPRT-113SPRT30961 uniquely map it to the Congress.gov Senate Judiciary system code ssju00.",2027-08-26

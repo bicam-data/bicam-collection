@@ -1,32 +1,33 @@
 {{ config(tags=["bills", "staging"]) }}
 
-with cosponsor_responses as (
-    {{ resolve_child('bill_detail', 'bill_cosponsors', 'bills') }}
-),
-bill_detail as (
+/*
+   The child resolver intentionally returns the complete baseline plus every
+   applicable non-empty delta.  Reconcile that evidence at the entity grain
+   here: a bill can have one current cosponsor observation per Bioguide ID.
+   The intermediate relation retains the source-array occurrences for audit.
+*/
+with observations as (
     select
-        raw_id,
-        bill_id
-    from {{ ref('stg_congress__bill_detail') }}
-),
-unnested as (
-    select
-        bill_detail.bill_id,
-        cosponsor_item.value as cosponsor_json
-    from cosponsor_responses
-    join bill_detail
-      on cosponsor_responses.parent_raw_id = bill_detail.raw_id
-    cross join lateral {{ unnest_array('response', 'cosponsors', 'cosponsor_item') }}
+        observations.*,
+        row_number() over (
+            partition by observations.bill_id, observations.bioguide_id
+            order by observations.source_fetched_at desc nulls last,
+                     observations.source_raw_id desc,
+                     observations.source_ordinal desc
+        ) as _rn
+    from {{ ref('int_congress_bill_cosponsor_observations') }} as observations
+    where observations.bioguide_id is not null
 )
 
 select
     bill_id,
-    nullif(cosponsor_json #>> '{bioguideId}', '') as bioguide_id,
-    nullif(cosponsor_json #>> '{fullName}', '') as display_name,
-    nullif(cosponsor_json #>> '{party}', '') as party,
-    nullif(cosponsor_json #>> '{state}', '') as state,
-    (nullif(cosponsor_json #>> '{district}', ''))::integer as district,
-    coalesce((nullif(cosponsor_json #>> '{isOriginalCosponsor}', ''))::boolean, false) as is_original_cosponsor,
-    (nullif(cosponsor_json #>> '{sponsorshipDate}', ''))::date as sponsorship_date,
-    (nullif(cosponsor_json #>> '{sponsorshipWithdrawnDate}', ''))::date as sponsorship_withdrawal_date
-from unnested
+    bioguide_id,
+    display_name,
+    party,
+    state,
+    district,
+    is_original_cosponsor,
+    sponsorship_date,
+    sponsorship_withdrawal_date
+from observations
+where _rn = 1

@@ -1,0 +1,66 @@
+version: 2
+
+models:
+  - name: stg_congress__congressional_record
+    description: Congressional Record index issues returned by the legacy congressional-record endpoint.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: record_issue_id
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: issue_number
+        tests: [not_null]
+
+  - name: stg_congress__daily_congressional_record
+    description: Daily Congressional Record issues listed by volume and issue number.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: daily_record_issue_id
+        tests: [not_null]
+      - name: volume_number
+        tests: [not_null]
+      - name: issue_number
+        tests: [not_null]
+
+  - name: stg_congress__daily_congressional_record_detail
+    description: Detail metadata and resource links for a Daily Congressional Record issue.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: daily_record_issue_id
+        tests: [not_null]
+      - name: articles_count
+        tests: [not_null]
+
+  - name: stg_congress__daily_congressional_record_articles
+    description: Section articles exposed by a Daily Congressional Record issue.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: article_id
+        tests: [not_null]
+      - name: title
+        tests: [not_null]
+
+  - name: stg_congress__bound_congressional_record
+    description: Bound Congressional Record issues from the root list endpoint.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: bound_record_id
+        tests: [not_null]
+      - name: record_date
+        tests: [not_null]
+
+  - name: stg_congress__bound_congressional_record_detail
+    description: Bound Congressional Record day detail and embedded resource metadata.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: bound_record_id
+        tests: [not_null]
+      - name: record_date
+        tests: [not_null]

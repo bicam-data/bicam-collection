@@ -24,8 +24,8 @@ resolved as (
         overrides.reason as review_reason
     from candidates
     left join overrides
-     on candidates.congress_source_record_id = overrides.congress_source_record_id
-     and candidates.govinfo_source_record_id = overrides.govinfo_source_record_id
+     on candidates.congress_source_record_id is not distinct from overrides.congress_source_record_id
+     and candidates.govinfo_source_record_id is not distinct from overrides.govinfo_source_record_id
      and (overrides.expires_at is null or overrides.expires_at >= now())
 )
 
@@ -53,9 +53,16 @@ select
     end as decision_rule,
     candidate_confidence,
     title_agrees,
+    primary_title_agrees,
+    title_agreement_basis,
+    matched_congress_title,
+    matched_congress_title_type,
+    matched_congress_title_type_code,
+    govinfo_title_field,
     origin_chamber_agrees,
     congress_title,
     govinfo_title,
+    govinfo_short_title,
     reviewer,
     reviewed_at,
     review_reason

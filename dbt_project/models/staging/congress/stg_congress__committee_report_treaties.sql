@@ -1,25 +1,17 @@
 {{ config(tags=["committee_reports", "staging"]) }}
 
-with detail as (
+with unnested as (
     select
-        response
-    from {{ source('raw', 'raw_responses') }}
-    where source = 'congress'
-      and category = 'committee-reports'
-      and node_type = 'committee_report_detail'
-),
-reports as (
-    select
-        report.value as report_json
-    from detail
-    cross join lateral {{ unnest_array('response', 'committeeReports', 'report') }}
-),
-unnested as (
-    select
-        report_json,
+        reports.report_json,
         treaty.value as treaty_json
-    from reports
-    cross join lateral {{ unnest_array('report_json', 'associatedTreaties', 'treaty') }}
+    from {{ ref('int_congress_committee_report_records') }} as reports
+    cross join lateral jsonb_array_elements(
+        case
+            when jsonb_typeof(reports.report_json -> 'associatedTreaties') = 'array'
+                then reports.report_json -> 'associatedTreaties'
+            else '[]'::jsonb
+        end
+    ) as treaty(value)
 )
 
 select
@@ -47,8 +39,8 @@ select
     || {{ json_int('treaty_json', 'congress') }}::text
     || '-'
     || {{ json_int('treaty_json', 'number') }}::text
-    || coalesce(({{ json_int('treaty_json', 'part') }})::text, '') as treaty_part_id,
+    || coalesce({{ json_text('treaty_json', 'part') }}, '') as treaty_part_id,
     {{ json_int('treaty_json', 'congress') }} as congress,
     {{ json_int('treaty_json', 'number') }} as treaty_number,
-    {{ json_int('treaty_json', 'part') }} as treaty_part
+    {{ json_text('treaty_json', 'part') }} as treaty_part
 from unnested

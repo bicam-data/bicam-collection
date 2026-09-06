@@ -1,6 +1,176 @@
 version: 2
 
 models:
+  - name: fct_child_state_gaps
+    description: >-
+      Selected Congress.gov child responses whose complete collection
+      generation could not be proven. These rows are routed to the source-gap
+      queue as actionable reprobe items without being treated as missing
+      cross-source records.
+    columns:
+      - name: queue_id
+        tests: [not_null, unique]
+      - name: entity
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [child_state]}
+      - name: canonical_id
+        tests: [not_null, unique]
+      - name: child_collection
+        tests: [not_null]
+      - name: missing_source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [congress]}
+      - name: endpoint_url
+        tests: [not_null]
+      - name: decision_rule
+        tests: [not_null]
+
+  - name: fct_source_gap_queue
+    description: >-
+      Actionable source-gap queue derived from reconciliation exceptions. It
+      keeps reviewed gaps and their expiry dates visible while exposing a
+      compact status/priority/next-action surface for schedulers and alerts.
+    columns:
+      - name: queue_id
+        tests: [not_null, unique]
+      - name: entity
+        tests: [not_null]
+      - name: canonical_id
+        tests: [not_null]
+      - name: missing_source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [congress, govinfo]}
+      - name: priority
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [high, normal, low]}
+      - name: queue_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [open, due_for_reprobe, deferred_source_gap, closed]}
+
+  - name: fct_govinfo_collection_windows
+    description: >-
+      Durable intended-window ledger for GovInfo BILLS, CRPT, CPRT, and CHRG.
+      A non-bootstrap completed row represents terminal pagination and zero
+      failed fetch events for the collection and all discovered descendants.
+    columns:
+      - name: window_id
+        tests: [not_null, unique]
+      - name: category
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - govinfo-bills
+                  - govinfo-committee-reports
+                  - govinfo-committee-prints
+                  - govinfo-hearings
+      - name: window_start
+        tests: [not_null]
+      - name: window_end
+        tests: [not_null]
+      - name: status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [running, completed, failed]
+      - name: is_bootstrap
+        tests: [not_null]
+      - name: completed_through
+        tests: [not_null]
+
+  - name: fct_root_detail_coverage
+    columns:
+      - name: root_detail_coverage_id
+        tests: [not_null, unique]
+      - name: source
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+      - name: list_node_type
+        tests: [not_null]
+      - name: detail_node_type
+        tests: [not_null]
+      - name: partition_value
+        tests: [not_null]
+      - name: root_item_count
+        tests: [not_null]
+      - name: fetched_detail_count
+        tests: [not_null]
+      - name: missing_detail_count
+        description: Raw advertised root identities without a stored detail payload.
+        tests: [not_null]
+      - name: confirmed_source_error_detail_count
+        description: Missing detail identities whose exact URL has at least three durable Congress.gov 404/500 responses.
+        tests: [not_null]
+      - name: actionable_missing_detail_count
+        description: Missing detail identities that remain fetchable and require crawler repair.
+        tests: [not_null]
+      - name: detail_coverage_rate
+        description: Raw fetched-detail rate; confirmed source defects remain visible as missing.
+        tests: [not_null]
+      - name: accounted_detail_coverage_rate
+        description: Rate after fetched details and confirmed deterministic source defects are both accounted for.
+        tests: [not_null]
+      - name: quality_status
+        tests: [not_null]
+
+  - name: fct_pagination_coverage
+    columns:
+      - name: pagination_coverage_id
+        tests: [not_null, unique]
+      - name: category
+        tests: [not_null]
+      - name: node_type
+        tests: [not_null]
+      - name: partition_value
+        tests: [not_null]
+      - name: expected_item_count
+        tests: [not_null]
+      - name: enumerated_item_count
+        tests: [not_null]
+      - name: enumerated_row_count
+        tests: [not_null]
+      - name: observed_row_count
+        tests: [not_null]
+      - name: duplicate_item_count
+        tests: [not_null]
+      - name: source_identity_count_gap
+        tests: [not_null]
+      - name: list_page_count
+        tests: [not_null]
+      - name: pages_with_next
+        tests: [not_null]
+      - name: terminal_page_count
+        tests: [not_null]
+      - name: missing_item_count
+        tests: [not_null]
+      - name: missing_position_ranges
+        description: Exact zero-based source list positions not covered by any stored page.
+        tests: [not_null]
+      - name: confirmed_source_error_item_count
+        description: Missing positions whose exact URL has a durable Congress.gov source-error response.
+        tests: [not_null]
+      - name: actionable_missing_item_count
+        description: Missing positions that remain fetchable and require repair.
+        tests: [not_null]
+      - name: actionable_missing_position_ranges
+        description: Exact missing ranges after subtracting confirmed deterministic source errors.
+        tests: [not_null]
+      - name: estimated_missing_page_count
+        tests: [not_null]
+
   - name: fct_collection_coverage
     columns:
       - name: coverage_id
@@ -15,7 +185,270 @@ models:
         tests: [not_null]
       - name: current_response_count
         tests: [not_null]
+      - name: scheduled_fetch_count
+        tests: [not_null]
+      - name: successful_fetch_count
+        tests: [not_null]
+      - name: failed_fetch_count
+        tests: [not_null]
+      - name: expected_fetch_count
+        tests: [not_null]
+      - name: expected_child_fetch_count
+        tests: [not_null]
+      - name: child_scheduled_fetch_count
+        tests: [not_null]
+      - name: child_successful_fetch_count
+        tests: [not_null]
+      - name: child_failed_fetch_count
+        tests: [not_null]
+      - name: unsatisfied_fetch_count
+        tests: [not_null]
+      - name: child_unsatisfied_fetch_count
+        tests: [not_null]
       - name: expected_scope
         tests: [not_null]
       - name: has_observed_data
         tests: [not_null]
+
+  - name: fct_congress_internal_reciprocity
+    description: >-
+      Reciprocity audit for Congress.gov member↔bill, member↔amendment,
+      committee↔bill, bill↔amendment, bill↔committee-report, committee↔nomination, and
+      committee↔committee-report, committee-meeting↔hearing, and
+      treaty↔committee-report relationships
+      exposed from both directions.
+      One-sided edges remain
+      counterpart-unavailable when the counterpart detail is absent; when both
+      endpoint records are present, a one-sided edge is explicitly classified
+      as source asymmetry. A contradiction is reserved for a future
+      attribute/value conflict and is never inferred solely from endpoint
+      presence. The meeting↔hearing API is intentionally asymmetric and uses
+      the same explicit asymmetric-source status.
+    columns:
+      - name: relationship_id
+        tests: [not_null, unique]
+      - name: relationship_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - member_bill_sponsor
+                  - member_bill_cosponsor
+                  - member_amendment_sponsor
+                  - member_amendment_cosponsor
+                  - committee_bill
+                  - bill_amendment
+                  - bill_committee_report
+                  - committee_nomination
+                  - committee_committee_report
+                  - committee_meeting_hearing
+                  - treaty_committee_report
+      - name: left_id
+        tests: [not_null]
+      - name: right_id
+        tests: [not_null]
+      - name: left_present
+        tests: [not_null]
+      - name: right_present
+        tests: [not_null]
+      - name: evidence_directions
+        description: API directions contributing evidence to the canonical union row.
+        tests: [not_null]
+      - name: evidence_sources
+        description: Source-side entity families contributing evidence.
+        tests: [not_null]
+      - name: evidence_count
+        description: Number of deduplicated source-side evidence rows retained for this relationship.
+        tests: [not_null]
+      - name: left_endpoint_available
+        tests: [not_null]
+      - name: right_endpoint_available
+        tests: [not_null]
+      - name: reciprocity_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - reciprocal
+                  - left_only_counterpart_unavailable
+                  - right_only_counterpart_unavailable
+                  - left_only_asymmetric_source
+                  - right_only_asymmetric_source
+                  - left_only_contradiction
+                  - right_only_contradiction
+                  - unclassified
+
+  - name: fct_congress_internal_reciprocity_metrics
+    description: >-
+      Aggregate counts and rates for the Congress.gov internal reciprocity
+      audit. Every declared relationship family receives a row; a family with
+      no observed edges is explicit with zero counts and review status.
+      Contradictions and unclassified rows are surfaced for review;
+      endpoint-unavailable rows are not treated as false negatives.
+    columns:
+      - name: relationship_type
+        tests:
+          - not_null
+          - unique
+      - name: relationship_count
+        tests: [not_null]
+      - name: reciprocal_count
+        tests: [not_null]
+      - name: unavailable_count
+        tests: [not_null]
+      - name: asymmetric_count
+        tests: [not_null]
+      - name: contradiction_count
+        tests: [not_null]
+      - name: unclassified_count
+        tests: [not_null]
+      - name: reciprocal_rate
+        tests: [not_null]
+      - name: contradiction_rate
+        tests: [not_null]
+      - name: quality_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [pass, review]
+
+  - name: fct_govinfo_member_identity_exceptions
+    description: >-
+      Review queue for unresolved GovInfo committee-report member records
+      whose Bioguide identity is missing or invalid. Committee, Congress,
+      state, and raw-name context are retained so reviewers can cross-reference
+      Congress.gov. Composite parents whose every named component is resolved
+      in bridge_govinfo__member_components remain non-singular source records
+      but are excluded from this queue.
+    columns:
+      - name: source_member_key
+        tests: [not_null, unique]
+      - name: report_id
+        tests: [not_null]
+      - name: bioguide_resolution_status
+        tests: [not_null]
+      - name: identity_context
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [submittedby, member_metadata]
+      - name: review_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [pending_manual_review]
+
+  - name: fct_govinfo_member_reference_identity_exceptions
+    description: >-
+      All-category review queue for GovInfo member references without a safe
+      canonical Bioguide assignment. Candidate IDs, raw names, source
+      provenance, and an explicit reason are retained; the queue never
+      invents an identifier. Composite parents whose every named component is
+      resolved in bridge_govinfo__member_components are excluded because the
+      source object is intentionally non-singular but fully linkable.
+    columns:
+      - name: member_reference_bridge_id
+        tests: [not_null, unique]
+      - name: source_member_reference_key
+        tests: [not_null, unique]
+      - name: raw_id
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+      - name: resolution_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [ambiguous_review, multi_legislator_review, missing_identifier_review]
+      - name: review_reason
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [ambiguous_member_name, composite_member_parent, no_safe_congress_member_match]
+      - name: review_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [pending_manual_review]
+
+  - name: fct_govinfo_member_identity_candidates
+    description: >-
+      Evidence-only Congress.gov candidates for unresolved GovInfo member
+      identities. Candidates are never applied automatically; reviewers must
+      confirm the member against the Congress, state, committee, and source
+      record before adding an override.
+    columns:
+      - name: source_member_key
+        tests: [not_null]
+      - name: candidate_count
+        tests: [not_null]
+      - name: chamber
+        description: GovInfo source chamber used to constrain candidate evidence.
+      - name: candidate_chamber
+        description: Congress.gov member-term chamber retained as independent evidence.
+      - name: review_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - manual_review_no_candidate
+                  - manual_review_single_candidate
+                  - manual_review_multiple_candidates
+
+  - name: fct_govinfo_data_quality_metrics
+    description: Counts of GovInfo committee-ID, member-identity, and recursive package/granule identity normalization outcomes, including source-neutral member-reference resolutions across bills, committee reports, and hearings.
+    columns:
+      - name: metric_name
+        tests: [not_null, unique]
+      - name: metric_value
+        tests: [not_null]
+      - name: quality_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [pass, review]
+
+  - name: fct_govinfo_nested_identity_exceptions
+    description: Review queue for malformed Bioguide, Thomas, or authority identifiers found in nested GovInfo JSON fields.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: json_path
+        tests: [not_null]
+      - name: identity_field
+        tests: [not_null]
+      - name: review_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [pending_manual_review]
+
+  - name: fct_govinfo_committee_id_exceptions
+    description: Review queue for GovInfo committees[] authority IDs (including nested package/granule subfields) without an evidence-backed Congress.gov system-code mapping. Reviewed authority exceptions are retained in the map but excluded from this open queue.
+    columns:
+      - name: source_committee_id
+        tests: [not_null]
+      - name: normalization_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [unmapped_identifier, non_identifier_text]
+      - name: node_types
+        tests: [not_null]
+      - name: review_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [pending_manual_review]

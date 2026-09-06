@@ -1,31 +1,22 @@
-{{ config(tags=["bills", "staging"]) }}
+{{ config(materialized="table", tags=["bills", "staging"]) }}
 
-with amendment_responses as (
-    {{ resolve_child('bill_detail', 'bill_amendments', 'bills') }}
-),
-bill_detail as (
+with observations as (
+    select *
+    from {{ ref('int_congress_bill_amendment_observations') }}
+), keyed as (
     select
-        raw_id,
-        bill_id
-    from {{ ref('stg_congress__bill_detail') }}
-),
-unnested as (
-    select
-        bill_detail.bill_id,
-        amendment_item.value as amendment_json
-    from amendment_responses
-    join bill_detail
-      on amendment_responses.parent_raw_id = bill_detail.raw_id
-    cross join lateral {{ unnest_array('response', 'amendments', 'amendment_item') }}
+        observations.*,
+        row_number() over (
+            partition by bill_id, amendment_id
+            order by source_fetched_at desc nulls last,
+                     source_raw_id desc,
+                     amendment_type asc nulls last,
+                     amendment_number asc nulls last,
+                     congress asc nulls last
+        ) as key_rank,
+        bill_id is not null and amendment_id is not null as key_complete
+    from observations
 )
-
-select
-    bill_id,
-    {{ build_custom_id([
-        "lower(nullif(amendment_json #>> '{type}', ''))",
-        "amendment_json #>> '{number}'"
-    ]) }} || '-' || coalesce(amendment_json #>> '{congress}', '') as amendment_id,
-    lower(nullif(amendment_json #>> '{type}', '')) as amendment_type,
-    (nullif(amendment_json #>> '{number}', ''))::integer as amendment_number,
-    (nullif(amendment_json #>> '{congress}', ''))::integer as congress
-from unnested
+select bill_id, amendment_id, amendment_type, amendment_number, congress
+from keyed
+where key_rank = 1 or not key_complete

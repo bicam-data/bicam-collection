@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: int_congress_committee_print_text_formats
+    description: Stable expansion of committee-print text and format arrays after child-state resolution.
+    columns:
+      - name: format_key
+        tests: [not_null, unique]
+      - name: print_id
+        tests: [not_null]
+      - name: raw_response_version_id
+        tests: [not_null]
+      - name: print_detail_raw_id
+        tests: [not_null]

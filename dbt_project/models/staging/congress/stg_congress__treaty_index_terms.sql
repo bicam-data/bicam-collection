@@ -2,10 +2,10 @@
 
 with detail_responses as (
     select
-        id as source_raw_id,
+        raw_id as source_raw_id,
         endpoint_url,
         response
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'treaties'
       and node_type = 'treaty_detail'

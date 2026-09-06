@@ -1,29 +1,20 @@
 {{ config(tags=["nominations", "staging"]) }}
 
-with action_responses as (
-    {{ resolve_child('nomination_detail', 'nomination_actions', 'nominations') }}
-),
-unnested as (
+with keyed as (
     select
-        substring(parent_endpoint_url from '/nomination/([0-9]+)/')::integer as congress,
-        substring(parent_endpoint_url from '/nomination/[0-9]+/([0-9]+)') as nomination_number,
-        coalesce(
-            substring(parent_endpoint_url from '/nomination/[0-9]+/[0-9]+/([^/?]+)'),
-            '00'
-        ) as nomination_part,
-        action.value as action_json
-    from action_responses
-    cross join lateral {{ unnest_array('response', 'actions', 'action') }}
+        observations.*,
+        row_number() over (
+            partition by observations.action_id
+            order by observations.source_fetched_at desc nulls last,
+                     observations.source_raw_id desc,
+                     observations.source_ordinal desc
+        ) as key_rank,
+        observations.action_id is not null
+            and observations.nomination_part_id is not null as key_complete
+    from {{ ref('int_congress_nomination_action_observations') }} as observations
 )
 
-select
-    'pn' || nomination_number || '-' || congress::text as nomination_id,
-    'pn' || nomination_number || '-' || nomination_part || '-' || congress::text as nomination_part_id,
-    {{ hash_to_uuid(
-        "'pn' || " ~ "nomination_number" ~ " || '-' || " ~ "nomination_part" ~ " || '-' || " ~ "congress::text" ~ " || '|' || action_json::text"
-    ) }} as action_id,
-    {{ json_text('action_json', 'actionCode') }} as action_code,
-    {{ json_text('action_json', 'type') }} as action_type,
-    {{ json_date('action_json', 'actionDate') }} as action_date,
-    {{ json_text('action_json', 'text') }} as text
-from unnested
+select nomination_id, nomination_part_id, action_id, action_code, action_type,
+       action_date, text
+from keyed
+where key_rank = 1 or not key_complete

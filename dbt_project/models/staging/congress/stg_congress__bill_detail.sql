@@ -2,26 +2,40 @@
 
 with detail as (
     select
-        id as raw_id,
+        raw_id,
         endpoint_url,
         raw_response_version_id,
-        response -> 'bill' as bill_json
-    from {{ source('raw', 'raw_responses') }}
+        response -> 'bill' as bill_payload
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'bills'
       and node_type = 'bill_detail'
+),
+normalized_detail as (
+    select
+        raw_id,
+        endpoint_url,
+        raw_response_version_id,
+        case
+            -- Older Congress partitions return a bill-number URL as an
+            -- array of historical introductions. Keep the first canonical
+            -- record at this source endpoint; the immutable raw payload
+            -- retains every introduction for later version expansion.
+            when jsonb_typeof(bill_payload) = 'array' then bill_payload -> 0
+            else bill_payload
+        end as bill_json
+    from detail
 )
 
 select
     raw_id,
     endpoint_url,
     raw_response_version_id,
-    {{ build_custom_id([
-        "lower(nullif(bill_json #>> '{type}', ''))",
-        "bill_json #>> '{number}'"
-    ]) }} || '-' || coalesce(bill_json #>> '{congress}', '') as bill_id,
+    lower(nullif(bill_json #>> '{type}', ''))
+    || {{ congress_bill_number('bill_json') }}
+    || '-' || coalesce(bill_json #>> '{congress}', '') as bill_id,
     lower({{ json_text('bill_json', 'type') }}) as bill_type,
-    {{ json_int('bill_json', 'number') }} as bill_number,
+    {{ congress_bill_number('bill_json') }} as bill_number,
     {{ json_int('bill_json', 'congress') }} as congress,
     {{ json_text('bill_json', 'title') }} as title,
     {{ json_text('bill_json', 'originChamber') }} as origin_chamber,
@@ -49,4 +63,4 @@ select
     {{ json_int('bill_json', 'titles.count', 0) }} as titles_count,
     {{ json_timestamptz('bill_json', 'updateDate') }} as updated_at,
     {{ json_timestamptz('bill_json', 'updateDateIncludingText') }} as updated_text_at
-from detail
+from normalized_detail

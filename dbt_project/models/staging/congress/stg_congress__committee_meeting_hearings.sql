@@ -3,7 +3,7 @@
 with detail as (
     select
         response -> 'committeeMeeting' as meeting_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'committee-meetings'
       and node_type = 'committee_meeting_detail'
@@ -22,7 +22,9 @@ parsed as (
         meeting_id,
         hearing_json,
         substring({{ json_text('hearing_json', 'url') }} from '/hearing/([0-9]+)/') as congress_text,
-        lower(substring({{ json_text('hearing_json', 'url') }} from '/hearing/[0-9]+/([^/]+)/')) as chamber
+        {{ congress_hearing_route_chamber(
+            "substring(" ~ json_text('hearing_json', 'url') ~ " from '/hearing/[0-9]+/([^/]+)/')"
+        ) }} as chamber
     from unnested
 )
 

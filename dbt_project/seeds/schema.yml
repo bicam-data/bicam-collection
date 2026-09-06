@@ -26,9 +26,172 @@ seeds:
       - name: expected_scope
         tests: [not_null]
 
+  - name: collection_scope_partitions
+    columns:
+      - name: source
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+      - name: partition_field
+        tests: [not_null]
+      - name: partition_values
+        tests: [not_null]
+      - name: completeness
+        tests:
+          - accepted_values:
+              arguments:
+                values: [sampled, observed_window, full]
+
   - name: reconciliation_quality_thresholds
     columns:
       - name: entity
         tests: [not_null, unique]
+      - name: authoritative_source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [congress, govinfo]
+      - name: max_ambiguous_rate
+        tests: [not_null]
+      - name: min_authoritative_match_rate
+        tests: [not_null]
+      - name: min_title_agreement_rate
+        tests: [not_null]
       - name: contract_version
+        tests: [not_null]
+
+  - name: reconciliation_exception_reviews
+    columns:
+      - name: entity
+        tests: [not_null]
+      - name: canonical_id
+        tests: [not_null]
+      - name: disposition
+        tests:
+          - accepted_values:
+              arguments:
+                values: [pending, confirmed_source_gap, out_of_scope, needs_source_refresh, data_error]
+      - name: contract_version
+        tests: [not_null]
+
+  - name: reconciliation_source_gap_rules
+    columns:
+      - name: entity
+        tests: [not_null]
+      - name: missing_source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [congress, govinfo, both]
+      - name: disposition
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [confirmed_source_gap, out_of_scope, needs_source_refresh, data_error]
+      - name: reviewer
+        tests: [not_null]
+      - name: reviewed_at
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+      - name: contract_version
+        tests: [not_null]
+
+  - name: govinfo_member_identity_overrides
+    description: Curated GovInfo member-to-Bioguide mappings for records whose source identifier is missing or ambiguous.
+    columns:
+      - name: source_member_key
+        tests: [not_null, unique]
+      - name: committee_id
+      - name: congress
+      - name: state
+      - name: member_name
+      - name: bioguide_id
+        tests: [not_null]
+      - name: reviewer
+        tests: [not_null]
+      - name: reviewed_at
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+
+  - name: govinfo_member_component_identity_overrides
+    description: Curated component-level GovInfo SUBMITTEDBY mappings for multi-legislator objects whose individual names were cross-referenced to Congress.gov terms.
+    columns:
+      - name: component_key
+        tests: [not_null, unique]
+      - name: candidate_bioguide_id
+        tests: [not_null]
+      - name: reviewer
+        tests: [not_null]
+      - name: reviewed_at
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+
+  - name: govinfo_committee_id_overrides
+    description: Curated mappings for GovInfo authority IDs that cannot be safely normalized automatically.
+    columns:
+      - name: source_committee_id
+        tests: [not_null, unique]
+      - name: committee_id
+        tests: [not_null]
+      - name: reviewer
+        tests: [not_null]
+      - name: reviewed_at
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+
+  - name: govinfo_committee_id_exceptions
+    description: Reviewed GovInfo authority IDs intentionally preserved without a Congress.gov committee mapping because the source authority is conflated, external, or otherwise not one-to-one with a Congress.gov committee.
+    columns:
+      - name: source_committee_id
+        tests: [not_null, unique]
+      - name: classification
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [reviewed_authority_exception]
+      - name: reviewer
+        tests: [not_null]
+      - name: reviewed_at
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+
+  - name: govinfo_member_reference_reviews
+    description: Reviewed dispositions for GovInfo member-reference rows that are known non-federal participants and therefore intentionally have no Bioguide ID.
+    columns:
+      - name: source_member_reference_key
+        tests: [not_null, unique]
+      - name: classification
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [reviewed_non_federal_participant]
+      - name: reviewer
+        tests: [not_null]
+      - name: reviewed_at
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+
+  - name: bill_committee_report_multiplicity_allowlist
+    description: Reviewed bill-detail cases where multiple committee-report rows are expected at the report-part grain.
+    columns:
+      - name: endpoint_url
+        tests: [not_null, unique]
+      - name: expected_report_count
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+      - name: reviewer
+        tests: [not_null]
+      - name: reviewed_at
         tests: [not_null]

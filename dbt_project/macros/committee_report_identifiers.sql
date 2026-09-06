@@ -12,13 +12,15 @@ end
 {%- endmacro %}
 
 {% macro committee_report_canonical_id(report_type_expr, report_number_expr, congress_expr, report_part_expr='1', is_errata_expr='false') -%}
-{{ committee_report_set_id(report_type_expr, report_number_expr, congress_expr) }}
+lower({{ report_type_expr }})
+|| ({{ report_number_expr }})::text
 || '-'
 || coalesce(({{ report_part_expr }})::text, '1')
 || case when coalesce({{ is_errata_expr }}, false) then 'e' else '' end
+|| '-'
+|| ({{ congress_expr }})::text
 {%- endmacro %}
 
 {% macro normalize_match_text(expr) -%}
 nullif(regexp_replace(lower(coalesce({{ expr }}, '')), '[^a-z0-9]+', '', 'g'), '')
 {%- endmacro %}
-

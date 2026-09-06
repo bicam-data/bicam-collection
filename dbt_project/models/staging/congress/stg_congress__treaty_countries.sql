@@ -3,7 +3,7 @@
 with detail_responses as (
     select
         response
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'treaties'
       and node_type = 'treaty_detail'

@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: int_congress_member_legislation_observations
+    description: Resolver-selected member sponsored/cosponsored legislation observations with stable source-array evidence.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, sponsorship_type, source_ordinal]
+    columns:
+      - name: observation_key
+        data_tests: [not_null, unique]
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: member_detail_raw_id
+        data_tests: [not_null]
+      - name: bioguide_id
+        data_tests: [not_null]
+      - name: sponsorship_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [sponsor, cosponsor]
+      - name: source_ordinal
+        data_tests: [not_null]

@@ -3,7 +3,7 @@
 with detail as (
     select
         response -> 'congress' as congress_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'congresses'
       and node_type = 'congress_detail'

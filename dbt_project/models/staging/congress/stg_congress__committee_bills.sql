@@ -1,37 +1,29 @@
 {{ config(tags=["committees", "staging"]) }}
 
-with bill_responses as (
-    {{ resolve_child('committee_detail', 'committee_bills', 'committees') }}
-),
-unnested as (
+with observations as (
+    select *
+    from {{ ref('int_congress_committee_bill_observations') }}
+), keyed as (
     select
-        parent_raw_id,
-        bill.value as bill_json
-    from bill_responses
-    cross join lateral {{ unnest_array('response', 'committee-bills.bills', 'bill') }}
-),
-committee_lookup as (
-    select
-        id as raw_id,
-        response -> 'committee' as committee_json
-    from {{ source('raw', 'raw_responses') }}
-    where source = 'congress'
-      and category = 'committees'
-      and node_type = 'committee_detail'
+        observations.*,
+        row_number() over (
+            partition by committee_id, bill_id
+            order by source_fetched_at desc nulls last,
+                     source_raw_id desc,
+                     updated_at desc nulls last,
+                     relationship_type asc nulls last
+        ) as key_rank,
+        committee_id is not null and bill_id is not null as key_complete
+    from observations
 )
-
 select
-    {{ json_text('committee_json', 'systemCode') }} as committee_id,
-    {{ build_custom_id([
-        "lower(" ~ json_text('bill_json', 'type') ~ ")",
-        json_text('bill_json', 'number')
-    ]) }} || '-' || {{ json_int('bill_json', 'congress') }}::text as bill_id,
-    lower({{ json_text('bill_json', 'type') }}) as bill_type,
-    {{ json_text('bill_json', 'number') }} as bill_number,
-    {{ json_int('bill_json', 'congress') }} as congress,
-    {{ json_text('bill_json', 'relationshipType') }} as relationship_type,
-    {{ json_timestamptz('bill_json', 'actionDate') }} as committee_action_date,
-    {{ json_timestamptz('bill_json', 'updateDate') }} as updated_at
-from unnested
-inner join committee_lookup
-    on unnested.parent_raw_id = committee_lookup.raw_id
+    committee_id,
+    bill_id,
+    bill_type,
+    bill_number,
+    congress,
+    relationship_type,
+    committee_action_date,
+    updated_at
+from keyed
+where key_rank = 1 or not key_complete

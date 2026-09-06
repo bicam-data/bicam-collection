@@ -1,0 +1,2 @@
+source_committee_id,classification,reviewer,reviewed_at,reason,expires_at
+hoce00,reviewed_authority_exception,codex,2026-08-27,"GovInfo uses hoce00 for CPRT records named both Committee on Standards of Official Conduct and Office of Congressional Ethics. Congress.gov has no one-to-one system-code mapping for this conflated source authority; preserve the raw value and committee names rather than guessing hsso00 or another committee code.",2027-08-27

@@ -6,13 +6,21 @@ case
 end
 {%- endmacro %}
 
+
+{#
+  A SERIALSET package has two numbers: serialSetNumber is a catalog/volume
+  number, while documentNumber is the report number printed in the citation.
+  The latter is the report identity component (for example, HRPT 10 in the
+  16th Congress), so never concatenate the serial-set number into it.  Keep
+  this macro's fourth argument for callers from older projects, but ignore it
+  deliberately; the raw serial-set value remains available in staging.
+#}
 {% macro govinfo_committeereport_report_set_id_from_fields(report_type_expr, document_number_expr, congress_expr, serial_set_number_expr='null') -%}
 case
   when {{ report_type_expr }} is not null
    and {{ document_number_expr }} is not null
    and {{ congress_expr }} is not null
     then lower({{ report_type_expr }})
-      || coalesce({{ serial_set_number_expr }}, '')
       || {{ document_number_expr }}
       || '-'
       || ({{ congress_expr }})::text
@@ -21,10 +29,22 @@ end
 {%- endmacro %}
 
 {% macro govinfo_committeereport_report_id(report_set_id_expr, report_part_expr, is_errata_expr='false') -%}
-{{ report_set_id_expr }}
-|| '-'
-|| ({{ report_part_expr }})::text
-|| case when {{ is_errata_expr }} then 'e' else '' end
+case
+  /* report_set_id is retained as <type><number>-<congress>, while the
+     published report ID is <type><number>-<part>-<congress>. */
+  when {{ report_set_id_expr }} ~ '^[a-z]+[0-9]+-[0-9]+$' then
+    split_part({{ report_set_id_expr }}, '-', 1)
+    || '-'
+    || ({{ report_part_expr }})::text
+    || case when {{ is_errata_expr }} then 'e' else '' end
+    || '-'
+    || split_part({{ report_set_id_expr }}, '-', 2)
+  else
+    {{ report_set_id_expr }}
+    || '-'
+    || ({{ report_part_expr }})::text
+    || case when {{ is_errata_expr }} then 'e' else '' end
+end
 {%- endmacro %}
 
 {% macro govinfo_roman_to_int(expr) -%}

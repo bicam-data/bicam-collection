@@ -4,9 +4,9 @@ with detail as (
     select
         bill_detail.bill_id,
         raw_responses.response -> 'bill' as bill_json
-    from {{ source('raw', 'raw_responses') }} as raw_responses
+    from {{ ref('int_raw_responses__current') }} as raw_responses
     join {{ ref('stg_congress__bill_detail') }} as bill_detail
-      on raw_responses.id = bill_detail.raw_id
+      on raw_responses.raw_id = bill_detail.raw_id
     where raw_responses.source = 'congress'
       and raw_responses.category = 'bills'
       and raw_responses.node_type = 'bill_detail'

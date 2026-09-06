@@ -1,0 +1,72 @@
+version: 2
+
+models:
+  - name: treaties
+    description: Published treaty parts at the stable Congress.gov treaty detail grain.
+    columns:
+      - name: treaty_id
+        description: Stable lowercase treaty detail identifier, including a part suffix when present.
+        tests: [not_null, unique]
+      - name: treaty_number
+        tests: [not_null]
+      - name: congress_received
+        tests: [not_null]
+      - name: congress_received_session
+        description: Congress session reported by the representative GovInfo treaty-document package, when available.
+      - name: pages
+        description: Page count reported by the representative GovInfo treaty-document package, when available.
+  - name: treaties_actions
+    description: Actions taken on treaty parts.
+    columns:
+      - name: action_id
+        tests: [not_null, unique]
+      - name: treaty_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('treaties'), field: treaty_id}}
+  - name: treaties_country_parties
+    description: Country-party edges for treaty parts.
+    columns:
+      - name: treaty_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('treaties'), field: treaty_id}}
+      - name: country
+        tests: [not_null]
+  - name: treaties_index_terms
+    description: Index terms assigned to treaty parts.
+    columns:
+      - name: treaty_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('treaties'), field: treaty_id}}
+      - name: index_term
+        tests: [not_null]
+  - name: treaties_metadata
+    description: GovInfo CDOC identifiers for treaties.
+    columns:
+      - name: treaty_id
+        tests:
+          - not_null
+          - unique
+          - relationships: {arguments: {to: ref('treaties'), field: treaty_id}}
+  - name: treaties_metadata_granules
+    description: GovInfo CDOC granule identifiers for treaties.
+    columns:
+      - name: treaty_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('treaties'), field: treaty_id}}
+      - name: govinfo_granule_id
+        tests: [not_null]
+  - name: treaties_titles
+    description: Typed titles for treaty parts.
+    columns:
+      - name: treaty_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('treaties'), field: treaty_id}}
+      - name: title
+        tests: [not_null]
+      - name: title_type
+        tests: [not_null]

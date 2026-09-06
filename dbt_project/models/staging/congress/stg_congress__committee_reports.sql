@@ -1,43 +1,19 @@
 {{ config(tags=["committees", "staging"]) }}
 
-with report_responses as (
-    {{ resolve_child('committee_detail', 'committee_reports', 'committees') }}
-),
-unnested as (
+with keyed as (
     select
-        parent_raw_id,
-        report.value as report_json
-    from report_responses
-    cross join lateral {{ unnest_array('response', 'reports', 'report') }}
-),
-committee_lookup as (
-    select
-        id as raw_id,
-        response -> 'committee' as committee_json
-    from {{ source('raw', 'raw_responses') }}
-    where source = 'congress'
-      and category = 'committees'
-      and node_type = 'committee_detail'
+        observations.*,
+        row_number() over (
+            partition by committee_id, report_id, report_part_id
+            order by source_fetched_at desc nulls last,
+                     source_raw_id desc,
+                     source_ordinal desc
+        ) as key_rank,
+        committee_id is not null
+            and report_id is not null
+            and report_part_id is not null as key_complete
+    from {{ ref('int_congress_committee_report_observations') }} as observations
 )
-
-select
-    {{ json_text('committee_json', 'systemCode') }} as committee_id,
-    {{ build_custom_id([
-        "lower(" ~ json_text('report_json', 'type') ~ ")",
-        "(" ~ json_text('report_json', 'number') ~ ")::text"
-    ]) }} || '-' || {{ json_int('report_json', 'congress') }}::text as report_id,
-    {{ build_custom_id([
-        "lower(" ~ json_text('report_json', 'type') ~ ")",
-        "(" ~ json_text('report_json', 'number') ~ ")::text"
-    ]) }}
-    || '-'
-    || coalesce(({{ json_int('report_json', 'part') }})::text, '1')
-    || case
-        when {{ json_text('report_json', 'citation') }} ilike '%errata%' then 'e'
-        else ''
-       end
-    || '-'
-    || {{ json_int('report_json', 'congress') }}::text as report_part_id
-from unnested
-inner join committee_lookup
-    on unnested.parent_raw_id = committee_lookup.raw_id
+select committee_id, report_id, report_part_id
+from keyed
+where key_rank = 1 or not key_complete

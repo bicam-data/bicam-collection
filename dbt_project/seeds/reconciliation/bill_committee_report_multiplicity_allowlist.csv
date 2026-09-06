@@ -1,0 +1,7 @@
+endpoint_url,expected_report_count,reason,reviewer,reviewed_at
+https://api.congress.gov/v3/committee-report/108/HRPT/125?format=json,2,The bill detail advertises two valid committee-report rows at its natural report-part grain.,codex,2026-08-28
+https://api.congress.gov/v3/committee-report/108/HRPT/167?format=json,2,The bill detail advertises two valid committee-report rows at its natural report-part grain.,codex,2026-08-28
+https://api.congress.gov/v3/committee-report/108/HRPT/461?format=json,2,The bill detail advertises two valid committee-report rows at its natural report-part grain.,codex,2026-08-28
+https://api.congress.gov/v3/committee-report/110/HRPT/373?format=json,2,The bill detail advertises two valid committee-report rows at its natural report-part grain.,codex,2026-08-28
+https://api.congress.gov/v3/committee-report/111/HRPT/86?format=json,2,The bill detail advertises two valid committee-report rows at its natural report-part grain.,codex,2026-08-28
+https://api.congress.gov/v3/committee-report/119/HRPT/716?format=json,2,The bill detail advertises two valid committee-report rows at its natural report-part grain.,codex,2026-08-28

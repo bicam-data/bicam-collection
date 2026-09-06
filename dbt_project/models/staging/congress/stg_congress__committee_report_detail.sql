@@ -1,30 +1,10 @@
 {{ config(tags=["committee_reports", "staging"]) }}
 
-with detail_responses as (
+with typed as (
     select
-        id as raw_id,
-        endpoint_url,
-        raw_response_version_id,
-        response
-    from {{ source('raw', 'raw_responses') }}
-    where source = 'congress'
-      and category = 'committee-reports'
-      and node_type = 'committee_report_detail'
-),
-unnested as (
-    select
-        raw_id,
-        endpoint_url,
-        raw_response_version_id,
-        report.value as report_json
-    from detail_responses
-    cross join lateral {{ unnest_array('response', 'committeeReports', 'report') }}
-),
-typed as (
-    select
-        raw_id,
-        endpoint_url,
-        raw_response_version_id,
+        source_raw_id as raw_id,
+        source_endpoint_url as endpoint_url,
+        source_raw_response_version_id as raw_response_version_id,
         {{ build_custom_id([
             "lower(" ~ json_text('report_json', 'type') ~ ")",
             "(" ~ json_text('report_json', 'number') ~ ")::text"
@@ -54,7 +34,7 @@ typed as (
         {{ json_text('report_json', 'citation') }} as citation,
         {{ json_int('report_json', 'text,count', 0) }} as texts_count,
         {{ json_timestamptz('report_json', 'updateDate') }} as updated_at
-    from unnested
+    from {{ ref('int_congress_committee_report_records') }}
 ),
 deduped as (
     select

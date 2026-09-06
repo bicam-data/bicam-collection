@@ -1,12 +1,101 @@
 version: 2
 
 models:
+  - name: stg_congress__crs_reports
+    description: CRS product records from the Congress.gov CRS catalog; coverage follows the source catalog and is not a 1789-present claim.
+    columns:
+      - name: crs_report_id
+        tests: [not_null, unique]
+      - name: content_type
+        tests: [not_null]
+      - name: title
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__crs_report_detail
+    columns:
+      - name: crs_report_id
+        tests: [not_null, unique]
+      - name: content_type
+        tests: [not_null]
+      - name: title
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__house_votes
+    description: Beta House roll call vote records, explicitly limited to the documented 118th and 119th Congresses.
+    columns:
+      - name: vote_identifier
+        tests: [not_null, unique]
+      - name: congress
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [118, 119]
+      - name: session_number
+        tests: [not_null]
+      - name: roll_call_number
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__house_vote_detail
+    columns:
+      - name: vote_identifier
+        tests: [not_null, unique]
+      - name: congress
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [118, 119]
+      - name: session_number
+        tests: [not_null]
+      - name: roll_call_number
+        tests: [not_null]
+
+  - name: stg_congress__house_vote_members
+    columns:
+      - name: parent_raw_id
+        tests: [not_null]
+      - name: vote_identifier
+        tests: [not_null]
+      - name: bioguide_id
+        tests: [not_null]
+      - name: vote_cast
+        tests: [not_null]
+
+  - name: stg_congress__bill_introductions
+    description: Every bill introduction returned by a Congress.gov bill detail response, including historical array variants.
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: introduction_id
+        tests: [not_null, unique]
+      - name: introduction_ordinal
+        tests: [not_null]
+      - name: is_historical_array
+        tests: [not_null]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: bill_number_authoritative
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+
   - name: stg_congress__bill_detail
     columns:
       - name: raw_id
         tests: [not_null, unique]
       - name: bill_id
-        tests: [not_null, unique]
+        tests: [not_null]
       - name: bill_type
         tests: [not_null]
       - name: bill_number
@@ -123,6 +212,35 @@ models:
   - name: stg_congress__bill_summaries
     columns:
       - name: bill_id
+        tests: [not_null]
+      - name: action_date
+        tests: [not_null]
+      - name: action_desc
+        tests: [not_null]
+      - name: text
+        tests: [not_null]
+      - name: version_code
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__summaries
+    description: >-
+      Standalone Congress.gov summary evidence. The nested bill identity is
+      retained for joining to the canonical bill; this model does not create
+      a separate bill entity or reconciliation source.
+    columns:
+      - name: summary_id
+        tests: [not_null, unique]
+      - name: raw_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: congress
         tests: [not_null]
       - name: action_date
         tests: [not_null]
@@ -382,6 +500,8 @@ models:
         tests: [not_null]
       - name: nominations_count
         tests: [not_null]
+      - name: communications_count
+        tests: [not_null]
       - name: updated_at
         tests: [not_null]
 
@@ -434,6 +554,30 @@ models:
       - name: nomination_part
         tests: [not_null]
       - name: congress
+        tests: [not_null]
+
+  - name: stg_congress__committee_communications
+    description: >-
+      One committee-to-communication relationship per Congress.gov committee
+      communications list item, normalized across House and Senate containers.
+    columns:
+      - name: committee_id
+        tests: [not_null]
+      - name: communication_id
+        tests: [not_null]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate]
+      - name: communication_type_code
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: communication_number
+        tests: [not_null]
+      - name: communication_url
         tests: [not_null]
 
   - name: stg_congress__amendment_detail
@@ -633,6 +777,12 @@ models:
     columns:
       - name: parent_raw_id
         tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: report_id
+        tests: [not_null]
+      - name: report_part_id
+        tests: [not_null]
       - name: system_code
         tests: [not_null]
 
@@ -734,6 +884,21 @@ models:
       - name: hearing_part_id
         tests: [not_null, unique]
       - name: chamber
+        description: >-
+          Canonical chamber for this hearing. Joint hearings remain rows in
+          this hearing relation and use the value `joint`; they are not split
+          into separate House and Senate records.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate, joint]
+      - name: source_chamber
+        description: >-
+          Chamber reported by the preferred Congress.gov source record before
+          joint-committee normalization. Multiple raw chamber representations
+          remain in the immutable archive; the canonical row prefers an
+          explicit Joint payload, then a J.Hrg citation, then the newest source.
         tests: [not_null]
       - name: congress
         tests: [not_null]
@@ -742,7 +907,7 @@ models:
       - name: hearing_part
         tests: [not_null]
       - name: loc_id
-        tests: [not_null]
+        description: Optional Library of Congress identifier; older and some corrected hearing records omit it.
       - name: updated_at
         tests: [not_null]
 
@@ -859,7 +1024,12 @@ models:
       - name: hearing_jacketnumber
         tests: [not_null]
       - name: chamber
-        tests: [not_null]
+        description: Canonical chamber; legacy `nochamber` routes are represented as `joint`.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate, joint]
       - name: congress
         tests: [not_null]
 
@@ -974,7 +1144,12 @@ models:
       - name: hearing_part_id
         tests: [not_null]
       - name: chamber
-        tests: [not_null]
+        description: Canonical chamber; legacy `nochamber` values are represented as `joint`.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house, senate, joint]
       - name: hearing_jacketnumber
         tests: [not_null]
       - name: congress
@@ -1047,13 +1222,14 @@ models:
       - name: text
         tests: [not_null]
       - name: action_type
-        tests: [not_null]
+        description: "Congress.gov may return historical treaty actions without a type; preserve that source null."
 
   - name: stg_congress__treaty_committeeactivities
     columns:
       - name: treaty_id
         tests: [not_null]
       - name: treaty_part_id
+        description: Base treaty identity; the official committee endpoint is not suffix-specific.
         tests: [not_null]
       - name: committee_id
         tests: [not_null]
@@ -1065,6 +1241,7 @@ models:
       - name: treaty_id
         tests: [not_null]
       - name: treaty_part_id
+        description: Base treaty identity; the official committee endpoint is not suffix-specific.
         tests: [not_null]
       - name: committee_id
         tests: [not_null]
@@ -1132,4 +1309,139 @@ models:
       - name: parent_raw_id
         tests: [not_null]
       - name: title
+        tests: [not_null]
+
+  - name: stg_congress__law_detail
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: bill_id
+        tests: [not_null, unique]
+      - name: congress
+        tests: [not_null]
+      - name: bill_type
+        tests: [not_null]
+      - name: bill_number
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__law_numbers
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: bill_id
+        tests: [not_null]
+      - name: law_type
+        tests: [not_null]
+      - name: law_number
+        tests: [not_null]
+
+  - name: stg_congress__house_communication_detail
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: communication_id
+        tests: [not_null, unique]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house]
+      - name: communication_type_code
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: communication_number
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__house_communication_committees
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: communication_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: committee_url
+        tests: [not_null]
+
+  - name: stg_congress__house_communication_requirements
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: communication_id
+        tests: [not_null]
+      - name: requirement_number
+        tests: [not_null]
+      - name: requirement_url
+        tests: [not_null]
+
+  - name: stg_congress__senate_communication_detail
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: communication_id
+        tests: [not_null, unique]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [senate]
+      - name: communication_type_code
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: communication_number
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__senate_communication_committees
+    columns:
+      - name: raw_id
+        tests: [not_null]
+      - name: communication_id
+        tests: [not_null]
+      - name: committee_id
+        tests: [not_null]
+      - name: committee_url
+        tests: [not_null]
+
+  - name: stg_congress__house_requirement_detail
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: requirement_number
+        tests: [not_null, unique]
+      - name: active_record
+        tests: [not_null]
+      - name: matching_communications_count
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+
+  - name: stg_congress__house_requirement_matching_communications
+    columns:
+      - name: requirement_raw_id
+        tests: [not_null]
+      - name: requirement_number
+        tests: [not_null]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [house]
+      - name: communication_type_code
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: communication_number
+        tests: [not_null]
+      - name: communication_url
         tests: [not_null]

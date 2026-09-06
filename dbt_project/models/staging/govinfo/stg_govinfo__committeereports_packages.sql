@@ -2,11 +2,11 @@
 
 with package_detail as (
     select
-        id as raw_id,
+        raw_id,
         endpoint_url,
         raw_response_version_id,
         response as package_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'govinfo'
       and category = 'govinfo-committee-reports'
       and node_type = 'govinfo_committee_report_package_detail'
@@ -23,7 +23,6 @@ normalized as (
             {{ json_text('package_json', 'documentType') }}
         )) as report_type,
         {{ json_text('package_json', 'documentNumber') }} as document_number_text,
-        {{ json_text('package_json', 'serialSet.serialSetNumber') }} as serial_set_number,
         {{ json_int('package_json', 'congress') }} as congress,
         {{ json_int('package_json', 'session') }} as session
     from package_detail
@@ -38,14 +37,10 @@ typed as (
             'report_type',
             'document_number_text',
             'congress',
-            'serial_set_number'
+            'null'
         ) }} as report_set_id,
         report_type,
-        case
-            when serial_set_number is not null
-              then (serial_set_number || document_number_text)::integer
-            else document_number_text::integer
-        end as report_number,
+        document_number_text::integer as report_number,
         coalesce({{ json_int('package_json', 'documentPart') }}, 1) as report_part,
         {{ json_text('package_json', 'title') }} as title,
         {{ json_text('package_json', 'subtitle') }} as subtitle,
@@ -100,4 +95,10 @@ select
     su_doc_item_number,
     other_su_doc_class_number,
     last_modified
+-- The GPO-J6-REPORT package is a standalone investigative publication that
+-- was harvested through the broad GovInfo report route, not a committee
+-- report package.  It has no report-set identity.  Keep the immutable raw
+-- record, but exclude it from the committee-report source relation so the
+-- source contract cannot manufacture null report identifiers.
 from typed
+where report_set_id is not null

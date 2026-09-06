@@ -2,11 +2,11 @@
 
 with detail as (
     select
-        id as raw_id,
+        raw_id,
         endpoint_url,
         raw_response_version_id,
         response -> 'amendment' as amendment_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'amendments'
       and node_type = 'amendment_detail'
@@ -53,5 +53,6 @@ select
         - {{ json_int('amendment_json', 'cosponsors.count', 0) }},
         0
     ) as cosponsors_withdrawn_count,
-    {{ json_int('amendment_json', 'textVersions.count', 0) }} as texts_count
+    {{ json_int('amendment_json', 'textVersions.count', 0) }} as texts_count,
+    {{ json_timestamptz('amendment_json', 'updateDate') }} as updated_at
 from detail

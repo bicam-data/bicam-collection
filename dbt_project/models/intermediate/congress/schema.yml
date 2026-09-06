@@ -1,0 +1,493 @@
+version: 2
+
+models:
+  - name: int_congress_bill_amendment_observations
+    description: Resolver-selected bill-to-amendment observations retained before the public natural-key reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: bill_id
+        data_tests: [not_null]
+
+  - name: int_congress_bill_committee_observations
+    description: Resolver-selected bill-to-committee observations retained before the public natural-key reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: bill_id
+        data_tests: [not_null]
+
+  - name: int_congress_committee_bill_observations
+    description: Resolver-selected committee-to-bill observations retained before the public natural-key reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: committee_id
+        data_tests: [not_null]
+      - name: bill_id
+        data_tests: [not_null]
+
+  - name: int_congress_treaty_action_observations
+    description: Resolver-selected treaty action observations retained before the public action-key reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: treaty_id
+        data_tests: [not_null]
+      - name: treaty_part_id
+        data_tests: [not_null]
+      - name: action_id
+        data_tests: [not_null]
+
+  - name: int_congress_treaty_committee_observations
+    description: Resolver-selected treaty committee observations retained before committee and activity projections.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: treaty_id
+        data_tests: [not_null]
+      - name: treaty_part_id
+        data_tests: [not_null]
+
+  - name: int_congress_committee_communication_observations
+    description: Resolver-selected committee communication observations retained before the public edge reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: committee_id
+        data_tests: [not_null]
+      - name: communication_id
+        data_tests: [not_null]
+
+  - name: int_congress_committee_nomination_observations
+    description: Resolver-selected committee nomination observations retained before the public edge reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: committee_id
+        data_tests: [not_null]
+      - name: nomination_id
+        data_tests: [not_null]
+
+  - name: int_congress_nomination_action_observations
+    description: Resolver-selected nomination action observations retained before action and committee-edge projections.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: nomination_id
+        data_tests: [not_null]
+      - name: nomination_part_id
+        data_tests: [not_null]
+      - name: action_id
+        data_tests: [not_null]
+
+  - name: int_congress_nomination_hearing_observations
+    description: Resolver-selected nomination hearing observations retained before the public hearing-edge reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: nomination_id
+        data_tests: [not_null]
+      - name: nomination_part_id
+        data_tests: [not_null]
+
+  - name: int_congress_nomination_committee_activity_observations
+    description: Resolver-selected nomination committee-activity observations retained before the public activity-edge reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal, activity_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: activity_ordinal
+        data_tests: [not_null]
+      - name: nomination_id
+        data_tests: [not_null]
+      - name: nomination_part_id
+        data_tests: [not_null]
+
+  - name: int_congress_amendment_amendment_observations
+    description: Resolver-selected amendment-to-amendment observations retained before the public edge reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: amendment_detail_raw_id
+        data_tests: [not_null]
+      - name: congress
+        data_tests: [not_null]
+      - name: amendment_number
+        data_tests: [not_null]
+      - name: amendment_type
+        data_tests: [not_null]
+
+  - name: int_congress_bill_cosponsor_observations
+    description: Source-array bill cosponsor observations retained before current bill/member reconciliation.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_page_offset
+        description: Offset of the selected child page, defaulting to zero.
+      - name: source_is_complete_generation
+        description: Whether the occurrence belongs to a proven contiguous full page generation.
+      - name: source_generation_crawl_run_id
+        description: Crawl run identifying the selected complete page generation, when proven.
+      - name: source_generation_page_count
+        description: Number of pages in the selected complete generation, when proven.
+      - name: source_generation_expected_count
+        description: API-reported item total for the selected complete generation, when proven.
+      - name: source_generation_finished_at
+        description: Latest fetch timestamp among pages in the selected complete generation.
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: bill_id
+        data_tests: [not_null]
+      - name: bioguide_id
+        data_tests: [not_null]
+
+  - name: int_congress_bill_related_bill_observations
+    description: Source-array related-bill observations retained before the public bill-to-bill natural-key reduction.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal, relationship_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_is_complete_generation
+        description: Whether the occurrence belongs to a proven contiguous full page generation.
+      - name: source_generation_crawl_run_id
+        description: Crawl run identifying the selected complete generation, when proven.
+      - name: source_generation_page_count
+        description: Number of pages in the selected complete generation, when proven.
+      - name: source_generation_expected_count
+        description: API-reported item total for the selected complete generation, when proven.
+      - name: source_generation_finished_at
+        description: Latest fetch timestamp among pages in the selected complete generation.
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: relationship_ordinal
+        data_tests: [not_null]
+      - name: bill_id
+        data_tests: [not_null]
+      - name: relatedbill_id
+        data_tests: [not_null]
+
+  - name: int_congress_nominee_observations
+    description: Source-array nominee observations with stable fetch and array-position evidence for public deduplication.
+    columns:
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: nomination_detail_raw_id
+        description: Raw parent nomination-detail response that owns the selected child payload.
+      - name: nomination_detail_endpoint_url
+        description: Parent nomination-detail endpoint associated with the selected child payload.
+      - name: source_fetched_at
+        tests: [not_null]
+      - name: source_endpoint_url
+        tests: [not_null]
+      - name: source_page_offset
+        description: Offset of the selected nominee page, defaulting to zero.
+      - name: source_is_complete_generation
+        description: Whether the occurrence belongs to a proven contiguous full page generation.
+      - name: source_generation_crawl_run_id
+        description: Crawl run identifying the selected complete nominee generation, when proven.
+      - name: source_generation_page_count
+        description: Number of pages in the selected complete nominee generation, when proven.
+      - name: source_generation_expected_count
+        description: API-reported nominee total for the selected complete generation, when proven.
+      - name: source_generation_finished_at
+        description: Latest fetch timestamp among pages in the selected complete nominee generation.
+      - name: source_ordinal
+        tests: [not_null]
+      - name: nomination_part_id
+        tests: [not_null]
+      - name: nominee_ordinal
+        tests: [not_null]
+  - name: int_congress_amendment_cosponsor_observations
+    description: Source-array amendment cosponsor observations selected by the complete-baseline-plus-delta child resolver.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [source_raw_id, source_ordinal]
+    columns:
+      - name: source_raw_id
+        data_tests: [not_null]
+      - name: source_raw_response_version_id
+        description: Exact immutable raw payload version selected by the child resolver.
+      - name: source_crawl_run_id
+        description: Crawl run associated with the selected current raw response.
+      - name: source_fetched_at
+        data_tests: [not_null]
+      - name: source_endpoint_url
+        data_tests: [not_null]
+      - name: source_page_offset
+        description: Offset of the selected amendment-cosponsor page, defaulting to zero.
+      - name: source_is_complete_generation
+        description: Whether the occurrence belongs to a proven contiguous full page generation.
+      - name: source_generation_crawl_run_id
+        description: Crawl run identifying the selected complete page generation, when proven.
+      - name: source_generation_page_count
+        description: Number of pages in the selected complete generation, when proven.
+      - name: source_generation_expected_count
+        description: API-reported cosponsor total for the selected complete generation, when proven.
+      - name: source_generation_finished_at
+        description: Latest fetch timestamp among pages in the selected complete generation.
+      - name: source_ordinal
+        data_tests: [not_null]
+      - name: amendment_id
+        data_tests: [not_null]
+      - name: bioguide_id
+        data_tests: [not_null]
+  - name: int_committees__congress
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: canonical_committee_id
+        tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
+  - name: int_committee_meetings__congress
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: canonical_committee_meeting_id
+        tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+  - name: int_hearing_committee_meeting_links
+    columns:
+      - name: link_id
+        tests: [not_null, unique]
+      - name: source_system
+        tests: [not_null]
+      - name: source_id
+        tests: [not_null]
+      - name: target_system
+        tests: [not_null]
+      - name: target_id
+        tests: [not_null]
+      - name: relationship_type
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+  - name: int_amendments__congress
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: canonical_amendment_id
+        tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
+      - name: amendment_type
+        tests: [not_null]
+      - name: amendment_number
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+  - name: int_nominations__congress
+    columns:
+      - name: source_record_id
+        tests: [not_null, unique]
+      - name: canonical_nomination_id
+        tests: [not_null, unique]
+      - name: source_raw_id
+        tests: [not_null]
+      - name: source_raw_response_version_id
+        tests: [not_null]
+      - name: nomination_number
+        tests: [not_null]
+      - name: nomination_part
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+  - name: int_committee_report_bill_links
+    columns:
+      - name: link_id
+        tests: [not_null, unique]
+      - name: bill_id
+        tests: [not_null]
+      - name: canonical_bill_id
+        tests: [not_null]
+      - name: report_part_id
+        tests: [not_null]
+      - name: canonical_report_id
+        tests: [not_null]
+      - name: from_bill_side
+        tests: [not_null]
+      - name: from_report_side
+        tests: [not_null]
+      - name: evidence_directions
+        tests: [not_null]
+      - name: evidence_count
+        tests: [not_null]

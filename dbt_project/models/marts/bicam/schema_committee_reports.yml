@@ -1,0 +1,130 @@
+version: 2
+
+models:
+  - name: committee_reports
+    description: Canonical part-aware committee reports unioned from Congress.gov and CRPT/SERIALSET GovInfo records.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [report_id]
+    columns:
+      - name: report_id
+        description: Stable lowercase report type, number, part, errata marker, and Congress identifier.
+        data_tests: [not_null, unique]
+      - name: report_type
+        data_tests: [not_null]
+      - name: report_number
+        data_tests: [not_null]
+      - name: report_part
+      - name: congress
+        data_tests: [not_null]
+      - name: session
+      - name: title
+      - name: subtitle
+      - name: chamber
+      - name: citation
+      - name: is_conference_report
+      - name: issued_at
+      - name: pages
+      - name: texts_count
+      - name: updated_at
+
+  - name: committee_reports_associated_bills
+    description: Reciprocal Congress.gov report-to-bill edges plus valid GovInfo report references.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [report_id, bill_id]
+    columns:
+      - name: report_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committee_reports'), field: report_id}
+      - name: bill_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('bills'), field: bill_id}
+
+  - name: committee_reports_associated_treaties
+    description: Reciprocal Congress.gov treaty-to-committee-report edges.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [report_id, treaty_id]
+    columns:
+      - name: report_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committee_reports'), field: report_id}
+      - name: treaty_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('treaties'), field: treaty_id}
+
+  - name: committee_reports_members
+    description: Evidence-backed GovInfo nested member identities linked to public members.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [report_id, bioguide_id]
+    columns:
+      - name: report_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committee_reports'), field: report_id}
+      - name: bioguide_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('members'), field: bioguide_id}
+
+  - name: committee_reports_metadata
+    description: Representative GovInfo package metadata for each report identity.
+    columns:
+      - name: report_id
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments: {to: ref('committee_reports'), field: report_id}
+      - name: govinfo_package_id
+      - name: su_doc_class_number
+      - name: migrated_doc_id
+      - name: govinfo_collection_code
+
+  - name: committee_reports_metadata_granules
+    description: GovInfo granules belonging to committee-report packages.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [report_id, govinfo_granule_id]
+    columns:
+      - name: report_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committee_reports'), field: report_id}
+      - name: govinfo_package_id
+      - name: govinfo_granule_id
+        data_tests: [not_null]
+
+  - name: committee_reports_texts
+    description: One best available text rendition per report, preferring Congress.gov content, then GovInfo granule and package-level official locators.
+    columns:
+      - name: report_id
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments: {to: ref('committee_reports'), field: report_id}
+      - name: raw_text
+      - name: formatted_text
+      - name: formatted_text_is_errata
+      - name: pdf
+        description: Best available official PDF URL from Congress.gov or a GovInfo granule/package detail.
+      - name: pdf_is_errata

@@ -1,0 +1,154 @@
+version: 2
+
+models:
+  - name: amendments
+    description: >-
+      Canonical BICAM amendments. Congress.gov list-backed identities are
+      retained when the source detail endpoint is unavailable; public rows do
+      not expose crawler or raw-response lineage.
+    columns:
+      - name: amendment_id
+        description: Stable canonical amendment identifier.
+        data_tests: [not_null, unique]
+      - name: congress
+        data_tests: [not_null]
+      - name: amendment_type
+        data_tests: [not_null]
+      - name: amendment_number
+        data_tests: [not_null]
+
+  - name: amendments_actions
+    description: Deduplicated congressional actions associated with amendments.
+    columns:
+      - name: action_id
+        data_tests: [not_null, unique]
+      - name: amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id
+
+  - name: amendments_actions_recorded_votes
+    description: Recorded-vote references nested in amendment actions.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [action_id, chamber, congress, session, roll_number]
+    columns:
+      - name: amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id
+      - name: action_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments_actions')
+                field: action_id
+
+  - name: amendments_amended_bills
+    description: Bills amended by an amendment.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [amendment_id, bill_id]
+    columns:
+      - name: amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id
+      - name: bill_id
+        data_tests: [not_null]
+
+  - name: amendments_amended_amendments
+    description: Amendment-to-amendment relationships.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [amendment_id, amended_amendment_id]
+    columns:
+      - name: amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id
+      - name: amended_amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id
+
+  - name: amendments_amended_treaties
+    description: Treaties amended by an amendment.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [amendment_id, treaty_id]
+    columns:
+      - name: amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id
+      - name: treaty_id
+        data_tests: [not_null]
+
+  - name: amendments_cosponsors
+    description: Reconciled union of amendment cosponsors from both Congress.gov directions.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [amendment_id, bioguide_id]
+    columns:
+      - name: amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id
+      - name: bioguide_id
+        data_tests: [not_null]
+
+  - name: amendments_sponsors
+    description: Reconciled union of amendment sponsors from both Congress.gov directions.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [amendment_id, bioguide_id]
+    columns:
+      - name: amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id
+      - name: bioguide_id
+        data_tests: [not_null]
+
+  - name: amendments_texts
+    description: Available amendment text versions and document URLs.
+    columns:
+      - name: amendment_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('amendments')
+                field: amendment_id

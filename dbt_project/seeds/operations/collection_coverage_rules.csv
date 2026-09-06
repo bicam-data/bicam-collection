@@ -1,14 +1,28 @@
 source,category,node_type,expected_scope,authoritative_source,bulk_bootstrap,scope_notes
-congress,amendments,*,bounded_congress_scope,congress,false,API is authoritative; completeness is tracked by Congress partition
-congress,bills,*,bounded_congress_scope,congress,optional,API is authoritative; GovInfo is an incomplete evidence bootstrap
-congress,committee-meetings,*,bounded_congress_scope,congress,false,API is authoritative
-congress,committee-prints,*,bounded_congress_scope,congress,false,API is authoritative
-congress,committee-reports,*,bounded_congress_scope,congress,optional,API is authoritative; GovInfo report evidence is incomplete
-congress,committees,*,bounded_congress_scope,congress,false,API is authoritative
-congress,congresses,*,bounded_congress_scope,congress,false,API is authoritative
-congress,hearings,*,bounded_congress_scope,congress,false,API is authoritative
-congress,members,*,bounded_congress_scope,congress,false,API is authoritative
-congress,nominations,*,bounded_congress_scope,congress,false,API is authoritative
-congress,treaties,*,bounded_congress_scope,congress,false,API is authoritative
+congress,amendments,*,full_congress_scope,congress,false,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence
+congress,bills,*,full_congress_scope,congress,optional,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence; GovInfo is an incomplete evidence bootstrap
+congress,committee-meetings,*,full_congress_scope,congress,false,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence
+congress,committee-prints,*,full_congress_scope,congress,false,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence
+congress,crs-reports,*,documented_source_scope,congress,false,CRS products are independently catalogued; this row does not claim 1789-present coverage
+congress,committee-reports,*,full_congress_scope,congress,optional,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence; GovInfo report evidence is incomplete
+congress,committees,*,full_congress_scope,congress,false,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence
+congress,congresses,*,full_congress_scope,congress,false,API is authoritative
+congress,hearings,*,full_congress_scope,congress,false,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence
+congress,house-votes,*,documented_beta_scope,congress,false,Beta endpoint covers legislation-related House votes in Congresses 118-119 only; do not infer 1789-present coverage
+congress,laws,*,full_congress_scope,congress,false,Law list routes are partitioned and required for every Congress 1-119; zero-count source partitions remain valid evidence
+congress,house-communications,*,full_congress_scope,congress,false,House communication routes are partitioned and required for every Congress 1-119; zero-count source partitions remain valid evidence
+congress,senate-communications,*,full_congress_scope,congress,false,Senate communication routes are partitioned and required for every Congress 1-119; zero-count source partitions remain valid evidence
+congress,house-requirements,*,documented_source_scope,congress,false,House requirements are an unpartitioned source catalog with independently harvested matching communications
+congress,daily-congressional-record,*,documented_source_scope,congress,false,Daily Congressional Record coverage is measured against the complete API catalog
+congress,bound-congressional-record,*,documented_source_scope,congress,false,Bound Congressional Record coverage is measured against the complete API catalog
+congress,congressional-record,*,documented_source_scope,congress,false,Legacy Congressional Record index uses explicit offset coverage through Results.TotalCount
+congress,summaries,*,documented_source_scope,congress,false,Standalone summaries are overlapping bill evidence harvested in bounded date windows; they are not a separate canonical entity
+congress,members,*,full_congress_scope,congress,false,API is authoritative
+congress,nominations,*,full_congress_scope,congress,false,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence
+congress,treaties,*,full_congress_scope,congress,false,API is authoritative; every Congress 1-119 is queried; zero-count source partitions remain valid evidence
 govinfo,govinfo-bills,*,bootstrap_incomplete,congress,optional,Selected GovInfo bill collections can bootstrap evidence but do not replace API coverage
 govinfo,govinfo-committee-reports,*,bootstrap_incomplete,congress,optional,Selected GovInfo report evidence is supplemental
+govinfo,govinfo-committee-prints,*,bootstrap_incomplete,congress,optional,Selected GovInfo committee-print evidence is supplemental
+govinfo,govinfo-hearings,*,bootstrap_incomplete,congress,optional,Selected GovInfo hearing evidence is supplemental
+govinfo,govinfo-congressional-directories,*,bootstrap_incomplete,govinfo,optional,GovInfo CDIR package metadata supplies the congressional-directory child tables
+govinfo,govinfo-treaty-documents,*,bootstrap_incomplete,govinfo,optional,GovInfo CDOC packages and granules supply treaty publication metadata

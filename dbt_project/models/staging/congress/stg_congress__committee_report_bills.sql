@@ -1,25 +1,17 @@
 {{ config(tags=["committee_reports", "staging"]) }}
 
-with detail as (
+with unnested as (
     select
-        response
-    from {{ source('raw', 'raw_responses') }}
-    where source = 'congress'
-      and category = 'committee-reports'
-      and node_type = 'committee_report_detail'
-),
-reports as (
-    select
-        report.value as report_json
-    from detail
-    cross join lateral {{ unnest_array('response', 'committeeReports', 'report') }}
-),
-unnested as (
-    select
-        report_json,
+        reports.report_json,
         bill.value as bill_json
-    from reports
-    cross join lateral {{ unnest_array('report_json', 'associatedBill', 'bill') }}
+    from {{ ref('int_congress_committee_report_records') }} as reports
+    cross join lateral jsonb_array_elements(
+        case
+            when jsonb_typeof(reports.report_json -> 'associatedBill') = 'array'
+                then reports.report_json -> 'associatedBill'
+            else '[]'::jsonb
+        end
+    ) as bill(value)
 )
 
 select
@@ -39,11 +31,10 @@ select
        end
     || '-'
     || {{ json_int('report_json', 'congress') }}::text as report_part_id,
-    {{ build_custom_id([
-        "lower(" ~ json_text('bill_json', 'type') ~ ")",
-        json_text('bill_json', 'number')
-    ]) }} || '-' || {{ json_int('bill_json', 'congress') }}::text as bill_id,
+    lower({{ json_text('bill_json', 'type') }})
+    || {{ normalize_congress_bill_number_text(json_text('bill_json', 'number')) }}
+    || '-' || {{ json_int('bill_json', 'congress') }}::text as bill_id,
     lower({{ json_text('bill_json', 'type') }}) as bill_type,
-    {{ json_text('bill_json', 'number') }} as bill_number,
+    {{ normalize_congress_bill_number_text(json_text('bill_json', 'number')) }} as bill_number,
     {{ json_int('bill_json', 'congress') }} as congress
 from unnested

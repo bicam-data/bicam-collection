@@ -2,11 +2,11 @@
 
 with detail_responses as (
     select
-        id as raw_id,
+        raw_id,
         endpoint_url,
         raw_response_version_id,
         response
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'committee-prints'
       and node_type = 'committee_print_detail'

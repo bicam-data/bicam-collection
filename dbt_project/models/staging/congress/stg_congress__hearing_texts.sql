@@ -3,19 +3,19 @@
 with detail as (
     select
         response -> 'hearing' as hearing_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'hearings'
       and node_type = 'hearing_detail'
 ),
 unnested as (
     select
-        lower(left(lower({{ json_text('hearing_json', 'chamber') }}), 1))
+        lower(left({{ congress_hearing_canonical_chamber('hearing_json') }}, 1))
         || 'hrg'
         || {{ json_bigint('hearing_json', 'jacketNumber') }}::text
         || '-'
         || {{ json_int('hearing_json', 'congress') }}::text as hearing_id,
-        lower(left(lower({{ json_text('hearing_json', 'chamber') }}), 1))
+        lower(left({{ congress_hearing_canonical_chamber('hearing_json') }}, 1))
         || 'hrg'
         || {{ json_bigint('hearing_json', 'jacketNumber') }}::text
         || '-'

@@ -1,30 +1,18 @@
 {{ config(tags=["bills", "staging"]) }}
 
-with action_responses as (
-    {{ resolve_child('bill_detail', 'bill_actions', 'bills') }}
-),
-bill_detail as (
+with unnested as (
     select
-        raw_id,
-        bill_id
-    from {{ ref('stg_congress__bill_detail') }}
-),
-unnested as (
-    select
-        action_responses.raw_id,
-        action_responses.parent_raw_id,
-        action_responses.parent_endpoint_url,
-        action_responses.endpoint_url,
-        bill_detail.bill_id,
-        action.value as action_json
-    from action_responses
-    join bill_detail
-      on action_responses.parent_raw_id = bill_detail.raw_id
-    cross join lateral {{ unnest_array('response', 'actions', 'action') }}
-)
-
+        source_raw_id as raw_id,
+        source_fetched_at as child_fetched_at,
+        bill_id,
+        action_json,
+        source_ordinal as array_ordinal
+    from {{ ref('int_congress_bill_action_observations') }}
+), extracted as (
 select
-distinct
+    raw_id,
+    child_fetched_at,
+    array_ordinal,
     {{ hash_to_uuid("bill_id || '|' || coalesce(action_json::text, '')") }} as action_id,
     bill_id,
     nullif(action_json #>> '{actionCode}', '') as action_code,
@@ -36,3 +24,20 @@ distinct
     nullif(action_json #>> '{calendarNumber,calendar}', '') as calendar,
     nullif(action_json #>> '{calendarNumber,number}', '') as calendar_number
 from unnested
+), keyed as (
+    select
+        extracted.*,
+        row_number() over (
+            partition by action_id
+            order by child_fetched_at desc nulls last,
+                     raw_id desc,
+                     array_ordinal desc
+        ) as key_rank,
+        action_id is not null and bill_id is not null as key_complete
+    from extracted
+)
+
+select action_id, bill_id, action_code, action_date, text, action_type,
+       source_system, source_system_code, calendar, calendar_number
+from keyed
+where key_rank = 1 or not key_complete

@@ -1,10 +1,28 @@
 {{ config(tags=["committee_report_reconciliation", "intermediate"]) }}
 
-with congress_records as (
-    select * from {{ ref('int_committee_reports__congress') }}
+with congress_records_ranked as (
+    select
+        records.*,
+        row_number() over (
+            partition by records.canonical_report_id
+            order by
+                case when records.source_record_id like 'congress:bill_committee_report:%' then 1 else 0 end,
+                records.source_updated_at desc nulls last,
+                records.source_record_id desc
+        ) as representative_rank
+    from {{ ref('int_committee_reports__congress') }} as records
+), congress_records as (
+    select *
+    from congress_records_ranked
+    where representative_rank = 1
 ),
 govinfo_records as (
-    select * from {{ ref('int_committee_reports__govinfo') }}
+    /* SERIALSET may expose more than one package for the same printed report
+       number. Keep all package evidence in int_committee_reports__govinfo,
+       but only pair the deterministic representative here. */
+    select *
+    from {{ ref('int_committee_reports__govinfo') }}
+    where is_representative_package
 )
 
 select

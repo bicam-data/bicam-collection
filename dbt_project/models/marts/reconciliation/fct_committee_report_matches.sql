@@ -24,8 +24,8 @@ resolved as (
         overrides.reason as review_reason
     from candidates
     left join overrides
-     on candidates.congress_source_record_id = overrides.congress_source_record_id
-     and candidates.govinfo_source_record_id = overrides.govinfo_source_record_id
+     on candidates.congress_source_record_id is not distinct from overrides.congress_source_record_id
+     and candidates.govinfo_source_record_id is not distinct from overrides.govinfo_source_record_id
      and (overrides.expires_at is null or overrides.expires_at >= now())
 )
 

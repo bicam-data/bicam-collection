@@ -1,3 +1,4 @@
-entity,authoritative_source,max_ambiguous_rate,min_authoritative_match_rate,contract_version
-bill,congress,0.005,0.98,v1
-committee_report,congress,0.005,0.98,v1
+entity,authoritative_source,max_ambiguous_rate,min_authoritative_match_rate,min_title_agreement_rate,contract_version
+bill,congress,0.005,0.98,0.50,v2
+committee_report,congress,0.005,0.98,0.00,v2
+hearing,govinfo,0.005,0.98,0.00,v2

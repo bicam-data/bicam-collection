@@ -1,41 +1,57 @@
 {{ config(tags=["members", "staging"]) }}
 
-with sponsored_legislation as (
+with source_rows as (
     select
+        bioguide_id,
+        member_detail_raw_id as parent_raw_id,
+        amendment_number,
+        congress,
+        legislation_url,
+        sponsorship_type,
+        source_fetched_at,
+        source_raw_id,
+        source_ordinal
+    from {{ ref('int_congress_member_legislation_observations') }}
+    where amendment_number is not null
+), sponsored_legislation as (
+    select
+        bioguide_id,
         parent_raw_id,
         amendment_number,
         congress,
         legislation_url,
-        'sponsor' as sponsorship_type
-    from {{ ref('stg_congress__member_sponsored_legislation') }}
-    where amendment_number is not null
-),
-cosponsored_legislation as (
+        sponsorship_type,
+        source_fetched_at,
+        source_raw_id,
+        source_ordinal
+    from source_rows
+), keyed as (
     select
-        parent_raw_id,
-        amendment_number,
-        congress,
-        legislation_url,
-        'cosponsor' as sponsorship_type
-    from {{ ref('stg_congress__member_cosponsored_legislation') }}
-    where amendment_number is not null
-),
-amendment_rows as (
-    select * from sponsored_legislation
-    union all
-    select * from cosponsored_legislation
+        sponsored_legislation.*,
+        {{ build_custom_id([
+            "lower(" ~ amendment_type_from_url('sponsored_legislation.legislation_url', 'sponsored_legislation.congress', 'sponsored_legislation.amendment_number') ~ ")",
+            "sponsored_legislation.amendment_number"
+        ]) }} || '-' || sponsored_legislation.congress::text as amendment_id,
+        row_number() over (
+            partition by bioguide_id,
+                         {{ build_custom_id([
+                             "lower(" ~ amendment_type_from_url('sponsored_legislation.legislation_url', 'sponsored_legislation.congress', 'sponsored_legislation.amendment_number') ~ ")",
+                             "sponsored_legislation.amendment_number"
+                         ]) }} || '-' || congress::text,
+                         sponsorship_type
+            order by source_fetched_at desc nulls last,
+                     source_raw_id desc,
+                     source_ordinal desc
+        ) as key_rank
+    from sponsored_legislation
 )
 
 select
-    members.bioguide_id,
-    {{ build_custom_id([
-        "(" ~ amendment_type_from_url('amendment_rows.legislation_url', 'amendment_rows.congress', 'amendment_rows.amendment_number') ~ ")",
-        "amendment_rows.amendment_number"
-    ]) }} || '-' || amendment_rows.congress::text as amendment_id,
-    amendment_rows.sponsorship_type,
-    {{ amendment_type_from_url('amendment_rows.legislation_url', 'amendment_rows.congress', 'amendment_rows.amendment_number') }} as amendment_type,
-    amendment_rows.amendment_number,
-    amendment_rows.congress
-from amendment_rows
-inner join {{ ref('stg_congress__member_detail') }} as members
-    on amendment_rows.parent_raw_id = members.raw_id
+    bioguide_id,
+    amendment_id,
+    sponsorship_type,
+    {{ amendment_type_from_url('legislation_url', 'congress', 'amendment_number') }} as amendment_type,
+    amendment_number,
+    congress
+from keyed
+where key_rank = 1

@@ -2,9 +2,9 @@
 
 with member_raw as (
     select
-        raw.id as raw_id,
+        raw.raw_id as raw_id,
         raw.response -> 'member' as member_json
-    from {{ source('raw', 'raw_responses') }} as raw
+    from {{ ref('int_raw_responses__current') }} as raw
     where raw.node_type = 'member_detail'
 ),
 previous_names as (

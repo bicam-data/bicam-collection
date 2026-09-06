@@ -9,4 +9,5 @@ bicam_collection:
       password: "{{ env_var('DB_PASSWORD') }}"
       dbname: "{{ env_var('DB_NAME', 'bicam_collection') }}"
       schema: "{{ env_var('DB_SCHEMA', 'public') }}"
+      application_name: "{{ env_var('PGAPPNAME', 'dbt') }}"
       threads: 4

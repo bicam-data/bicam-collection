@@ -2,11 +2,11 @@
 
 with detail as (
     select
-        id as raw_id,
+        raw_id,
         endpoint_url,
         raw_response_version_id,
         response -> 'nomination' as nomination_json
-    from {{ source('raw', 'raw_responses') }}
+    from {{ ref('int_raw_responses__current') }}
     where source = 'congress'
       and category = 'nominations'
       and node_type = 'nomination_detail'

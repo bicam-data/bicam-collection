@@ -1,35 +1,38 @@
 {{ config(tags=["amendments", "staging"]) }}
 
-with cosponsor_responses as (
-    {{ resolve_child('amendment_detail', 'amendment_cosponsors', 'amendments') }}
-),
-amendment_detail as (
+/*
+   The child resolver and source-array expansion live in the materialized
+   observation relation.  Reading that relation here prevents this staging
+   model from silently reverting to latest-URL state when adjacent incremental
+   windows or equivalent query-string variants exist.
+*/
+with observed as (
     select
-        raw_id,
-        amendment_id
-    from {{ ref('stg_congress__amendment_detail') }}
-),
-unnested as (
-    select
-        amendment_detail.amendment_id,
-        cosponsor.value as cosponsor_json
-    from cosponsor_responses
-    join amendment_detail
-      on cosponsor_responses.parent_raw_id = amendment_detail.raw_id
-    cross join lateral {{ unnest_array('response', 'cosponsors', 'cosponsor') }}
+        observations.*,
+        row_number() over (
+            partition by observations.amendment_id, observations.bioguide_id
+            order by observations.source_fetched_at desc nulls last,
+                     observations.source_raw_response_version_id desc nulls last,
+                     observations.source_raw_id desc,
+                     observations.source_ordinal desc
+        ) as key_rank,
+        observations.amendment_id is not null
+            and observations.bioguide_id is not null as key_complete
+    from {{ ref('int_congress_amendment_cosponsor_observations') }} as observations
 )
 
 select
     amendment_id,
-    {{ json_text('cosponsor_json', 'bioguideId') }} as bioguide_id,
-    {{ json_text('cosponsor_json', 'fullName') }} as display_name,
-    {{ json_text('cosponsor_json', 'firstName') }} as first_name,
-    {{ json_text('cosponsor_json', 'middleName') }} as middle_name,
-    {{ json_text('cosponsor_json', 'lastName') }} as last_name,
-    {{ json_text('cosponsor_json', 'party') }} as party,
-    {{ json_text('cosponsor_json', 'state') }} as state,
-    {{ json_int('cosponsor_json', 'district') }} as district,
-    {{ json_boolean('cosponsor_json', 'isOriginalCosponsor') }} as is_original_cosponsor,
-    {{ json_date('cosponsor_json', 'sponsorshipDate') }} as sponsorship_date,
-    {{ json_date('cosponsor_json', 'sponsorshipWithdrawnDate') }} as sponsorship_withdrawal_date
-from unnested
+    bioguide_id,
+    display_name,
+    first_name,
+    middle_name,
+    last_name,
+    party,
+    state,
+    district,
+    is_original_cosponsor,
+    sponsorship_date,
+    sponsorship_withdrawal_date
+from observed
+where key_rank = 1 or not key_complete

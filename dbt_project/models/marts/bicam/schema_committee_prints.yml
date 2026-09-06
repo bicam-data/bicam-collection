@@ -1,0 +1,68 @@
+version: 2
+
+models:
+  - name: committee_prints
+    description: Canonical committee prints, reconciled to GovInfo where an exact print identity exists.
+    columns:
+      - name: print_id
+        description: Stable lowercase chamber/jacket/Congress identifier.
+        tests: [not_null, unique]
+      - name: print_jacketnumber
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: session
+        description: Congress session reported by the representative GovInfo package, when available.
+      - name: pages
+        description: Page count reported by the representative GovInfo package, when available.
+  - name: committee_prints_associated_bills
+    description: Committee-print to bill association edges.
+    columns:
+      - name: print_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_prints'), field: print_id}}
+      - name: bill_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('bills'), field: bill_id}}
+  - name: committee_prints_committees
+    description: Committee-print to committee association edges.
+    columns:
+      - name: print_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_prints'), field: print_id}}
+      - name: committee_code
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committees'), field: committee_code}}
+  - name: committee_prints_metadata
+    description: Public GovInfo identifiers for reconciled committee prints.
+    columns:
+      - name: print_id
+        tests:
+          - not_null
+          - unique
+          - relationships: {arguments: {to: ref('committee_prints'), field: print_id}}
+      - name: govinfo_package_id
+        tests: [not_null, unique]
+      - name: migrated_doc_id
+        description: Migrated document identifier from the GovInfo otherIdentifier object, when supplied.
+  - name: committee_prints_metadata_granules
+    description: GovInfo granules belonging to committee-print packages.
+    columns:
+      - name: print_id
+        tests:
+          - not_null
+          - relationships: {arguments: {to: ref('committee_prints'), field: print_id}}
+      - name: govinfo_granule_id
+        tests: [not_null, unique]
+  - name: committee_prints_texts
+    description: Available Congress.gov committee-print text renditions and URLs.
+    columns:
+      - name: print_id
+        tests:
+          - not_null
+          - unique
+          - relationships: {arguments: {to: ref('committee_prints'), field: print_id}}
