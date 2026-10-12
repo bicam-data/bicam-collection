@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-project_root=/home/rdelano/bicam/bicam-collection
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root" || exit 1
 set -a
 . ./.env
