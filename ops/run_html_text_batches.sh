@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Resumable HTML extraction lane. Each batch is small enough to stop safely;
-# one lexical cursor per source table is persisted in
-# reports/html-text/checkpoint.json and can be resumed after a restart or
-# usage-window reset. This lane does not consume Congress.gov API keys because
-# it reads public HTML renditions.
+# Resumable HTML text extraction (public renditions, no API keys). One cursor
+# per source table is kept in reports/html-text/checkpoint.json.
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
 cd "$project_root"
 lock_wait_seconds=${BICAM_HTML_LOCK_TIMEOUT_SECONDS:-900}
-# `flock 9` by itself releases the lock when the helper process exits.  Run a
-# guarded child instead so the lock remains held for extraction, dbt
-# propagation, and reporting as one serialized checkpoint.
+# Re-run under the lock so it stays held through extraction, dbt and reporting.
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   exec 9>/run/user/$(id -u)/bicam-ingestion.lock
   lock_status=0
@@ -56,10 +51,7 @@ result='{"requested": 0, "statuses": {}}'
 
 checkpoint="$output_dir/checkpoint.json"
 
-# Rotate one public text table per batch. The former single lexical cursor
-# could spend days in the hearing URL range before reaching bills, amendments,
-# or GovInfo bill versions. Successful rows are filtered by the database, so an old
-# checkpoint is safely restarted at the beginning of the fair queue.
+# Rotate tables one batch at a time so no single table starves the rest.
 source_tables=(amendments_texts bills_texts committee_prints_texts committee_reports_texts hearings_texts bills_versions)
 next_source_table="${source_tables[0]}"
 declare -A last_urls
@@ -110,11 +102,8 @@ for index in "${!source_tables[@]}"; do
 done
 after="${last_urls[$next_source_table]}"
 
-# Count only full/useful batches against the configured cap.  A short batch
-# means that table is exhausted (or has no currently eligible URLs), so it is
-# reset and skipped without making the next useful table wait for another
-# timer tick.  The finite attempt bound prevents an all-exhausted queue from
-# turning the fairness loop into an infinite cycle.
+# Only full batches count against the cap; a short batch means the table is
+# exhausted, so it is reset and skipped. The attempt bound ends an all-exhausted loop.
 useful_batches=0
 max_attempts=$((max_batches + ${#source_tables[@]}))
 for ((attempt=1; attempt<=max_attempts && useful_batches<max_batches; attempt++)); do
@@ -165,11 +154,7 @@ print(json.loads(sys.argv[1]).get("requested", 0))
 PY
   )
   if (( requested < batch_limit )); then
-    # A complete pass for this table starts from the beginning next time so
-    # newly added URLs and URLs past the refresh age are reconsidered.  Keep
-    # the bounded invocation moving, though: an exhausted table must not
-    # consume the remaining rounds and delay the next table until the next
-    # timer tick.
+    # Restart this table from the beginning next time to pick up new and aged URLs.
     last_urls["$current_source_table"]=""
     uv run python - "$checkpoint" "${last_urls[amendments_texts]}" "${last_urls[bills_texts]}" "${last_urls[committee_prints_texts]}" "${last_urls[committee_reports_texts]}" "${last_urls[hearings_texts]}" "${last_urls[bills_versions]}" <<'PY'
 import json, sys
@@ -186,25 +171,15 @@ PY
   useful_batches=$((useful_batches + 1))
 done
 
-# Propagate newly extracted text into the public tables in the same serialized
-# checkpoint. A batch containing only HTTP/fetch failures cannot change the
-# public tables, so skip the expensive rebuild in that case.
+# Rebuild the public text tables, unless the batch produced no new text.
 dbt_cycle_boundary=0
 [[ "$next_source_table" == "${source_tables[0]}" ]] && dbt_cycle_boundary=1
 if [[ "${BICAM_HTML_SKIP_DBT:-0}" != "1" ]] && (( pending_dbt == 1 )) \
     && (( dbt_batches_since_last >= dbt_batch_interval \
           || "${BICAM_HTML_DBT_FORCE:-0}" == "1" \
           || (dbt_cycle_boundary == 1 && dbt_batches_since_last > 0) )); then
-  # Rebuild each text model's selected child-state ancestors as well.  The
-  # public text tables depend on resolver-backed intermediate tables (most
-  # visibly committee-print text); selecting only the leaf can otherwise leave
-  # a freshly harvested raw response invisible to the public product.
-  # Keep this graph explicit instead of selecting every ancestor of each leaf:
-  # the ``+bills_texts`` form also rebuilds the entire bills/reconciliation
-  # graph, which makes a bounded HTML checkpoint spend its timeout on unrelated
-  # title and match models. These are the raw/current, shared child-state,
-  # text-specific, and public relations required for the six HTML sources;
-  # root/public identity tables are refreshed by their source lanes.
+  # Explicit graph: selecting +bills_texts would also rebuild all of
+  # bills/reconciliation and blow the timeout.
   html_dbt_select=(
     int_raw_response_versions int_raw_responses__current
     int_congress_child_response_selection int_congress_child_response_selections
@@ -223,46 +198,18 @@ if [[ "${BICAM_HTML_SKIP_DBT:-0}" != "1" ]] && (( pending_dbt == 1 )) \
     stg_congress__hearing_texts hearings_texts
     bills_versions
   )
-  # Match the client timeout with a slightly earlier PostgreSQL statement
-  # timeout so cancellation cannot leave a server-side table build running
-  # after this bounded checkpoint exits.
-  # The resolver-backed bill-text-version model needs more than ten minutes
-  # on the production archive. Keep propagation bounded, but allow one
-  # complete graph attempt to finish rather than repeatedly cancelling during
-  # its largest table. PostgreSQL still stops the statement before the client
-  # timeout, and the cursor remains durable if either bound is reached.
   html_dbt_timeout_seconds=${BICAM_HTML_DBT_TIMEOUT_SECONDS:-1800}
   html_dbt_statement_timeout_ms=${BICAM_HTML_DBT_STATEMENT_TIMEOUT_MS:-1740000}
   html_dbt_app_name="bicam-html-dbt-$(date -u '+%Y%m%dT%H%M%SZ')-$$"
   html_dbt_test_app_name="${html_dbt_app_name}-test"
-  cancel_html_dbt_backends() {
-    local app_name="$1"
-    # A client-side timeout can leave a PostgreSQL backend alive until TCP
-    # keepalive notices the disconnect. Cancel only this checkpoint's unique
-    # application name; never touch another ingestion lane.
-    for cancel_attempt in 1 2; do
-      bicam_psql -At -v app_name="$app_name" \
-        <<< "select pg_cancel_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
-      # The first cancellation can race the client-side timeout while its
-      # connection is still unwinding.  A short second pass catches that
-      # backend without broad termination or touching another run.
-      (( cancel_attempt == 2 )) || sleep 2
-    done
-    # A backend in uninterruptible I/O can survive cancellation after the
-    # client has exited. Terminate only this exact abandoned application name.
-    bicam_psql -At -v app_name="$app_name" \
-      <<< "select pg_terminate_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
-  }
   cleanup_html_dbt_backends() {
     local exit_status=$?
     if [[ -n "${html_dbt_app_name:-}" ]]; then
-      cancel_html_dbt_backends "$html_dbt_app_name"
+      bicam_stop_dbt_backends "$html_dbt_app_name"
     fi
     return "$exit_status"
   }
-  # A systemd start-timeout can terminate the wrapper after its child client
-  # exits.  Keep the exact application name available to an EXIT/TERM trap so
-  # that path cannot leave an unowned server-side DBT backend behind.
+  # A systemd timeout can kill the wrapper after dbt exits; clean up on EXIT too.
   trap cleanup_html_dbt_backends EXIT
   trap 'exit 143' TERM
   trap 'exit 130' INT
@@ -275,7 +222,7 @@ if [[ "${BICAM_HTML_SKIP_DBT:-0}" != "1" ]] && (( pending_dbt == 1 )) \
     :
   else
     html_dbt_status=$?
-    cancel_html_dbt_backends "$html_dbt_app_name"
+    bicam_stop_dbt_backends "$html_dbt_app_name"
   fi
   html_dbt_test_timeout_seconds=${BICAM_HTML_DBT_TEST_TIMEOUT_SECONDS:-300}
   html_dbt_test_statement_timeout_ms=${BICAM_HTML_DBT_TEST_STATEMENT_TIMEOUT_MS:-270000}
@@ -289,7 +236,7 @@ if [[ "${BICAM_HTML_SKIP_DBT:-0}" != "1" ]] && (( pending_dbt == 1 )) \
       :
     else
       html_dbt_test_status=$?
-      cancel_html_dbt_backends "$html_dbt_test_app_name"
+      bicam_stop_dbt_backends "$html_dbt_test_app_name"
     fi
   else
     echo "html_dbt_test_skipped=1 reason=dbt_run_status_${html_dbt_status}"
@@ -307,13 +254,9 @@ payload["dbt_batches_since_last"] = 0
 path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
   else
-    # Keep the extraction cursor and the pending flag durable.  The next
-    # checkpoint retries propagation without discarding successfully fetched
-    # HTML or pretending the public models are current.
+    # Keep the cursor and pending flag; the next checkpoint retries propagation.
     echo "html_dbt_pending=1 reason=propagation_failed"
-    # Avoid retrying the same expensive graph on every short extraction tick.
-    # New successful batches advance the counter; BICAM_HTML_DBT_FORCE=1 can
-    # still request an immediate refresh.
+    # Don't retry the same graph every tick; new batches (or BICAM_HTML_DBT_FORCE=1) trigger it.
     dbt_batches_since_last=0
     uv run python - "$checkpoint" <<'PY'
 import json, sys
@@ -328,9 +271,7 @@ elif (( pending_dbt == 1 )); then
   echo "html_dbt_deferred=1 batches_since_last=$dbt_batches_since_last interval=$dbt_batch_interval"
 fi
 
-# Keep a per-public-table checkpoint alongside the URL cursor.  This is
-# intentionally non-fatal: extraction results and the cursor are already
-# durable, and a report query must not stop the next batch.
+# Non-fatal: extraction results and the cursor are already saved.
 uv run python scripts/report_html_text_progress.py --output-dir "$output_dir" || true
 
 echo "html_text_checkpoint=$checkpoint"

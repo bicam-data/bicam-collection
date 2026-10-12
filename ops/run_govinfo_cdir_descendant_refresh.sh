@@ -3,10 +3,8 @@ set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
 
-# Historical CDIR package discovery and descendant traversal are separate
-# operations.  The daily date-window job finds newly revised packages, while
-# this cursor lane walks every stored package detail and fills its granule
-# list/detail descendants in bounded slices.
+# Walks every stored CDIR package and fills its granules in bounded slices;
+# the daily date-window job finds new packages.
 report_root="$reports_root"
 log_path="$report_root/govinfo-cdir-descendant-refresh.log"
 lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
@@ -36,8 +34,7 @@ bicam_load_project_env
 export DBT_PROFILES_DIR="$project_root/dbt_project"
 
 batch_size=${BICAM_GOVINFO_CDIR_BATCH_SIZE:-12}
-# Twenty-four bounded rounds cover the current 239 stored packages in one
-# service invocation while retaining a small per-round root batch.
+# 24 rounds cover all stored packages (~240) per invocation.
 max_batches=${BICAM_GOVINFO_CDIR_MAX_BATCHES:-24}
 concurrency=${BICAM_GOVINFO_CDIR_CONCURRENCY:-4}
 page_size=${BICAM_GOVINFO_CDIR_PAGE_SIZE:-100}
@@ -63,9 +60,7 @@ uv run python scripts/run_congress_descendant_refresh.py \
   --checkpoint-path "$report_root/govinfo-cdir-descendant-checkpoint.json" \
   || status=$?
 
-# Rebuild only the CDIR-backed public surfaces after a successful crawl.  The
-# models are selected explicitly so this lane cannot trigger a full product
-# rebuild while the historical cursor is advancing.
+# Rebuild only the CDIR-backed public tables.
 if (( status == 0 )); then
   uv run dbt run --no-partial-parse --project-dir dbt_project --profiles-dir dbt_project \
     --select int_raw_response_versions int_raw_responses__current \

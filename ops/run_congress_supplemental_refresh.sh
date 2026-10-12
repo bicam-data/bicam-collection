@@ -15,9 +15,7 @@ mkdir -p "$report_dir"
 lock_wait_seconds=${BICAM_SUPPLEMENTAL_LOCK_WAIT_SECONDS:-900}
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   bicam_reexec_under_ingestion_lock "$lock_path" -w "$lock_wait_seconds" -- "$@"
-  # The incremental lane and this broader lane are intentionally serialized.
-  # A bounded wait lets a timer collision complete after the active lane rather
-  # than silently deferring the targeted refresh for the entire six-hour cycle.
+  # Waited up to lock_wait_seconds behind another lane (usually incremental).
   printf '# Congress supplemental refresh\n\n- generated: %s\n- status: lock_busy\n- note: another ingestion lane owns the shared lock; next scheduled run will retry\n' \
     "$(date -u --iso-8601=seconds)" >"$checkpoint"
   ln -sfn "$(basename "$checkpoint")" "$attempt_latest"
@@ -30,19 +28,11 @@ export DBT_PROFILES_DIR="$project_root/dbt_project"
 export BICAM_CONGRESS_GLOBAL_RATE_LIMIT="${BICAM_SUPPLEMENTAL_GLOBAL_RATE_LIMIT:-18000}"
 export BICAM_CONGRESS_PER_KEY_RATE_LIMIT="${BICAM_SUPPLEMENTAL_PER_KEY_RATE_LIMIT:-20000}"
 
-# Give every dbt connection in this wrapper a run-unique application name so
-# a client timeout can cancel only its own orphaned PostgreSQL backends.
+# A run-unique application name lets a timed-out dbt step cancel only its own
+# orphaned backends.
 dbt_app_name="bicam-supplemental-dbt-${stamp}"
-cancel_dbt_backends() {
-  local app_name="$1"
-  bicam_psql -At -v app_name="$app_name" \
-    <<< "select pg_cancel_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
-}
 
-# Keep the scheduled lane conservative by default, while allowing an
-# operator to raise throughput when the per-key headers and system health
-# support it.  These knobs are deliberately scoped to this service; they do
-# not alter other crawlers or the source-wide availability guard.
+# Throughput knobs for this lane only.
 refresh_concurrency="${BICAM_SUPPLEMENTAL_CONCURRENCY:-8}"
 refresh_category_workers="${BICAM_SUPPLEMENTAL_CATEGORY_WORKERS:-2}"
 refresh_request_interval="${BICAM_SUPPLEMENTAL_REQUEST_INTERVAL:-0.20}"
@@ -56,9 +46,7 @@ feature_parity_active_keys="${BICAM_SUPPLEMENTAL_FEATURE_PARITY_ACTIVE_KEYS:-12}
 started_at=$(date -u --iso-8601=seconds)
 status=0
 {
-  # Hearings and Congresses do not support update-date filters.  Keep them out
-  # of this all-history incremental discovery pass; the bounded Congress-119
-  # refresh below is the intentional unfiltered operation for those families.
+  # Hearings and Congresses have no date filter; they get the current-Congress refresh below.
   .venv/bin/python scripts/run_multi_crawl.py \
     --categories amendments bills committee-meetings committee-prints \
       committee-reports committees members nominations treaties \
@@ -67,10 +55,8 @@ status=0
     --category-workers "$refresh_category_workers" \
     --key-wait-timeout 1200 --request-interval "$refresh_request_interval" || status=1
 
-  # Refresh the unpartitioned Congress index first, then resolve the highest
-  # observed Congress so the unfiltered hearing refresh follows a newly opened
-  # Congress automatically. BICAM_CURRENT_CONGRESS is an explicit recovery
-  # override; a failed resolution stops only this lane and is retried later.
+  # Refresh the Congress index so a newly opened Congress becomes current
+  # (BICAM_CURRENT_CONGRESS overrides it).
   congress_discovery_status=0
   current_congress=""
   .venv/bin/python scripts/run_congress_history.py \
@@ -98,10 +84,8 @@ status=0
     status=1
   fi
 
-  # Feature-parity backfill: nominee-group endpoints are independently
-  # paginated, and historical amendment text children remain incomplete.
-  # Give those known source paths a stable cursor of their own so they make
-  # progress every cycle instead of waiting behind lower-priority categories.
+  # Nominee groups and historical amendment text get their own cursor so they
+  # progress every cycle.
   .venv/bin/python scripts/run_congress_descendant_refresh.py \
     --categories nominations amendments \
     --batch-size 100 --concurrency "$feature_parity_concurrency" \
@@ -111,12 +95,8 @@ status=0
     --active-key-budget "$feature_parity_active_keys" \
     --checkpoint-path "$report_dir/feature-parity-descendant-checkpoint.json" || status=1
 
-  # A completed descendant cursor can miss a child URL that was advertised by
-  # a newly refreshed bill detail after the cursor passed that root.  Replay
-  # only the finite set proven missing by the same edge grammar used by the
-  # coverage audit; the broad stored-root sweep below remains the fallback for
-  # any residual gap.  This keeps the common repair bounded to a few hundred
-  # requests instead of replaying hundreds of thousands of bill roots.
+  # Fetch child URLs the coverage audit proves missing (e.g. advertised by a
+  # detail refreshed after the cursor passed it) instead of re-sweeping roots.
   targeted_child_status=0
   timeout --signal=TERM --kill-after=30s 1200s \
     .venv/bin/python scripts/backfill_missing_child_endpoints.py \
@@ -131,10 +111,7 @@ status=0
     status=1
   fi
 
-  # Descendant refresh is driven by the child-coverage ledger.  The audit is a
-  # read-only database check and is substantially cheaper than traversing
-  # stored roots; do not spend API quota on an unconditional sweep when it
-  # already proves that every declared child edge is present or classified.
+  # Only sweep stored roots when the (database-only) child audit finds gaps.
   child_audit_status=0
   child_audit_log=/tmp/bicam-child-coverage-supplemental-$stamp.log
   timeout --signal=TERM --kill-after=20s 600s \
@@ -166,16 +143,10 @@ status=0
     fi
   fi
 
-  # Propagate the crawl's current raw state into the reconciliation inputs
-  # before probing the opposite source.  The final product rebuild below is
-  # still authoritative, but waiting until then makes newly discovered
-  # Congress-only records invisible to the targeted GovInfo probes in this
-  # cycle.  Keep this deliberately narrow so an incremental run does not pay
-  # for a second full product rebuild merely to construct probe candidates.
+  # Build just the match inputs now so this cycle's GovInfo probes see newly
+  # crawled records. Each dbt step sets a statement_timeout just inside its
+  # client timeout so a killed dbt leaves no query running.
   pre_reconcile_status=0
-  # Keep PostgreSQL's server-side timeout just inside the client timeout.  A
-  # client-side timeout alone can leave a CREATE TABLE AS query running after
-  # the dbt process exits, consuming the shared database for the next lane.
   PGAPPNAME="$dbt_app_name" \
     PGOPTIONS="${PGOPTIONS:-} -c statement_timeout=${BICAM_SUPPLEMENTAL_PRE_RECONCILE_STATEMENT_TIMEOUT_MS:-840000}" \
     timeout --signal=TERM --kill-after=30s 900s \
@@ -189,16 +160,13 @@ status=0
         int_bills__congress int_bills__govinfo int_bill_candidates fct_bill_matches \
         int_committee_reports__congress int_committee_reports__govinfo \
         int_committee_report_candidates fct_committee_report_matches \
-      || { pre_reconcile_status=$?; cancel_dbt_backends "$dbt_app_name"; }
+      || { pre_reconcile_status=$?; bicam_stop_dbt_backends "$dbt_app_name"; }
   echo "pre_reconciliation_propagation_status=$pre_reconcile_status"
   if (( pre_reconcile_status != 0 )); then
     status=1
   fi
 
-  # Reconcile the opposite source directions as well.  These helpers derive
-  # deterministic counterpart URLs from current source records, retain 404
-  # evidence, and skip recently probed endpoints; they are bounded probes, not
-  # historical crawls.
+  # Probe each source for counterparts of the other's records (404s are kept as evidence).
   .venv/bin/python scripts/backfill_govinfo_bills.py \
     --modern-missing \
     --limit "${BICAM_SUPPLEMENTAL_GOVINFO_BILL_PROBE_LIMIT:-500}" \
@@ -228,11 +196,7 @@ status=0
     --limit 2000 --max-pages 1000 --page-size 250 --min-age-minutes 0 \
     --request-interval 0.5 --key-wait-timeout 1200 || status=1
 
-  # Recheck only the small, classified root-detail source-error set on each
-  # six-hour pass.  Ordinary retries intentionally exclude known 500s so a
-  # malformed upstream record cannot consume the whole API budget; this
-  # bounded opt-in probe still heals a record automatically if Congress.gov
-  # repairs it, without replaying historical list pages or child fan-out.
+  # Re-probe the few detail URLs with known source 500s in case Congress.gov fixed them.
   .venv/bin/python scripts/retry_failed_fetches.py \
     --categories amendments bills \
     --node-types amendment_detail bill_detail \
@@ -245,13 +209,11 @@ status=0
     timeout --signal=TERM --kill-after=30s 300s \
     uv run dbt seed --no-partial-parse --project-dir dbt_project \
       --select govinfo_member_component_identity_overrides reconciliation_quality_thresholds bill_committee_report_multiplicity_allowlist --full-refresh \
-      || { seed_status=$?; cancel_dbt_backends "$dbt_app_name"; status=1; }
+      || { seed_status=$?; bicam_stop_dbt_backends "$dbt_app_name"; status=1; }
 
   dbt_run_status=0
   dbt_test_status=0
-  # Materialize all category-tagged models and the dependency closure of the
-  # quality marts.  Running this separately from tests prevents the broad
-  # schema-test graph from exhausting the refresh timeout before the gate.
+  # Models and targeted tests run separately; the full schema-test graph does not fit the window.
   PGAPPNAME="$dbt_app_name" \
     PGOPTIONS="${PGOPTIONS:-} -c statement_timeout=${BICAM_SUPPLEMENTAL_RUN_STATEMENT_TIMEOUT_MS:-1740000}" \
     timeout --signal=TERM --kill-after=30s 1800s \
@@ -278,11 +240,8 @@ status=0
         +fct_committee_print_matches \
         +fct_committee_print_reconciliation_metrics \
         bridge_govinfo__committee_print_packages \
-      || { dbt_run_status=$?; cancel_dbt_backends "$dbt_app_name"; status=1; }
+      || { dbt_run_status=$?; bicam_stop_dbt_backends "$dbt_app_name"; status=1; }
 
-  # Keep the same auditable reconciliation/identity corpus used by the
-  # incremental lane.  Full schema sweeps remain available to CI and the
-  # read-only audit service.
   if (( dbt_run_status == 0 )); then
     PGAPPNAME="$dbt_app_name" \
       PGOPTIONS="${PGOPTIONS:-} -c statement_timeout=${BICAM_SUPPLEMENTAL_TEST_STATEMENT_TIMEOUT_MS:-840000}" \
@@ -349,7 +308,7 @@ status=0
           bills_version_links_have_version_evidence \
           bills_version_links_title_codes_match_source \
           bills_version_links_exclude_summary_codes \
-        || { dbt_test_status=$?; cancel_dbt_backends "$dbt_app_name"; status=1; }
+        || { dbt_test_status=$?; bicam_stop_dbt_backends "$dbt_app_name"; status=1; }
   fi
   echo "- dbt model status: $dbt_run_status"
   echo "- dbt targeted-test status: $dbt_test_status"

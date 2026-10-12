@@ -3,11 +3,7 @@ set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
 
-# Serialize the export with crawler/dbt lanes.  A dbt view/table rebuild can
-# briefly drop a relation while the exporter is enumerating its contract;
-# using a separate snapshot-only lock allowed the 05:00 export to race that
-# rebuild and fail with a missing staging relation.  The bounded wait keeps a
-# collision from losing the entire daily snapshot window.
+# Hold the ingestion lock: a dbt rebuild briefly drops relations the exporter reads.
 lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
 log_path="$reports_root/research-snapshot.log"
 

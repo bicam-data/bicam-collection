@@ -4,8 +4,8 @@ set -u
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
 bicam_load_project_env
 
-# Recurring guard for a coordinated Congress.gov outage. It is intentionally
-# conservative: ordinary isolated failures must not pause a healthy crawl.
+# Pauses the Congress history workers during a coordinated Congress.gov
+# outage; isolated failures must not pause a healthy crawl.
 threshold_total=${BICAM_RESUME_GUARD_FAILURE_THRESHOLD:-20}
 threshold_503=${BICAM_RESUME_GUARD_503_THRESHOLD:-10}
 threshold_failure_ratio=${BICAM_RESUME_GUARD_FAILURE_RATIO:-0.50}
@@ -15,18 +15,11 @@ state_file=${BICAM_RESUME_GUARD_STATE_FILE:-$reports_root/availability-guard-lat
 cooldown_marker=${BICAM_CONGRESS_COOLDOWN_MARKER:-$reports_root/congress-api-cooldown-until}
 
 write_state() {
-  local state=$1
-  local failures=$2
-  local failures_503=$3
-  local failures_429=$4
-  local fetched=$5
-  local failure_ratio=$6
-  local last_429_at=$7
   mkdir -p "$(dirname "$state_file")"
   {
     printf 'generated_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    printf 'state=%s\n' "$state"
-    printf 'failures_2m=%s\n' "$failures"
+    printf 'state=%s\n' "$1"
+    printf 'failures_2m=%s\n' "$total"
     printf 'http_503_2m=%s\n' "$failures_503"
     printf 'http_429_2m=%s\n' "$failures_429"
     printf 'fetched_2m=%s\n' "$fetched"
@@ -35,10 +28,7 @@ write_state() {
   } >"$state_file"
 }
 
-# Congress.gov emits a bounded set of deterministic 500 responses for some
-# historical URLs.  They remain in the durable failure ledger and are handled
-# by the explicit source-500 retry stage, but must not be mistaken for a
-# coordinated outage that stops every healthy descendant lane.
+# Plain 500s are deterministic source defects on historical URLs, not an outage.
 read -r total failures_503 failures_429 fetched last_429_epoch <<EOF
 $(bicam_psql -At -F ' ' -c \
   "select count(*) filter (where outcome = 'failed' and http_status is distinct from 500),
@@ -71,11 +61,9 @@ fi
 failure_ratio_triggered=$(awk -v ratio="$failure_ratio" -v threshold="$threshold_failure_ratio" \
   'BEGIN { print (ratio >= threshold) ? 1 : 0 }')
 
+# Find stopped workers by command line: the transient resume unit holding
+# their PIDs can be lost across a restart.
 resume_stopped_workers() {
-  # A prior guard invocation may have stopped a worker and then lost its
-  # transient systemd resume unit across a worker restart.  Once the live
-  # window is healthy, discover stopped current workers by command line rather
-  # than trusting the old PID embedded in that unit.
   mapfile -t stopped_pids < <(
     ps -eo pid=,stat=,args= \
       | awk '$2 ~ /^T/ && $0 ~ /\/bicam-collection\/\.venv\/bin\/python3 scripts\/run_congress_history\.py/ {print $1}'
@@ -86,27 +74,18 @@ resume_stopped_workers() {
   fi
 }
 
-# A worker can be completely idle—or may have been stopped by the circuit
-# breaker—while every credential is cooling after a coordinated 429 burst.
-# Preserve that distinction in the durable artifact even when no crawler
-# process remains, so the supervisor does not mistake a recent source window
-# for a clean no-worker state.
+# Quota cooldown is reported separately from "no workers" so a recent 429
+# window is never mistaken for a clean idle state. The Retry-After marker is
+# authoritative even if a few in-flight requests succeeded meanwhile.
 now_epoch=$(date +%s)
 quota_cooldown=0
 quota_low_activity=0
-# A coordinated 429 circuit writes a durable marker with the server-provided
-# Retry-After window. Treat that marker as authoritative even when a small
-# number of already-in-flight requests completed in the same reporting
-# window; otherwise the supervisor can launch retries while the source is
-# still cooling down.
 marker_until=$(cat "$cooldown_marker" 2>/dev/null || true)
 if [[ "$marker_until" =~ ^[0-9]+$ ]] && (( marker_until > now_epoch )); then
   quota_cooldown=1
 fi
-# A small but nonzero successful sample is normal for the dedicated amendment
-# reserve lane (about 4,000 requests/hour).  Do not call that healthy progress
-# a coordinated quota cooldown: cooldown requires that the two-minute window
-# contain no successful network fetches at all.
+# Without a marker, cooldown means zero successful fetches in the window;
+# a slow lane's trickle of successes is healthy progress.
 if (( fetched == 0 && failures_503 == 0 && (total == 0 || failures_429 == total) )); then
   quota_low_activity=1
 fi
@@ -115,18 +94,18 @@ if (( quota_cooldown == 0 && quota_low_activity == 1 )) && [[ "$last_429_epoch" 
   quota_cooldown=1
 fi
 if (( quota_cooldown == 1 )); then
-  write_state quota_cooldown "$total" "$failures_503" "$failures_429" "$fetched" "$failure_ratio" "$last_429_at"
+  write_state quota_cooldown
   echo "resume_guard_quota_cooldown failures=$total http_503=$failures_503 http_429=$failures_429 fetched=$fetched last_429_at=$last_429_at"
   exit 0
 fi
 if systemctl --user is-active --quiet bicam-crawl-resume-guard.timer; then
-  write_state paused_waiting_retry "$total" "$failures_503" "$failures_429" "$fetched" "$failure_ratio" "$last_429_at"
+  write_state paused_waiting_retry
   echo "resume_guard_retry_pending failures=$total http_503=$failures_503 http_429=$failures_429 fetched=$fetched failure_ratio=$failure_ratio"
   exit 0
 fi
 if (( total < threshold_total || (failures_503 < threshold_503 && failure_ratio_triggered == 0) )); then
   resume_stopped_workers
-  write_state healthy "$total" "$failures_503" "$failures_429" "$fetched" "$failure_ratio" "$last_429_at"
+  write_state healthy
   echo "resume_guard_ok failures=$total http_503=$failures_503 http_429=$failures_429 fetched=$fetched failure_ratio=$failure_ratio"
   exit 0
 fi
@@ -135,13 +114,13 @@ mapfile -t pids < <(
   pgrep -f '/bicam-collection/.venv/bin/python3 scripts/run_congress_history.py' || true
 )
 if ((${#pids[@]} == 0)); then
-  write_state no_workers "$total" "$failures_503" "$failures_429" "$fetched" "$failure_ratio" "$last_429_at"
+  write_state no_workers
   echo "resume_guard_no_workers failures=$total http_503=$failures_503 http_429=$failures_429 fetched=$fetched failure_ratio=$failure_ratio"
   exit 0
 fi
 
 kill -STOP "${pids[@]}" || true
-write_state paused "$total" "$failures_503" "$failures_429" "$fetched" "$failure_ratio" "$last_429_at"
+write_state paused
 echo "resume_guard_paused failures=$total http_503=$failures_503 fetched=$fetched failure_ratio=$failure_ratio pids=${pids[*]}"
 if systemctl --user is-active --quiet bicam-crawl-resume-guard.timer; then
   echo "resume_guard_retry_already_scheduled"

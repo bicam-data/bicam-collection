@@ -55,9 +55,8 @@ quality_status=0
 ln -sfn "$(basename "$targeted_log")" "$log_dir/targeted.log"
 printf '%s\t%s\t%s\n' "$(date -u --iso-8601=seconds)" targeted "$targeted_status" >>"$phase_status"
 
-# Refresh the positional ledger before targeted repair so deterministic
-# Congress.gov source errors are preserved but not requeued as actionable
-# gaps. This also ensures interior list holes use their exact offsets.
+# Refresh the positional ledger first so known source errors aren't requeued
+# and interior list holes use exact offsets.
 timeout --signal=TERM --kill-after=30s 900s \
   uv run dbt build --project-dir dbt_project \
     --select fct_pagination_coverage \
@@ -97,13 +96,8 @@ printf '%s\t%s\t%s\n' "$(date -u --iso-8601=seconds)" hearing_meetings "$hearing
   >"$log_dir/retries.log" 2>&1 || retry_status=$?
 printf '%s\t%s\t%s\n' "$(date -u --iso-8601=seconds)" retries "$retry_status" >>"$phase_status"
 
-# The full coverage models are maintained by the bounded pre-repair phase.
-# Keep the final reconciliation run focused on source models and quality
-# outputs so a coverage-only scan cannot force the entire historical crawl to
-# restart.  ``dbt build`` also schedules hundreds of legacy staging tests;
-# several of those repeatedly group large raw-backed views and can hold the
-# ingestion lock for tens of minutes.  Materialize the selected models first,
-# then run the small, auditable reconciliation/identity test set below.
+# Models first, then the targeted tests; dbt build would run hundreds of slow
+# staging tests while holding the lock.
 dbt_run_status=0
 dbt_test_status=0
 timeout --signal=TERM --kill-after=30s 300s \

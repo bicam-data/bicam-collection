@@ -12,8 +12,7 @@ exec >>"$log_file" 2>&1
 date -u
 echo "reconciliation_probe_followup_started"
 
-# OnSuccess is ordered after the supervisor process exits, but keep this
-# guard because a crawler worker may still be finishing its database cleanup.
+# A crawler may still be cleaning up after the supervisor exits.
 while :; do
   active_runs=$(bicam_psql -At -c \
     "select count(*) from crawl_runs where status = 'running';" 2>/dev/null || echo 1)
@@ -47,10 +46,7 @@ while [ "$probe_attempt" -lt 3 ]; do
 done
 
 echo "probe_modern_congress_only_govinfo_bills"
-# The source-gap seed intentionally keeps the quality gate usable while the
-# modern overlap is being checked, but it must not turn unprobed Congress-only
-# records into permanent truth. Probe each remaining modern identity's
-# conventional GovInfo BILLS package and retain 404 evidence for review.
+# Probe GovInfo for the remaining modern Congress-only bills; 404s are kept for review.
 uv run python scripts/backfill_govinfo_bills.py \
   --modern-missing \
   --limit "${BICAM_MODERN_GOVINFO_BILL_PROBE_LIMIT:-500}" \

@@ -12,18 +12,12 @@ attempt_latest="$report_dir/fetch-lineage-checkpoint-attempt-latest.md"
 log_path="$report_dir/fetch-lineage-backfill.log"
 
 mkdir -p "$report_dir"
-# Queue behind a long supplemental refresh rather than dropping a 15-minute
-# provenance-repair cadence.  This is database-only waiting and consumes no
-# source quota.  The systemd service has a larger outer timeout so the repair
-# still has time to run after the lock is released.
 lock_wait_seconds=${BICAM_LINEAGE_LOCK_WAIT_SECONDS:-2700}
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   bicam_reexec_under_ingestion_lock "$lock_path" -w "$lock_wait_seconds" -- "$@"
   printf '# Fetch-lineage checkpoint\n\n- generated: %s\n- status: lock_busy\n- note: another ingestion lane owns the shared lock; next timer invocation will retry\n' \
     "$(date -u --iso-8601=seconds)" >"$checkpoint"
-  # Preserve the last successful repair as the authoritative latest
-  # checkpoint.  A coordination skip is durable, but belongs under the
-  # attempt pointer so consumers can distinguish it from a completed batch.
+  # A lock-busy skip is recorded only under the attempt pointer.
   ln -sfn "$(basename "$checkpoint")" "$attempt_latest"
   exit 0
 fi
@@ -34,11 +28,7 @@ echo "$started_at fetch_lineage_backfill_started"
 cd "$project_root" || exit 1
 bicam_load_project_env
 
-# This is database-only provenance repair, not network crawling. Two million
-# event rows per bounded invocation normally finishes within the 15-minute
-# timer cadence; 5,000 raw IDs per transaction keeps each indexed update below
-# the database statement-timeout guardrail while retaining an operator override
-# for slower deployments.
+# Database-only provenance repair; 5,000 raw IDs per transaction stays under the statement timeout.
 batch_rows=${BICAM_LINEAGE_BATCH_ROWS:-2000000}
 batch_raw_ids=${BICAM_LINEAGE_BATCH_RAW_IDS:-5000}
 timeout_seconds=${BICAM_LINEAGE_TIMEOUT_SECONDS:-900}

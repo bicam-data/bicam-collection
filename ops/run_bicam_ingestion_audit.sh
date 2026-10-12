@@ -12,10 +12,7 @@ history="$history_dir/$timestamp.txt"
 mkdir -p "$history_dir"
 cd "$project_root" || exit 1
 
-# The audit reads materialized dbt relations while ingestion lanes may be
-# rebuilding them.  Serialize with the shared ingestion lock so a report
-# cannot observe a relation between DROP and CREATE (the same race the
-# research-snapshot runner guards against).  Waiting consumes no API quota.
+# Hold the lock so the audit never reads a relation mid-rebuild.
 lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
 lock_wait_seconds=${BICAM_AUDIT_LOCK_WAIT_SECONDS:-1800}
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
@@ -64,13 +61,8 @@ trap 'rm -f "$temporary"' EXIT
       where status <> 'completed'
       order by window_start, category;"
   echo "unresolved_retryable_failures"
-  # Keep the recovery queue visible across usage resets.  Count distinct URLs
-  # that still have no current successful payload; repeated attempts for the
-  # same URL are retained in the ledger but must not inflate the queue size.
-  # Older crawler versions stored query parameters in arrival order, while
-  # current URLs are canonicalized lexically.  Compare an order-insensitive
-  # URL key so a successful fetch is not reported as unresolved merely because
-  # ``offset,limit,format`` and ``format,limit,offset`` were stored differently.
+  # Distinct URLs still lacking a successful payload; the URL key ignores query
+  # parameter order, which older crawler versions did not canonicalize.
   bicam_psql -At -F '|' -c \
     "with latest_failures as (
        select distinct on (f.category, f.endpoint_url, f.node_type)
@@ -203,9 +195,7 @@ trap 'rm -f "$temporary"' EXIT
       group by f.category, f.http_status
       order by f.category, f.http_status;"
   echo "missing_congress_root_partitions"
-  # Keep uncrawled partitions distinct from source-empty partitions.  A left
-  # join with only an item count treats both cases as zero and previously made
-  # an active backfill look like a source-availability gap.
+  # Uncrawled partitions are reported apart from source-empty ones.
   bicam_psql -At -F '|' -c \
     "with roots(category, node_type, item_key, path) as (
        values
@@ -245,9 +235,7 @@ trap 'rm -f "$temporary"' EXIT
      group by scope.category
      order by scope.category;"
   echo "empty_congress_root_partitions"
-  # A root is source-empty only when at least one current response exists and
-  # every observed response contains zero items.  This is evidence about the
-  # upstream API, not permission to silently shrink the declared 1-119 scope.
+  # Source-empty: has current responses, all with zero items.
   bicam_psql -At -F '|' -c \
     "with roots(category, node_type, item_key, path) as (
        values

@@ -7,11 +7,8 @@ lock_file=/run/user/$(id -u)/bicam-ingestion.lock
 cd "$project_root" || exit 1
 bicam_load_project_env
 
-# This is a bounded maintenance lane, not a second concurrent crawler.  The
-# historical bill/amendment sweep and the dedicated amendment reserve already
-# consume the shared Congress.gov account window.  Never queue behind their
-# lock (which can make systemd kill the job during a long cooldown); skip this
-# window and let the next timer invocation try again instead.
+# Skip (don't queue) when the lock is busy; queuing through a long cooldown gets
+# the job killed by systemd.
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   bicam_reexec_under_ingestion_lock "$lock_file" -n -- "$@"
   echo "[retry-window] skipped: ingestion lock is held"
@@ -29,9 +26,7 @@ if pgrep -f '[r]un_congress_history.py|[r]un_congress_descendant_refresh.py|[b]a
   exit 0
 fi
 
-# Keep this repair lane deliberately small.  It handles aged transient child
-# failures after a source cooldown without competing with the high-throughput
-# historical workers or replaying descendant fan-out.
+# Small batches of aged transient child failures, without descendant fan-out.
 exec "$project_root/.venv/bin/python" scripts/retry_failed_fetches.py \
   --categories amendments \
   --limit "${BICAM_AMENDMENT_RETRY_LIMIT:-25}" \

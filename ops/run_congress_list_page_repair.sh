@@ -10,10 +10,7 @@ mkdir -p "$reports_root"
 cd "$project_root" || exit 1
 bicam_load_project_env
 
-# Serialize with the main supervisor and its post-crawl/dbt phase.  The
-# blocking flock is intentional: this service may start at boot while a
-# historical crawl is already active, but must not consume the shared API
-# budget or race the reconciliation build.
+# Blocks on the lock: may start at boot while a crawl or dbt build is running.
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   exec 9>"$lock_file"
   (
@@ -24,11 +21,7 @@ if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   exit $?
 fi
 
-# The post-crawl supervisor deliberately allows the dedicated amendment
-# reserve to finish in parallel with its dbt phase. It owns a separate 4k/h
-# source-budget lane, so this repair can start as soon as all other Congress
-# crawl runs finish and use its complementary 16k/h budget. Waiting for the
-# reserve as well would leave the source quota idle without improving safety.
+# The amendment reserve lane has its own budget, so don't wait for it to finish.
 while :; do
   active_runs=$(bicam_psql -At -c \
     "select count(*)

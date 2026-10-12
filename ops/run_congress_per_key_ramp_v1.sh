@@ -3,14 +3,8 @@ set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
 
-# Bounded per-key Congress.gov rate experiment.
-#
-# The live headers and published API policy describe credential-scoped limits,
-# while one high-concurrency run also encountered a broader 429 window. This
-# wrapper schedules the theoretical sum of the live per-credential windows
-# with a smooth request pacer rather than issuing that sum as a burst. It stops
-# the child worker after a small coordinated-429 signal and leaves all
-# successful raw responses durable for the next continuation.
+# Bounded per-key Congress.gov rate experiment (disabled). Paces requests at the
+# sum of the per-key windows and stops the worker on a small coordinated-429 signal.
 
 lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
 log_path="$reports_root/congress-per-key-ramp.log"
@@ -44,9 +38,7 @@ if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   exit 0
 fi
 
-# The cooldown may have been written while this process was waiting for the
-# shared ingestion lock.  Recheck after acquiring it; otherwise a queued ramp
-# can start immediately after another lane observes coordinated 429s.
+# The cooldown may have started while waiting for the lock.
 if bicam_cooldown_active; then
   flock -u 9
   bicam_wait_for_cooldown congress_per_key_ramp_cooldown_sleep
@@ -71,8 +63,7 @@ write_checkpoint() {
   local attempts
   local h2xx
   local h429
-  # Use the existing crawl_run_fetches(crawl_run_id) index instead of scanning
-  # the multi-gigabyte fetch ledger by fetched_at on every checkpoint.
+  # Use the crawl_run_fetches(crawl_run_id) index rather than scanning by fetched_at.
   attempts=$(bicam_db_count "select coalesce(sum(coalesce(cf.attempt_count,0)),0) from crawl_run_fetches cf join crawl_runs cr on cr.id=cf.crawl_run_id where cr.started_at >= '${started_at}' and cf.api_key_name like 'congressional%';")
   h2xx=$(bicam_db_count "select count(*) from crawl_run_fetches cf join crawl_runs cr on cr.id=cf.crawl_run_id where cr.started_at >= '${started_at}' and cf.api_key_name like 'congressional%' and cf.http_status between 200 and 299;")
   h429=$(bicam_db_count "select count(*) from crawl_run_fetches cf join crawl_runs cr on cr.id=cf.crawl_run_id where cr.started_at >= '${started_at}' and cf.api_key_name like 'congressional%' and cf.http_status=429;")

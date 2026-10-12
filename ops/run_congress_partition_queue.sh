@@ -3,10 +3,8 @@ set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
 
-# Queue historical Congress.gov partitions behind the active ingestion lane.
-# The blocking flock is deliberate: this pass must not create a second
-# process-local key pool while the descendant refresh is using the same
-# credentials.
+# Historical Congress.gov partition queue (disabled; for supervised backfills).
+# Blocks on the lock so two key pools never run at once.
 
 lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
 log_path="$reports_root/congress-partition-queue.log"
@@ -53,9 +51,7 @@ write_checkpoint() {
   local stamp
   stamp=$(date -u '+%Y%m%dT%H%M%SZ')
   local attempts h2xx h429
-  # Filter through crawl_runs first so PostgreSQL can use the existing
-  # crawl_run_fetches(crawl_run_id) index. The fetch ledger is tens of GB and
-  # a timestamp scan here would stall the guard for minutes.
+  # Filter via crawl_runs to use the crawl_run_fetches(crawl_run_id) index.
   attempts=$(bicam_db_count "select coalesce(sum(coalesce(cf.attempt_count,0)),0) from crawl_run_fetches cf join crawl_runs cr on cr.id=cf.crawl_run_id where cr.started_at >= '${started_at}' and cf.api_key_name like 'congressional%';")
   h2xx=$(bicam_db_count "select count(*) from crawl_run_fetches cf join crawl_runs cr on cr.id=cf.crawl_run_id where cr.started_at >= '${started_at}' and cf.api_key_name like 'congressional%' and cf.http_status between 200 and 299;")
   h429=$(bicam_db_count "select count(*) from crawl_run_fetches cf join crawl_runs cr on cr.id=cf.crawl_run_id where cr.started_at >= '${started_at}' and cf.api_key_name like 'congressional%' and cf.http_status=429;")
@@ -97,16 +93,11 @@ write_queue_state() {
 run_group() {
   local group_start="$1"
   local group_end="$2"
-  # Hold the shared lock only for this bounded Congress group.  Releasing it
-  # between groups lets the resumable descendant refresher run a small slice
-  # without allowing two Congress request pools to overlap.
+  # Hold the lock per Congress group so the descendant refresher can run between groups.
   if bicam_cooldown_active; then
     echo "[$(date -u)] congress_partition_queue_cooldown_wait" >>"$log_path"
     return 42
   fi
-  # A standalone `flock 9` releases its lock when the helper exits. Re-enter
-  # this script under a command-held lock so the bounded worker group and its
-  # checkpoint updates remain serialized with the other ingestion lanes.
   if [[ "${BICAM_PARTITION_GROUP_LOCK_HELD:-0}" != "1" ]]; then
     (
       flock -w "${BICAM_PARTITION_LOCK_WAIT_SECONDS:-1800}" 9 || exit $?
@@ -178,8 +169,7 @@ if ! [[ "$next_start" =~ ^[0-9]+$ ]] || (( next_start < 1 || next_start > 119 ))
   next_start=1
 fi
 echo "[$(date -u)] congress_partition_queue_resume next_start=$next_start state_path=$state_path" >>"$log_path"
-# Make the durable cursor truthful while a bounded group is actively running;
-# the prior failure state remains useful only after this process stops.
+# Mark the cursor running while a group is in progress.
 write_queue_state "$next_start" "$((next_start - 1))" running
 
 queue_status=0
@@ -193,10 +183,7 @@ for ((group_start=next_start; group_start<=119; group_start+=group_size)); do
     write_queue_state "$group_start" "$((group_start - 1))" paused_after_group_failure
     break
   fi
-  # Give the other serialized Congress lane a chance to acquire the lock
-  # before the next historical group.  This is intentionally short and
-  # configurable; it prevents a fast, already-cached group from starving the
-  # resumable descendant refresher.
+  # Pause between groups so the other Congress lane can take the lock.
   if (( between_group_sleep > 0 )); then
     echo "[$(date -u)] congress_partition_between_group_sleep seconds=$between_group_sleep" >>"$log_path"
     sleep "$between_group_sleep"

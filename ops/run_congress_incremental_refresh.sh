@@ -15,11 +15,8 @@ mkdir -p "$report_dir"
 
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   bicam_reexec_under_ingestion_lock "$lock_path" -n -- "$@"
-  # The supplemental lane covers the same main-11 source families and may
-  # already be running when the six-hour timers fire together.  Waiting hours
-  # here only queues a duplicate refresh behind the owner and can make systemd
-  # report a false failure after a manual restart.  The next timer invocation
-  # is the durable retry; record a successful coordination skip instead.
+  # Another lane (often supplemental, on the same six-hour cadence) holds the
+  # lock; the next timer run is the retry, so skip rather than queue behind it.
   printf '# Congress incremental checkpoint\n\n- generated: %s\n- status: lock_busy\n- note: another ingestion lane owns the shared lock; next scheduled run will retry\n' \
     "$(date -u --iso-8601=seconds)" >"$checkpoint"
   ln -sfn "$(basename "$checkpoint")" "$attempt_latest"
@@ -38,9 +35,7 @@ fi
 cd "$project_root" || exit 1
 bicam_load_project_env
 
-# Keep this discovery lane below the deployment's observed aggregate pressure
-# boundary. The shared file lock makes it mutually exclusive with historical
-# and descendant workers, so it does not add pressure to another Congress run.
+# Stay under the observed aggregate rate boundary.
 export BICAM_CONGRESS_GLOBAL_RATE_LIMIT="${BICAM_INCREMENTAL_GLOBAL_RATE_LIMIT:-18000}"
 export BICAM_CONGRESS_PER_KEY_RATE_LIMIT="${BICAM_INCREMENTAL_PER_KEY_RATE_LIMIT:-20000}"
 export DBT_PROFILES_DIR="$project_root/dbt_project"
@@ -63,10 +58,8 @@ congress_discovery_status=0
 current_congress=""
 discovery_log=/tmp/bicam-congress-incremental-discovery.log
 
-# Refresh the tiny unpartitioned Congress index before selecting the current
-# hearing partition. The resolver reads the highest observed congress_detail
-# URL, so a newly opened Congress is picked up automatically; an explicit
-# BICAM_CURRENT_CONGRESS value remains available for a controlled recovery.
+# Refresh the Congress index first so a newly opened Congress is picked up as
+# the current hearing partition (BICAM_CURRENT_CONGRESS overrides it).
 .venv/bin/python scripts/run_congress_history.py \
   --categories congresses \
   --congress-start 1 --congress-end 1 \
@@ -76,23 +69,17 @@ discovery_log=/tmp/bicam-congress-incremental-discovery.log
   --request-interval "${BICAM_INCREMENTAL_REQUEST_INTERVAL:-0.20}" \
   >"$discovery_log" 2>&1 || congress_discovery_status=$?
 if (( congress_discovery_status == 0 )); then
-  if [[ -n "${BICAM_CURRENT_CONGRESS:-}" ]]; then
-    current_congress="$({ .venv/bin/python scripts/resolve_current_congress.py --override "$BICAM_CURRENT_CONGRESS"; })" \
-      || congress_discovery_status=$?
-  else
-    current_congress="$({ .venv/bin/python scripts/resolve_current_congress.py; })" \
-      || congress_discovery_status=$?
-  fi
+  current_congress=$(.venv/bin/python scripts/resolve_current_congress.py \
+    ${BICAM_CURRENT_CONGRESS:+--override "$BICAM_CURRENT_CONGRESS"}) \
+    || congress_discovery_status=$?
 fi
 if (( congress_discovery_status != 0 )); then
   current_congress=""
   echo "Unable to resolve the current Congress; the next scheduled run will retry." >>"$discovery_log"
 fi
 
-# These nine list endpoints support fromDateTime/toDateTime in the official
-# OpenAPI specification. A 24-hour overlap protects timestamp ties and late
-# source publication while the immutable response-version archive preserves
-# every refreshed payload.
+# These nine list endpoints accept fromDateTime/toDateTime. The overlap
+# covers timestamp ties and late publication.
 .venv/bin/python scripts/run_multi_crawl.py \
   --categories amendments bills committee-meetings committee-prints \
     committee-reports committees members nominations treaties \
@@ -105,9 +92,7 @@ fi
   --request-interval "${BICAM_INCREMENTAL_REQUEST_INTERVAL:-0.20}" \
   >"$filtered_log" 2>&1 || filtered_status=$?
 
-# Congress and hearing lists do not support update-date filters. The Congress
-# index was refreshed above; refresh only the newly resolved current-Congress
-# hearing partition instead of replaying the full historical hearing archive.
+# Hearing lists have no date filter, so refresh just the current Congress.
 if (( congress_discovery_status == 0 )); then
   .venv/bin/python scripts/run_congress_history.py \
     --categories hearings \
@@ -123,8 +108,9 @@ else
   printf 'current-hearing refresh skipped: current Congress resolution failed\n' >"$unfiltered_log"
 fi
 
-# The hearing/meeting relationship is not symmetric. Follow and audit both
-# explicit source directions without manufacturing one-to-one links.
+# Retry failures, repair list-chain gaps, follow hearing<->meeting links in
+# both directions (the relationship is not symmetric), and re-probe the few
+# detail URLs with deterministic source 500s.
 {
   .venv/bin/python scripts/retry_failed_fetches.py \
     --categories amendments bills committee-meetings committee-prints \
@@ -132,13 +118,6 @@ fi
     --limit 5000 --max-pages 1000 --page-size 250 --min-age-minutes 0 \
     --request-interval 0.5 --key-wait-timeout 1200 \
     || relationship_status=1
-  # Pagination coverage is a deliberately bounded audit run during the
-  # historical/coverage phase. It scans the complete raw archive and can
-  # hold the ingestion lock for tens of minutes, so it is not part of the
-  # incremental reconciliation critical path.
-  # Re-evaluate the materialized root-position gate before reconciliation.
-  # This is normally a no-op; when an interrupted list chain leaves a tail
-  # position absent, fetch only the diagnosed partition/page.
   .venv/bin/python scripts/run_root_gap_repair.py \
     --categories amendments bills committee-meetings committee-prints \
       committee-reports committees hearings nominations treaties \
@@ -153,11 +132,6 @@ fi
     --limit 5000 --concurrency 4 --batch-size 250 \
     --request-interval 0.5 --key-wait-timeout 1200 --active-key-budget 4 \
     || relationship_status=1
-  # Re-probe only the small, durable set of main-11 detail URLs that have
-  # produced deterministic upstream HTTP 500s.  This is deliberately
-  # separate from the ordinary transient retry sweep so source defects are
-  # revisited after recovery without replaying hundreds of malformed child
-  # page variants or consuming the whole API window.
   .venv/bin/python scripts/retry_failed_fetches.py \
     --categories amendments bills \
     --node-types amendment_detail bill_detail \
@@ -170,13 +144,9 @@ fi
     || source_error_status=1
 } >"$relationship_log" 2>&1
 
-# Materialize the current raw archive immediately after the crawl.  The
-# downstream reconciliation selection includes several standalone marts (for
-# example bills_versions and fct_collection_coverage) whose explicit dbt
-# selectors do not pull raw parents into the run.  Without this bounded
-# propagation step, newly fetched payloads can remain invisible until a later
-# timer or a manual full build, and lineage-only parent repairs can fail to
-# reach staging.  The step is database-only and consumes no source quota.
+: >"$dbt_log"
+# The model selection below does not pull in the raw intermediates, so build
+# them first or new payloads stay invisible downstream.
 timeout --signal=TERM --kill-after=30s 900s \
   uv run dbt run --no-partial-parse --project-dir dbt_project \
     --select int_raw_response_versions int_raw_responses__current \
@@ -218,9 +188,6 @@ dbt_models=(
   +fct_committee_print_reconciliation_metrics
   bridge_govinfo__committee_print_packages
   bridge_govinfo__member_components
-  # Keep the person-level GovInfo export relation materialized alongside the
-  # identity bridges.  It is intentionally outside the category-tagged
-  # Congress models, so an explicit selector is required on every refresh.
   stg_govinfo__member_references
 )
 dbt_tests=(
@@ -288,14 +255,11 @@ dbt_tests=(
   source_gap_queue_open_rows_have_action
 )
 
-# Keep scheduled refreshes bounded by materializing the quality models first,
-# then running the small auditable regression corpus.  The previous dbt build
-# mode also ran every schema test in the dependency graph and could time out
-# before reaching the quality gate.
+# Run the targeted tests only; the full schema-test graph does not fit the window.
 timeout --signal=TERM --kill-after=30s 1800s \
   uv run dbt run --no-partial-parse --project-dir dbt_project \
     --select "${dbt_models[@]}" \
-    >"$dbt_log" 2>&1 || dbt_run_status=$?
+    >>"$dbt_log" 2>&1 || dbt_run_status=$?
 
 if (( dbt_run_status == 0 )); then
   timeout --signal=TERM --kill-after=30s 900s \
@@ -330,31 +294,11 @@ timeout --signal=TERM --kill-after=30s 600s \
   echo "- quality gate status: $quality_status"
   echo "- overlap hours: ${BICAM_INCREMENTAL_OVERLAP_HOURS:-24}"
   echo "- process request interval: ${BICAM_INCREMENTAL_REQUEST_INTERVAL:-0.20}s"
-  echo
-  echo "## Filtered crawl tail"
-  echo '```text'
-  tail -n 30 "$filtered_log" 2>/dev/null || true
-  echo '```'
-  echo
-  echo "## Unfiltered crawl tail"
-  echo '```text'
-  tail -n 30 "$unfiltered_log" 2>/dev/null || true
-  echo '```'
-  echo
-  echo "## Relationship crawl tail"
-  echo '```text'
-  tail -n 30 "$relationship_log" 2>/dev/null || true
-  echo '```'
-  echo
-  echo "## Congress discovery tail"
-  echo '```text'
-  tail -n 30 "$discovery_log" 2>/dev/null || true
-  echo '```'
-  echo
-  echo "## dbt and quality tail"
-  echo '```text'
-  tail -n 50 "$dbt_log" 2>/dev/null || true
-  echo '```'
+  log_tail "Filtered crawl tail" "$filtered_log" 30
+  log_tail "Unfiltered crawl tail" "$unfiltered_log" 30
+  log_tail "Relationship crawl tail" "$relationship_log" 30
+  log_tail "Congress discovery tail" "$discovery_log" 30
+  log_tail "dbt and quality tail" "$dbt_log" 50
 } >"$checkpoint"
 ln -sfn "$(basename "$checkpoint")" "$attempt_latest"
 

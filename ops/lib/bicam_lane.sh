@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Shared preamble for the timer-driven lane wrappers in ../.  Sourced, never
-# executed.  Each function is the block that used to be pasted into every
-# wrapper; the wrappers still own their lock timeouts, lock-busy handling,
-# exit codes and log lines.
+# Shared helpers for the lane wrappers in ../; sourced, never executed.
 
-# Paths are derived from this file's location so the repo can live anywhere.
-# Reports hold checkpoints, logs and exports (hundreds of GB); they sit
-# outside the repo and default to a sibling of it.
+# Reports (checkpoints, logs, exports; hundreds of GB) live outside the repo.
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 reports_root="${BICAM_REPORTS_DIR:-$(dirname "$project_root")/reports}"
 
@@ -17,10 +12,8 @@ bicam_load_project_env() {
   set +a
 }
 
-# Host psql against the same database the crawler and dbt use.  The DB_*
-# defaults match config.py and profiles.yml (the compose port forward), so a
-# local Docker database and an external server are both configured purely
-# through .env.  Requires bicam_load_project_env first.
+# psql against the database configured in .env, with the same DB_* defaults
+# as config.py and profiles.yml. Requires bicam_load_project_env first.
 bicam_psql() {
   PGHOST="${DB_HOST:-localhost}" \
   PGPORT="${DB_PORT:-5433}" \
@@ -30,21 +23,14 @@ bicam_psql() {
     psql "$@"
 }
 
-# Re-run the calling wrapper with the shared ingestion lock held on fd 9.
+# Re-run the calling wrapper with the shared ingestion lock held on fd 9:
 #
-#   if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
-#     bicam_reexec_under_ingestion_lock "$lock_path" -w "$lock_wait_seconds" -- "$@"
-#     ...record this wrapper's lock-busy outcome and exit...
-#   fi
+#   bicam_reexec_under_ingestion_lock "$lock_path" -w 30 -- "$@"
 #
-# Words between the lock path and `--` go to flock verbatim (-n, or -w
-# SECONDS); words after `--` are the wrapper's own "$@".  The child inherits
-# fd 9 and BICAM_INGESTION_LOCK_HELD=1, so it skips the guard.  When the child
-# finishes this process exits 0; when flock fails for any reason other than a
-# busy or timed-out lock (75) this process exits with flock's status.  Only
-# the busy case returns, so each wrapper keeps its own checkpoint text and
-# exit code for that path.  Call it from the top level of the wrapper, not
-# from a subshell, or the exits above would not end the wrapper.
+# Arguments before `--` go to flock. The re-run child sees
+# BICAM_INGESTION_LOCK_HELD=1. Exits when the child finishes or flock fails;
+# returns only when the lock is busy, so the caller handles that case. Call
+# from the wrapper's top level, not a subshell.
 bicam_reexec_under_ingestion_lock() {
   local lock_path=$1
   shift
@@ -61,17 +47,12 @@ bicam_reexec_under_ingestion_lock() {
     exec "$0" "$@"
   )
   lock_status=$?
-  if (( lock_status == 0 )); then
-    exit 0
-  else
-    if (( lock_status != 75 )); then
-      exit "$lock_status"
-    fi
+  if (( lock_status != 75 )); then
+    exit "$lock_status"
   fi
 }
 
-# Congress.gov cooldown coordination shared by the persistent per-key ramp and
-# partition-queue lanes.  These read the caller's $cooldown_path and $log_path.
+# Congress.gov Retry-After coordination; uses the caller's $cooldown_path and $log_path.
 bicam_cooldown_active() {
   local until now
   until=$(cat "$cooldown_path" 2>/dev/null || true)
@@ -79,9 +60,8 @@ bicam_cooldown_active() {
   [[ "$until" =~ ^[0-9]+$ ]] && (( until > now ))
 }
 
-# Sleep through a server cooldown in short chunks instead of exiting into a
-# rapid systemd Restart=always loop.  Re-reading the marker lets an operator
-# shorten or clear the cooldown without waiting the full server interval.
+# Sleep through the cooldown in chunks of at most a minute (rather than exit
+# into a Restart=always loop), re-reading the marker so it can be cleared early.
 bicam_wait_for_cooldown() {
   local log_label=$1
   local until now delay
@@ -114,8 +94,7 @@ bicam_write_cooldown_marker() {
   printf '%s\n' "$until" >"$temporary"
   mv "$temporary" "$cooldown_path"
   echo "[$(date -u)] congress_api_cooldown_marker until=$until retry_after=$retry_after" >>"$log_path"
-  # Re-arm the one-shot resume timer so a future coordinated window remains
-  # self-healing even after the currently armed timer has already fired.
+  # Re-arm the one-shot resume timer, which may already have fired.
   systemctl --user restart bicam-congress-cooldown-resume.timer >/dev/null 2>&1 || true
 }
 
@@ -130,7 +109,27 @@ bicam_worker_alive() {
   [[ -n "$state" && "$state" != Z* ]]
 }
 
+# Stop backends left behind by a timed-out dbt step, matched by its unique
+# application name: cancel twice (the first can race the client disconnect),
+# then terminate any stuck in I/O.
+bicam_stop_dbt_backends() {
+  local app_name=$1 action
+  for action in cancel cancel terminate; do
+    bicam_psql -At -v app_name="$app_name" \
+      <<< "select pg_${action}_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
+    [[ $action == terminate ]] || sleep 2
+  done
+}
+
 bicam_db_count() {
   local sql="$1"
   bicam_psql -At -c "$sql" 2>/dev/null | tr -d '[:space:]'
+}
+
+# Markdown section with the last lines of a log, for checkpoint files.
+log_tail() {
+  local title=$1 log=$2 lines=$3
+  printf '\n## %s\n```text\n' "$title"
+  tail -n "$lines" "$log" 2>/dev/null || true
+  printf '```\n'
 }

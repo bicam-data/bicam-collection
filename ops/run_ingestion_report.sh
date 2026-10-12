@@ -7,9 +7,7 @@ lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
 report_dir="$reports_root"
 mkdir -p "$report_dir"
 
-# Keep all three report artifacts on one consistent post-dbt database state.
-# A bounded wait avoids dropping a six-hour report when an ingestion lane is
-# still materializing relations; it does not consume source API quota.
+# Hold the lock so all three reports see one consistent post-dbt state.
 lock_wait_seconds=${BICAM_REPORT_LOCK_WAIT_SECONDS:-1800}
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   bicam_reexec_under_ingestion_lock "$lock_path" -w "$lock_wait_seconds" -- "$@"

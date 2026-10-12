@@ -10,8 +10,7 @@ lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
 mkdir -p "$report_root"
 exec >>"$log_path" 2>&1
 
-# Serialize with the Congress and four-collection GovInfo lanes so dbt never
-# materializes a half-updated public product.
+# Hold the lock so dbt never builds from a half-updated crawl.
 lock_wait_seconds=${BICAM_GOVINFO_SUPPLEMENTAL_LOCK_WAIT_SECONDS:-1800}
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   bicam_reexec_under_ingestion_lock "$lock_path" -w "$lock_wait_seconds" -- "$@"

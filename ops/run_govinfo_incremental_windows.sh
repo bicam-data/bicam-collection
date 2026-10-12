@@ -11,17 +11,8 @@ attempt_checkpoint="$reports_root/govinfo-window-checkpoint-attempt-latest.md"
 mkdir -p "$reports_root"
 exec >>"$log_path" 2>&1
 
-# All ingestion lanes share one process-level lock.  The six-hour Congress
-# refresh materializes reconciliation models after it crawls; allowing a
-# GovInfo window to insert raw rows during that build can leave the quality
-# gate observing a half-new cross-source state.  Wait for a bounded period when
-# another lane owns the lock: a non-blocking skip can line up with the next
-# hourly trigger and repeatedly delay the GovInfo frontier.  Waiting consumes
-# no API quota and keeps the reconciliation build serialized.
-# A six-hour Congress supplemental refresh can legitimately hold the shared
-# lock for longer than the old 15-minute wait.  Queue the hourly GovInfo lane
-# behind it instead of recording a lock-busy no-op and losing that window.
-# This wait consumes no API quota; the service timeout remains the outer bound.
+# Wait behind other lanes rather than skip: an hourly skip can keep lining up
+# with the next trigger and stall the GovInfo frontier.
 lock_wait_seconds=${BICAM_GOVINFO_LOCK_WAIT_SECONDS:-1800}
 if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   bicam_reexec_under_ingestion_lock "$lock_path" -w "$lock_wait_seconds" -- "$@"
@@ -36,9 +27,7 @@ if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
     echo "Status: lock_busy"
     echo "Another ingestion/reconciliation lane held the shared lock for ${lock_wait_seconds}s; the next scheduled trigger will retry."
   } >"$checkpoint_path"
-  # Keep the last successful frontier authoritative.  A coordination skip is
-  # still durable, but it belongs under the attempt pointer so consumers do
-  # not mistake a lock-busy no-op for a completed source window.
+  # A lock-busy skip is recorded only under the attempt pointer.
   ln -sfn "$(basename "$checkpoint_path")" "$attempt_checkpoint"
   echo "govinfo_incremental_windows_lock_busy=1"
   exit 0
@@ -48,34 +37,14 @@ started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "$started_at govinfo_incremental_windows_started"
 cd "$project_root" || exit 1
 
-# The Python crawler loads the project dotenv through Settings, but dbt does
-# not.  Load it explicitly and prefer the live container password so the
-# post-window reconciliation step uses the same database credentials as the
-# crawler and the other ingestion services.
 bicam_load_project_env
 export DBT_PROFILES_DIR="$project_root/dbt_project"
 
 dbt_app_name="bicam-govinfo-dbt-$(date -u '+%Y%m%dT%H%M%SZ')-$$"
-cancel_dbt_backends() {
-  local app_name="$1"
-  local cancel_attempt
-  for cancel_attempt in 1 2; do
-    bicam_psql -At -v app_name="$app_name" \
-      <<< "select pg_cancel_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
-    if (( cancel_attempt == 1 )); then
-      sleep 2
-    fi
-  done
-  # A backend in uninterruptible I/O can ignore cancellation long enough to
-  # outlive the client. It is safe to terminate only this run's exact,
-  # already-abandoned application name; never use a broad PID or dbt match.
-  bicam_psql -At -v app_name="$app_name" \
-    <<< "select pg_terminate_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
-}
 
 cleanup_dbt_backends() {
   local exit_status=$?
-  cancel_dbt_backends "$dbt_app_name"
+  bicam_stop_dbt_backends "$dbt_app_name"
   return "$exit_status"
 }
 
@@ -95,9 +64,7 @@ timeout --signal=TERM --kill-after=20s "${BICAM_GOVINFO_WINDOW_TIMEOUT_SECONDS:-
     --request-interval "${BICAM_GOVINFO_WINDOW_REQUEST_INTERVAL:-0.25}" \
     --key-wait-timeout "${BICAM_GOVINFO_WINDOW_KEY_WAIT_TIMEOUT:-600}" || status=$?
 
-# Refresh the lightweight GovInfo bill identity model before probing.  The
-# just-completed window may have inserted a package that was not visible to
-# the previous materialized model.
+# Refresh the GovInfo bill identity model so the probes see this window's packages.
 bill_identity_status=0
 if (( status == 0 )); then
   timeout --signal=TERM --kill-after=20s "${BICAM_GOVINFO_BILL_IDENTITY_TIMEOUT_SECONDS:-120}s" \
@@ -108,9 +75,7 @@ if (( status == 0 )); then
   fi
 fi
 
-# The Congress index is refreshed by the six-hour Congress lane. Resolve its
-# highest observed detail partition here so the hourly CHRG/JHRG counterpart
-# probe follows a newly opened Congress without a hard-coded upper bound.
+# Upper bound for the hearing probe: the newest Congress the Congress lane has seen.
 current_congress_status=0
 current_congress=""
 if (( status == 0 )); then
@@ -126,11 +91,7 @@ if (( status == 0 )); then
   fi
 fi
 
-# Probe the small, explicit set of GovInfo committee-report records whose
-# Congress.gov counterpart is missing.  The exception model constructs the
-# deterministic detail URL and retains 200/404 evidence; this bounded probe
-# lets the managed source-gap queue move an open row to reviewed source-gap or
-# back into reconciliation without waiting for a full Congress backfill.
+# Probe Congress.gov for GovInfo committee reports missing a counterpart.
 congress_report_probe_status=0
 if (( status == 0 )); then
   timeout --signal=TERM --kill-after=20s "${BICAM_GOVINFO_CONGRESS_REPORT_PROBE_TIMEOUT_SECONDS:-300}s" \
@@ -147,12 +108,8 @@ if (( status == 0 )); then
 fi
 echo "congress_committee_report_probe_status=$congress_report_probe_status"
 
-# The window above inserts new raw GovInfo rows, while the counterpart helpers
-# intentionally read the materialized candidate/match marts. Refresh those
-# lightweight match inputs before probing so a newly published BILLS or CHRG
-# package is discovered in this same window rather than one cycle later. The
-# final reconciliation build below still runs after any counterpart payloads
-# are fetched and therefore remains the authoritative post-probe materialization.
+# Rebuild the match inputs so the counterpart probes see this window's packages;
+# the reconciliation build after the probes is the authoritative one.
 candidate_refresh_status=0
 if (( status == 0 )); then
   timeout --signal=TERM --kill-after=20s "${BICAM_GOVINFO_CANDIDATE_REFRESH_TIMEOUT_SECONDS:-180}s" \
@@ -166,13 +123,8 @@ if (( status == 0 )); then
   fi
 fi
 
-# Keep the nested GovInfo identity audit current for every newly harvested
-# package.  This deliberately refreshes only the recursive identifier scan and
-# its exception table; the much heavier all-category member-reference
-# expansion remains in the six-hour Congress reconciliation lane.  Running
-# this after ``int_raw_responses__current`` ensures Bioguide, Thomas, and
-# authority values in package/granule subfields are checked in the same hourly
-# window that fetched them.
+# Audit identifiers nested in newly harvested packages (the full member-reference
+# expansion stays in the six-hour lane).
 nested_identity_status=0
 if (( status == 0 )); then
   timeout --signal=TERM --kill-after=20s "${BICAM_GOVINFO_IDENTITY_AUDIT_TIMEOUT_SECONDS:-360}s" \
@@ -197,12 +149,8 @@ if (( status == 0 )); then
   fi
 fi
 
-# GovInfo can publish a BILLS package before the corresponding Congress.gov
-# index page exposes that bill.  Probe those GovInfo-only identities in the
-# same bounded run so a temporary publication lag becomes durable, expiring
-# 404 evidence instead of an open reconciliation exception.  Existing 404s
-# and 500s are skipped by the helper, so this does not replay the historical
-# failure ledger or manufacture counterpart rows.
+# Probe Congress.gov for GovInfo-only bills, so a publication lag becomes expiring
+# 404 evidence instead of an open exception.
 counterpart_status=0
 if (( status == 0 )); then
   timeout --signal=TERM --kill-after=20s "${BICAM_GOVINFO_COUNTERPART_TIMEOUT_SECONDS:-300}s" \
@@ -216,12 +164,7 @@ if (( status == 0 )); then
   fi
 fi
 
-# GovInfo can also publish a CHRG/JHRG package before Congress.gov exposes the
-# corresponding hearing detail.  Probe the bounded modern set immediately so
-# a newly visible Congress hearing is linked in the same hourly cycle rather
-# than waiting for the six-hour supplemental lane.  The helper skips existing
-# links and recently confirmed 404s, so this is a frontier-driven probe, not a
-# historical hearing sweep.
+# Same for CHRG/JHRG hearing packages.
 hearing_counterpart_status=0
 if (( status == 0 )); then
   timeout --signal=TERM --kill-after=20s "${BICAM_GOVINFO_HEARING_COUNTERPART_TIMEOUT_SECONDS:-300}s" \
@@ -239,23 +182,10 @@ if (( status == 0 )); then
   fi
 fi
 
-# Refresh the bounded cross-source reconciliation paths immediately after the
-# counterpart probes.  The hourly window can publish committee-report or
-# hearing packages as well as bills; selecting the parents of both match marts
-# prevents newly visible GovInfo records from leaving an open exception until
-# the six-hour release build.  The selector remains bounded to the affected
-# reconciliation graph rather than running the full archive.
+# Rebuild the bill, committee-report and hearing reconciliation graph.
 reconciliation_status=0
 if (( status == 0 )); then
-  # The resolver-backed source-gap graph can scan millions of immutable
-  # response observations. Keep the server-side statement bound just inside
-  # the client bound so a timeout cannot leave CREATE TABLE AS running after
-  # this window exits.
-  # The complete resolver-backed graph reaches the expensive source-gap tail
-  # only after rebuilding the 3M-row child-state selection and observation
-  # relations.  A 15-minute bound repeatedly stopped at model 73/77 and left
-  # a mixed, non-certifying generation.  Keep the window bounded but allow the
-  # graph to finish within the service's one-hour outer timeout.
+  # The source-gap tail of this graph needs most of the service's hour.
   reconciliation_timeout_seconds=${BICAM_GOVINFO_RECONCILIATION_TIMEOUT_SECONDS:-1800}
   reconciliation_statement_timeout_ms=${BICAM_GOVINFO_RECONCILIATION_STATEMENT_TIMEOUT_MS:-1740000}
   PGAPPNAME="$dbt_app_name" \
@@ -273,7 +203,7 @@ if (( status == 0 )); then
         bills bills_metadata committee_reports committee_reports_associated_bills \
         bills_reference_codes bills_reference_codes_sections \
         bills_reference_laws bills_reference_statutes \
-        bills_reference_statutes_pages || { reconciliation_status=$?; cancel_dbt_backends "$dbt_app_name"; }
+        bills_reference_statutes_pages || { reconciliation_status=$?; bicam_stop_dbt_backends "$dbt_app_name"; }
   if (( reconciliation_status != 0 )); then
     status=1
   fi
@@ -295,7 +225,7 @@ if (( reconciliation_status == 0 )); then
         committee_reports_public_union_preserves_bill_side \
         committee_reports_associated_bills_cover_internal_union \
         source_gap_queue_open_rows_have_action \
-      || { reconciliation_test_status=$?; cancel_dbt_backends "$dbt_app_name"; }
+      || { reconciliation_test_status=$?; bicam_stop_dbt_backends "$dbt_app_name"; }
   if (( reconciliation_test_status != 0 )); then
     status=1
   fi
