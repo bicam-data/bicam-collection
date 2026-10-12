@@ -24,6 +24,51 @@ seeds:
   bicam_collection:
     +quote_columns: false
     reconciliation:
+      # Decision seeds written by scripts/reconcile.py. Pin every column so
+      # an empty or newly edited file never changes the inferred table types
+      # (an empty seed is otherwise created with all-integer columns).
+      bill_match_overrides:
+        +column_types:
+          congress_source_record_id: text
+          govinfo_source_record_id: text
+          decision: text
+          reviewer: text
+          reviewed_at: timestamp
+          reason: text
+          expires_at: timestamp
+          contract_version: text
+      committee_report_match_overrides:
+        +column_types:
+          congress_source_record_id: text
+          govinfo_source_record_id: text
+          decision: text
+          reviewer: text
+          reviewed_at: timestamp
+          reason: text
+          expires_at: timestamp
+          contract_version: text
+      reconciliation_exception_reviews:
+        +column_types:
+          entity: text
+          canonical_id: text
+          disposition: text
+          reviewer: text
+          reviewed_at: timestamp
+          reason: text
+          expires_at: timestamp
+          contract_version: text
+      govinfo_member_identity_overrides:
+        +column_types:
+          source_member_key: text
+          committee_id: text
+          congress: integer
+          state: text
+          member_name: text
+          bioguide_id: text
+          reviewer: text
+          reviewed_at: date
+          reason: text
+          expires_at: date
       govinfo_committee_id_overrides:
         +column_types:
           source_committee_id: text
