@@ -14,6 +14,11 @@ flock -n /run/user/$(id -u)/bicam-ingestion.lock true && echo idle
 
 systemctl --user stop 'bicam-*.timer'
 cp -a ~/bicam/bicam-collection/deploy/systemd/user/bicam-* ~/.config/systemd/user/
+# Units for the historical backfill lanes removed on 2026-10-12
+(cd ~/.config/systemd/user && rm -rf bicam-amendment-* bicam-congress-cooldown-resume.* \
+  bicam-congress-list-page-repair.service bicam-congress-partition-queue* \
+  bicam-congress-per-key-refresh-persistent.service* bicam-congress-supplemental-history.service \
+  bicam-ingestion-supervisor.* bicam-reconciliation-probe.service)
 systemctl --user daemon-reload
 systemctl --user start $(systemctl --user list-unit-files 'bicam-*.timer' --state=enabled --no-legend | cut -d' ' -f1)
 systemctl --user list-timers 'bicam-*'

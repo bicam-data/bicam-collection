@@ -5,27 +5,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from bicam_collection.config import Settings
 from bicam_collection.spec_loader import discover_spec_categories, resolve_spec_path
 from bicam_collection.target_scope import TARGET_CONGRESS_CATEGORIES
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUN_CRAWL_PATH = PROJECT_ROOT / "scripts" / "run_crawl.py"
-RUN_SAMPLE_CRAWL_PATH = PROJECT_ROOT / "scripts" / "run_sample_crawl.py"
 RUN_MULTI_CRAWL_PATH = PROJECT_ROOT / "scripts" / "run_multi_crawl.py"
 
 
 def _load_run_crawl_module():
     spec = importlib.util.spec_from_file_location("run_crawl", RUN_CRAWL_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _load_run_sample_crawl_module():
-    spec = importlib.util.spec_from_file_location("run_sample_crawl", RUN_SAMPLE_CRAWL_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -115,81 +105,6 @@ class CliTests(unittest.TestCase):
     def test_resolve_spec_path_raises_clear_error_for_missing_category(self) -> None:
         with self.assertRaisesRegex(FileNotFoundError, "Spec not found for category 'communications'"):
             resolve_spec_path(PROJECT_ROOT / "specs", "communications")
-
-    def test_sample_parse_args_defaults_to_target_categories_and_bounded_pages(self) -> None:
-        run_sample_crawl = _load_run_sample_crawl_module()
-
-        args = run_sample_crawl.parse_args([], project_root=PROJECT_ROOT)
-
-        self.assertEqual(args.categories, list(TARGET_CONGRESS_CATEGORIES))
-        self.assertEqual(args.max_pages, 3)
-        self.assertEqual(args.page_size, 25)
-        self.assertFalse(args.use_async)
-        self.assertEqual(args.concurrency, 5)
-        self.assertEqual(args.category_workers, 3)
-        self.assertEqual(args.dbt, "skip")
-
-    def test_sample_main_runs_selected_categories_and_optional_dbt(self) -> None:
-        run_sample_crawl = _load_run_sample_crawl_module()
-        categories_run: list[list[str]] = []
-        dbt_actions: list[str] = []
-
-        with patch.object(run_sample_crawl, "run_single_crawl_main", side_effect=lambda argv: categories_run.append(argv) or 0), patch.object(
-            run_sample_crawl, "_run_dbt", side_effect=lambda project_root, action: dbt_actions.append(action)
-        ), patch.object(
-            Settings,
-            "from_env",
-            classmethod(
-                lambda cls, project_root: type(
-                    "SettingsStub",
-                    (),
-                    {"database_url": "postgres://example", "env_path": project_root / ".env"},
-                )()
-            ),
-        ):
-            exit_code = run_sample_crawl.main(["--categories", "bills", "members", "--max-pages", "5", "--dbt", "run"])
-
-        self.assertEqual(exit_code, 0)
-        self.assertCountEqual(
-            categories_run,
-            [
-                ["--category", "bills", "--mode", "full", "--max-pages", "5", "--page-size", "25"],
-                ["--category", "members", "--mode", "full", "--max-pages", "5", "--page-size", "25"],
-            ],
-        )
-        self.assertEqual(dbt_actions, ["run"])
-
-    def test_sample_main_passes_async_flags_through(self) -> None:
-        run_sample_crawl = _load_run_sample_crawl_module()
-        categories_run: list[list[str]] = []
-
-        with patch.object(run_sample_crawl, "run_single_crawl_main", side_effect=lambda argv: categories_run.append(argv) or 0), patch.object(
-            run_sample_crawl, "_run_dbt", return_value=None
-        ), patch.object(
-            Settings,
-            "from_env",
-            classmethod(
-                lambda cls, project_root: type(
-                    "SettingsStub",
-                    (),
-                    {"database_url": "postgres://example", "env_path": project_root / ".env"},
-                )()
-            ),
-        ):
-            exit_code = run_sample_crawl.main(["--categories", "bills", "--async", "--concurrency", "9"])
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(
-            categories_run,
-            [["--category", "bills", "--mode", "full", "--max-pages", "3", "--page-size", "25", "--async", "--concurrency", "9"]],
-        )
-
-    def test_sample_parse_args_supports_category_workers(self) -> None:
-        run_sample_crawl = _load_run_sample_crawl_module()
-
-        args = run_sample_crawl.parse_args(["--category-workers", "4"], project_root=PROJECT_ROOT)
-
-        self.assertEqual(args.category_workers, 4)
 
     def test_multi_parse_args_defaults_to_target_categories_without_sample_limits(self) -> None:
         run_multi_crawl = _load_run_multi_crawl_module()

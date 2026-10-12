@@ -1,9 +1,0 @@
-[Unit]
-Description=Bicam post-crawl reconciliation probes and dbt refresh
-After=docker.service
-
-[Service]
-Type=oneshot
-WorkingDirectory=%h/bicam/bicam-collection
-ExecStart=%h/bicam/bicam-collection/ops/run_bicam_reconciliation_probe_once.sh
-TimeoutStartSec=infinity

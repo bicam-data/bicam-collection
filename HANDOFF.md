@@ -47,9 +47,9 @@ Enabled timers:
 | `bicam-ingestion-audit` | every 6 h | Read-only ingestion/reconciliation audit |
 | `bicam-research-snapshot` | daily 05:00 UTC | Exports the portable research snapshot and checks freshness |
 
-The remaining units in `deploy/systemd/user/` (historical partition queue,
-per-key ramp, amendment lanes, supervisor, cooldown resume, list-page repair)
-are disabled. They are kept for explicitly supervised backfills.
+The one-time historical backfill lanes (partition queue, per-key ramp,
+supervisor, amendment lanes and related units) were removed on 2026-10-12;
+they are in git history and `~/bicam-archive/retired-lanes-20261012/`.
 
 Useful commands:
 

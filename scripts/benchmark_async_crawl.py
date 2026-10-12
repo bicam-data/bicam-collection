@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
 import importlib.metadata
 import json
 import os
@@ -22,17 +21,13 @@ import time
 
 from bicam_collection.client import AsyncCongressClient, clear_shared_key_pools
 from bicam_collection.crawler import AsyncSpecCrawler, CrawlOptions
+from bicam_collection.storage import StoredNode, StoredResponseRef
 from bicam_collection.spec_loader import CrawlSpec, EdgeSpec, NodeSpec, SeedSpec
 
 
-@dataclass(slots=True)
 class BenchmarkStore:
-    raw_by_url: dict[str, dict]
-    expected_fetches: int = 0
-    fetched: int = 0
-
     def __init__(self) -> None:
-        self.raw_by_url = {}
+        self.stored: dict[str, StoredNode] = {}
         self.expected_fetches = 0
         self.fetched = 0
 
@@ -45,27 +40,24 @@ class BenchmarkStore:
     async def finish_run(self, run_id: str, status: str, items_fetched: int, high_water_mark=None) -> None:
         self.fetched = items_fetched
 
-    async def has_response(self, endpoint_url: str) -> bool:
-        return endpoint_url in self.raw_by_url
+    async def get_stored_nodes(self, endpoint_urls: list[str]) -> dict[str, StoredNode]:
+        return {url: self.stored[url] for url in endpoint_urls if url in self.stored}
 
-    async def get_stored_node(self, endpoint_url: str):
-        stored = self.raw_by_url.get(endpoint_url)
-        if stored is None:
-            return None
-        return type("StoredNode", (), {"raw_id": stored["raw_id"], "endpoint_url": endpoint_url, "response": stored["response"]})()
-
-    async def list_refresh_nodes(self, *, category: str, node_type: str, limit: int) -> list:
+    async def list_refresh_nodes(self, **kwargs) -> list[StoredNode]:
         return []
 
-    async def upsert_response(self, **kwargs) -> str:
-        raw_id = f"benchmark-raw-{len(self.raw_by_url) + 1}"
-        self.raw_by_url[kwargs["endpoint_url"]] = {"raw_id": raw_id, "response": kwargs["response"]}
-        return raw_id
+    async def upsert_response(self, **kwargs) -> StoredResponseRef:
+        raw_id = f"benchmark-raw-{len(self.stored) + 1}"
+        self.stored[kwargs["endpoint_url"]] = StoredNode(raw_id, kwargs["endpoint_url"], kwargs["response"])
+        return StoredResponseRef(raw_id, f"{raw_id}-version", "hash")
 
-    async def record_expected_fetch(self, **kwargs) -> None:
-        self.expected_fetches += 1
+    async def record_expected_fetch_batch(self, records: list[dict]) -> None:
+        self.expected_fetches += len(records)
 
     async def record_fetch(self, **kwargs) -> None:
+        return None
+
+    async def record_fetch_batch(self, records: list[dict]) -> None:
         return None
 
     async def record_failed_request(self, **kwargs) -> None:

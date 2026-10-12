@@ -5,7 +5,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
 
 report_dir="$reports_root"
 lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
-cooldown_path="$report_dir/congress-api-cooldown-until"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 checkpoint="$report_dir/congress-incremental-checkpoint-$stamp.md"
 latest="$report_dir/congress-incremental-checkpoint-latest.md"
@@ -19,15 +18,6 @@ if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   # lock; the next timer run is the retry, so skip rather than queue behind it.
   printf '# Congress incremental checkpoint\n\n- generated: %s\n- status: lock_busy\n- note: another ingestion lane owns the shared lock; next scheduled run will retry\n' \
     "$(date -u --iso-8601=seconds)" >"$checkpoint"
-  ln -sfn "$(basename "$checkpoint")" "$attempt_latest"
-  exit 0
-fi
-
-now_epoch=$(date +%s)
-cooldown_until=$(cat "$cooldown_path" 2>/dev/null || true)
-if [[ "$cooldown_until" =~ ^[0-9]+$ ]] && (( cooldown_until > now_epoch )); then
-  printf '# Congress incremental checkpoint\n\n- generated: %s\n- status: source_cooldown\n- retry_after_epoch: %s\n' \
-    "$(date -u --iso-8601=seconds)" "$cooldown_until" >"$checkpoint"
   ln -sfn "$(basename "$checkpoint")" "$attempt_latest"
   exit 0
 fi

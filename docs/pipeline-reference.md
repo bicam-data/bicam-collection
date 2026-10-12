@@ -134,10 +134,9 @@ catch up a longer outage, increase the service's `BICAM_GOVINFO_WINDOW_MAX_WINDO
 or run a bounded historical job explicitly rather than changing the steady-state
 polling cadence.
 
-The retired historical queue/supervisor services are disabled and stopped in the
-production user manager. Their unit files remain available for an explicitly
-supervised backfill, but they cannot relaunch on a host restart or compete with
-these bounded lanes.
+The one-time historical backfill lanes (partition queue, per-key ramp, supervisor
+and related services) were removed after the backfill finished; they remain in git
+history.
 
 Common shortcuts are defined in [Makefile](../Makefile). Run `make help` to see the available targets.
 
@@ -159,30 +158,6 @@ uv run python scripts/run_crawl.py --category govinfo-hearings --mode full --max
 uv run python scripts/run_crawl.py --category govinfo-committee-prints --mode full --max-pages 1
 ```
 
-For larger GovInfo collections, use the cursor runner with a bounded number of
-windows. It reads the opaque `nextPage` cursor persisted by the previous run,
-so it never reconstructs or guesses an offset token:
-
-```bash
-seed=$(docker compose exec -T postgres psql -U admin -d bicam_collection -At \
-  -c "select response->>'nextPage' from raw_responses
-      where node_type='govinfo_bill_package_list'
-      order by fetched_at desc limit 1;")
-uv run python scripts/run_govinfo_cursor_batches.py \
-  --category govinfo-bills \
-  --seed-path "$seed" \
-  --seed-node-type govinfo_bill_package_list \
-  --batches 2 --max-pages 3 --page-size 100 \
-  --concurrency 3 --request-interval 0.25
-```
-
-The runner refuses to overlap another run in the same category and stops when
-the collection returns no further cursor. Three configured GovInfo credentials
-already cap useful in-flight work at three requests; the 0.25-second
-process-wide pacer uses that pool more fully while retaining a bounded
-aggregate envelope. Keep date ranges and page ceilings small enough to resume
-safely; GovInfo bulk collections supplement, rather than replace, the
-Congress.gov historical partitions.
 
 When reconciliation identifies a GovInfo bill whose Congress.gov detail is
 missing, backfill those canonical identities in bounded batches:

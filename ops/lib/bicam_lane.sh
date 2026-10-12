@@ -52,63 +52,6 @@ bicam_reexec_under_ingestion_lock() {
   fi
 }
 
-# Congress.gov Retry-After coordination; uses the caller's $cooldown_path and $log_path.
-bicam_cooldown_active() {
-  local until now
-  until=$(cat "$cooldown_path" 2>/dev/null || true)
-  now=$(date +%s)
-  [[ "$until" =~ ^[0-9]+$ ]] && (( until > now ))
-}
-
-# Sleep through the cooldown in chunks of at most a minute (rather than exit
-# into a Restart=always loop), re-reading the marker so it can be cleared early.
-bicam_wait_for_cooldown() {
-  local log_label=$1
-  local until now delay
-  until=$(cat "$cooldown_path" 2>/dev/null || true)
-  now=$(date +%s)
-  if [[ "$until" =~ ^[0-9]+$ ]] && (( until > now )); then
-    delay=$((until - now))
-    echo "[$(date -u)] $log_label seconds=$delay" >>"$log_path"
-    while bicam_cooldown_active; do
-      sleep "$((delay > 60 ? 60 : delay))"
-      until=$(cat "$cooldown_path" 2>/dev/null || true)
-      now=$(date +%s)
-      if [[ "$until" =~ ^[0-9]+$ ]] && (( until > now )); then
-        delay=$((until - now))
-      else
-        break
-      fi
-    done
-  fi
-}
-
-bicam_write_cooldown_marker() {
-  local source_log="$1"
-  local retry_after until temporary
-  retry_after=$(grep -Eo 'retry_after=[0-9]+([.][0-9]+)?' "$source_log" 2>/dev/null \
-    | awk -F= 'BEGIN { max=0 } { if ($2 > max) max=$2 } END { if (max > 0) printf "%.0f", max + 30; else print 300 }')
-  retry_after=${retry_after:-300}
-  until=$(( $(date +%s) + retry_after ))
-  temporary="${cooldown_path}.tmp"
-  printf '%s\n' "$until" >"$temporary"
-  mv "$temporary" "$cooldown_path"
-  echo "[$(date -u)] congress_api_cooldown_marker until=$until retry_after=$retry_after" >>"$log_path"
-  # Re-arm the one-shot resume timer, which may already have fired.
-  systemctl --user restart bicam-congress-cooldown-resume.timer >/dev/null 2>&1 || true
-}
-
-# An exited-but-unreaped worker still answers kill -0; treat zombies as dead.
-bicam_worker_alive() {
-  local pid="$1"
-  if ! kill -0 "$pid" 2>/dev/null; then
-    return 1
-  fi
-  local state
-  state=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')
-  [[ -n "$state" && "$state" != Z* ]]
-}
-
 # Stop backends left behind by a timed-out dbt step, matched by its unique
 # application name: cancel twice (the first can race the client disconnect),
 # then terminate any stuck in I/O.
@@ -119,11 +62,6 @@ bicam_stop_dbt_backends() {
       <<< "select pg_${action}_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
     [[ $action == terminate ]] || sleep 2
   done
-}
-
-bicam_db_count() {
-  local sql="$1"
-  bicam_psql -At -c "$sql" 2>/dev/null | tr -d '[:space:]'
 }
 
 # Markdown section with the last lines of a log, for checkpoint files.

@@ -12,7 +12,6 @@ threshold_failure_ratio=${BICAM_RESUME_GUARD_FAILURE_RATIO:-0.50}
 resume_after=${BICAM_RESUME_GUARD_RETRY_SECONDS:-600}
 quota_low_activity_limit=${BICAM_RESUME_GUARD_QUOTA_LOW_ACTIVITY_LIMIT:-1000}
 state_file=${BICAM_RESUME_GUARD_STATE_FILE:-$reports_root/availability-guard-latest.txt}
-cooldown_marker=${BICAM_CONGRESS_COOLDOWN_MARKER:-$reports_root/congress-api-cooldown-until}
 
 write_state() {
   mkdir -p "$(dirname "$state_file")"
@@ -75,21 +74,16 @@ resume_stopped_workers() {
 }
 
 # Quota cooldown is reported separately from "no workers" so a recent 429
-# window is never mistaken for a clean idle state. The Retry-After marker is
-# authoritative even if a few in-flight requests succeeded meanwhile.
+# window is never mistaken for a clean idle state.
 now_epoch=$(date +%s)
 quota_cooldown=0
 quota_low_activity=0
-marker_until=$(cat "$cooldown_marker" 2>/dev/null || true)
-if [[ "$marker_until" =~ ^[0-9]+$ ]] && (( marker_until > now_epoch )); then
-  quota_cooldown=1
-fi
-# Without a marker, cooldown means zero successful fetches in the window;
-# a slow lane's trickle of successes is healthy progress.
+# Cooldown means zero successful fetches in the window plus a 429 in the last
+# hour; a slow lane's trickle of successes is healthy progress.
 if (( fetched == 0 && failures_503 == 0 && (total == 0 || failures_429 == total) )); then
   quota_low_activity=1
 fi
-if (( quota_cooldown == 0 && quota_low_activity == 1 )) && [[ "$last_429_epoch" =~ ^[0-9]+$ ]] \
+if (( quota_low_activity == 1 )) && [[ "$last_429_epoch" =~ ^[0-9]+$ ]] \
   && (( last_429_epoch > 0 && now_epoch - last_429_epoch < 3600 )); then
   quota_cooldown=1
 fi
