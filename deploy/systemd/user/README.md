@@ -4,8 +4,9 @@ These are the units installed in `~/.config/systemd/user/` on the production
 host. Paths use `%h` and assume this repo is checked out at
 `~/bicam/bicam-collection`, with `rotisserie` and `reports` as siblings.
 
-Installing changes what the timers run on their next fire, so do it when no
-lane is active:
+The lanes call host `psql` (`sudo apt-get install postgresql-client-16`), so
+install that first. Installing the units changes what the timers run on their
+next fire, so do it when no lane is active:
 
 ```bash
 # Wait until nothing holds the shared lock

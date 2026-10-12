@@ -1,74 +1,18 @@
 # bicam-collection handoff
 
-Start here. This is the map; [README.md](README.md) is the detailed reference
-for each subsystem.
+Start here. The [README](README.md) explains what the pipeline does and how to
+set it up and run it; [docs/pipeline-reference.md](docs/pipeline-reference.md)
+has detail on each subsystem. This page covers what a new owner needs beyond
+that: production, state, open work, and known issues.
 
-## What this is
-
-BICAM is a research-grade relational database of eleven congressional data
-families (bills, amendments, members, congresses, committees, committee
-meetings, committee prints, committee reports, hearings, nominations,
-treaties). Congress.gov is authoritative; GovInfo is supplemental evidence.
-
-The pipeline has four layers:
-
-1. **Crawl** — `src/bicam_collection/` is one generic engine (`SpecCrawler`)
-   driven by YAML specs in `specs/`. There is no category-specific crawl code;
-   a new endpoint is a new spec. Raw responses are stored immutably
-   (`raw_responses`, `raw_response_versions`, `crawl_run_*` tables).
-2. **Transform** — `dbt_project/` stages raw JSON, reconciles Congress.gov
-   against GovInfo, and builds the public `bicam` schema
-   (`models/marts/bicam/`) plus reconciliation and operations marts.
-3. **Release** — `scripts/export_research_snapshot.py` writes an immutable
-   candidate snapshot; `scripts/promote_research_snapshot.py` validates it and
-   atomically swaps `reports/exports/latest`. Contracts in `contracts/` declare
-   the public tables, keys, and foreign keys that validation enforces.
-4. **Operate** — systemd user timers run bounded, restartable lanes through the
-   shell wrappers in `ops/`.
-
-API key rotation and rate limiting come from the sibling
-[`rotisserie`](https://github.com/ryandelano/rotisserie) library, installed as
-an editable path dependency (`../rotisserie`).
-
-## Repository layout
-
-| Path | Contents |
-| --- | --- |
-| `src/bicam_collection/` | Crawler engine, HTTP client, storage, spec loader, export helpers |
-| `specs/` | YAML endpoint traversal specs (one per category) |
-| `migrations/` | Ordered SQL schema migrations (`scripts/run_migrations.py`) |
-| `dbt_project/` | Staging, intermediate, reconciliation, and public mart models; seeds; data tests |
-| `contracts/` | Public schema and entity contracts used by validation and export |
-| `scripts/` | Python entry points: crawls, backfills, exports, audits, release tooling |
-| `ops/` | Shell lane wrappers run by systemd; `ops/lib/bicam_lane.sh` is the shared preamble |
-| `deploy/systemd/user/` | The production systemd user units and drop-ins (source of truth) |
-| `deploy/systemd/` | Lane-status drop-in and failure-alert template (not yet installed) |
-| `docs/` | Researcher guide, source policies, active plan and status tracker |
-| `tests/` | pytest suite and fixtures |
-| `api_schemas/` | Example response shapes for Congress.gov endpoint families |
-
-## Getting started
-
-Prerequisites: Docker, [uv](https://docs.astral.sh/uv/), and a checkout of
-`rotisserie` next to this repo:
+The expected checkout layout:
 
 ```text
 ~/bicam/
-├── bicam-collection/   (this repo)
+├── bicam-collection/   (this repo, branch feature/reconciliation-foundations)
 ├── rotisserie/         (git@github.com:ryandelano/rotisserie.git)
 └── reports/            (created by the lanes; checkpoints, logs, exports)
 ```
-
-```bash
-cp .env.example .env          # fill in CONGRESS_API_KEYS, GOVINFO_API_KEY, DB_PASSWORD
-make up && make migrate       # Postgres 16 on localhost:5433
-uv sync
-uv run pytest                 # ~690 tests, no database needed
-uv run ruff check && uv run mypy src/
-```
-
-API keys are free from <https://api.congress.gov/sign-up/> (also valid for
-GovInfo). Multiple comma-separated keys are rotated by `rotisserie`.
 
 Tests that need external resources are skipped unless their env var is set:
 
@@ -79,13 +23,13 @@ Tests that need external resources are skipped unless their env var is set:
 | `BICAM_REPLAY_BUILD_DIR` | Raw-replay generation verification |
 | `BICAM_PUBLISHED_ARCHIVE_DIR` | Contract check against the published 2025 CSV archives |
 
-`make help` lists the Docker-based shortcuts (crawl, dbt, release checks).
-
 ## Production
 
 Production runs on one host as systemd **user** units. All lanes share the
 lock `/run/user/$UID/bicam-ingestion.lock`, so they never overlap and a
-lock-busy run simply retries on the next timer.
+lock-busy run simply retries on the next timer. The lanes reach Postgres with
+host `psql` using the `DB_*` settings in `.env`, so `postgresql-client-16`
+must be installed on the host.
 
 Enabled timers:
 
@@ -118,6 +62,12 @@ cat ~/bicam/reports/ingestion-status-latest.md
 To install or update the units from this repo, see
 [deploy/systemd/user/README.md](deploy/systemd/user/README.md).
 
+**Cutover pending.** The installed units still run the pre-move copies in
+`~/bicam/scripts/` and `scripts/run_html_text_batches.sh`, which reach the
+database through `docker exec`. Once `psql` is installed, install the units
+from this repo; after one clean 6-hour cycle, delete `~/bicam/scripts/` and
+`scripts/run_html_text_batches.sh`.
+
 ## The reports directory
 
 `reports/` lives **outside** the repo (default `../reports`, override with
@@ -133,9 +83,11 @@ reproducible from git alone. What matters in it:
 | `*-latest.md`, `*-checkpoint*`, `*-cursor.json` | Lane checkpoints and durable cursors; lanes resume from these, do not delete |
 | `*.log` | Lane logs |
 
-The database is the other piece of state: the `bicam-collection-postgres`
-container volume. Backups are produced by the optional `postgres-backup`
-sidecar (`make up-ops`).
+The database is the other piece of state (about 240 GB; most of it is the
+fetch-lineage log). In production it is the `bicam-collection-postgres`
+container volume, backed up by the optional `postgres-backup` sidecar
+(`make up-ops`); it can be moved to an existing server with
+`pg_dump -Fc`/`pg_restore` while the timers are stopped.
 
 ## Current state and open work
 
@@ -153,6 +105,14 @@ under `reports/quality/congress119-export-20260910/`.
 Other policy docs in `docs/` record decisions that are easy to get wrong:
 source boundaries, reciprocity, hearing linkage, and GovInfo identity quality.
 
+**Reconciliation decisions.** `scripts/reconcile.py queues` currently shows
+every queue empty. Earlier work recorded about 300 decisions by hand, and the
+rules in `reconciliation_source_gap_rules.csv` close about 359,000 match
+exceptions automatically as known source gaps. Those rules, and many recorded
+decisions, **expire in August 2027**; the affected items then reopen for
+re-probing and review. `reconcile.py list QUEUE --include-reviewed` shows
+what was closed and why.
+
 ## Known issues and gotchas
 
 - **Branches.** Active work is on `feature/reconciliation-foundations`, far
@@ -164,12 +124,9 @@ source boundaries, reciprocity, hearing linkage, and GovInfo identity quality.
   before bumping the dependency. The production host still runs the older
   local checkout.
 - **Database credentials.** `.env.example` and the ops scripts use DB user
-  `admin`; older notes that say `postgres/postgres` are stale.
-  `ops/lib/bicam_lane.sh` prefers the password from the running container over
+  `admin`; older notes that say `postgres/postgres` are stale. Everything
+  (crawler, dbt, `ops/` lanes, `reconcile.py`) reads the `DB_*` settings in
   `.env`.
-- **Two shell runners live in `scripts/`** (`run_bicam_amendment_lane.sh`,
-  `run_html_text_batches.sh`) rather than `ops/`, because live units point at
-  them. Move them with the next unit update.
 - **The status doc links into `../reports/`.** Those links only resolve on
   the production host.
 - **Lane-status drop-in** in `deploy/systemd/bicam-.service.d/` is written
