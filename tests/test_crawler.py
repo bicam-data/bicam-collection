@@ -5,143 +5,19 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
-import requests
 
+from crawler_fakes import AsyncFakeClient, AsyncFakeStore, FakeClient, FakeStore, http_error
+from bicam_collection.client import FetchMetadata
 from bicam_collection.crawler import AsyncSpecCrawler, CrawlOptions, SpecCrawler
 from bicam_collection.examples import load_example_payload
 from bicam_collection.spec_loader import load_spec
+from bicam_collection.storage import StoredNode
 from bicam_collection.urls import canonicalize_congress_api_url, with_query_params
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES_DIR = PROJECT_ROOT / "api_schemas" / "bills"
 COMMITTEE_REPORT_EXAMPLES_DIR = PROJECT_ROOT / "api_schemas" / "committee-reports"
-
-
-class FakeClient:
-    def __init__(self, payloads: dict[str, dict]) -> None:
-        self.payloads = payloads
-        self.calls: list[str] = []
-
-    def get_json(self, url: str) -> tuple[dict, int]:
-        self.calls.append(url)
-        if url not in self.payloads:
-            raise AssertionError(f"Unexpected URL fetch: {url}")
-        return self.payloads[url], 200
-
-
-class FailingFakeClient(FakeClient):
-    def __init__(self, payloads: dict[str, dict], failures: dict[str, tuple[int | None, str]]) -> None:
-        super().__init__(payloads)
-        self.failures = failures
-
-    def get_json(self, url: str) -> tuple[dict, int]:
-        self.calls.append(url)
-        if url in self.failures:
-            status_code, message = self.failures[url]
-            response = requests.Response()
-            if status_code is not None:
-                response.status_code = status_code
-                response.url = url
-            raise requests.HTTPError(message, response=response)
-        if url not in self.payloads:
-            raise AssertionError(f"Unexpected URL fetch: {url}")
-        return self.payloads[url], 200
-
-
-class TelemetryFakeClient(FakeClient):
-    def __init__(
-        self,
-        payloads: dict[str, dict],
-        *,
-        api_key_name: str,
-        duration_ms: int,
-        attempt_count: int,
-        rate_limit_attempts: int,
-        pool_allocation: dict | None = None,
-    ) -> None:
-        super().__init__(payloads)
-        self.api_key_name = api_key_name
-        self.duration_ms = duration_ms
-        self.attempt_count = attempt_count
-        self.rate_limit_attempts = rate_limit_attempts
-        self.pool_allocation = pool_allocation
-
-    def get_json(self, url: str):
-        payload, status_code = super().get_json(url)
-        metadata = type(
-            "FetchMetadata",
-            (),
-            {
-                "status_code": status_code,
-                "api_key_name": self.api_key_name,
-                "attempt_count": self.attempt_count,
-                "rate_limit_attempts": self.rate_limit_attempts,
-                "duration_ms": self.duration_ms,
-                "pool_allocation": self.pool_allocation,
-            },
-        )()
-        return type("FetchResult", (), {"payload": payload, "metadata": metadata})()
-
-
-class FakeStore:
-    def __init__(
-        self,
-        existing_urls: set[str] | None = None,
-        latest_high_water_mark: datetime | None = None,
-    ) -> None:
-        self.existing_urls = set(existing_urls or set())
-        self.latest_high_water_mark = latest_high_water_mark
-        self.raw_by_url: dict[str, dict] = {}
-        self.fetch_events: list[dict] = []
-        self.expected_fetches: list[dict] = []
-        self.failed_requests: list[dict] = []
-        self.finished: tuple[str, int, datetime | None] | None = None
-        self.refresh_nodes: list[object] = []
-
-    def start_run(self, category: str, mode: str, high_water_mark=None) -> str:
-        return "run-1"
-
-    def get_latest_high_water_mark(self, category: str) -> datetime | None:
-        return self.latest_high_water_mark
-
-    def finish_run(self, run_id: str, status: str, items_fetched: int, high_water_mark=None) -> None:
-        self.finished = (status, items_fetched, high_water_mark)
-
-    def has_response(self, endpoint_url: str) -> bool:
-        return endpoint_url in self.existing_urls or endpoint_url in self.raw_by_url
-
-    def get_stored_node(self, endpoint_url: str):
-        stored = self.raw_by_url.get(endpoint_url)
-        if stored is None:
-            return None
-        return type("StoredNode", (), {"raw_id": stored.get("raw_id", "raw-existing"), "endpoint_url": endpoint_url, "response": stored["response"]})()
-
-    def list_refresh_nodes(self, *, category: str, node_type: str, limit: int) -> list[object]:
-        return self.refresh_nodes[:limit]
-
-    def upsert_response(self, **kwargs) -> str:
-        self.raw_by_url[kwargs["endpoint_url"]] = kwargs
-        return f'raw-{len(self.raw_by_url)}'
-
-    def record_fetch(self, **kwargs) -> None:
-        self.fetch_events.append(kwargs)
-
-    def record_expected_fetch(self, **kwargs) -> None:
-        self.expected_fetches.append(kwargs)
-
-    def record_failed_request(self, **kwargs) -> None:
-        self.failed_requests.append(kwargs)
-
-
-class AsyncFakeClient(FakeClient):
-    async def get_json(self, url: str):
-        return super().get_json(url)
-
-
-class AsyncFailingFakeClient(FailingFakeClient):
-    async def get_json(self, url: str):
-        return super().get_json(url)
 
 
 class AsyncTrackingFakeClient(AsyncFakeClient):
@@ -151,7 +27,7 @@ class AsyncTrackingFakeClient(AsyncFakeClient):
         self.active = 0
         self.max_active = 0
 
-    async def get_json(self, url: str):
+    async def get_json(self, url: str, endpoint_name: str | None = None, **kwargs: object):  # type: ignore[override]
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -159,38 +35,6 @@ class AsyncTrackingFakeClient(AsyncFakeClient):
             return await super().get_json(url)
         finally:
             self.active -= 1
-
-
-class AsyncFakeStore(FakeStore):
-    async def start_run(self, category: str, mode: str, high_water_mark=None) -> str:
-        return super().start_run(category, mode, high_water_mark)
-
-    async def get_latest_high_water_mark(self, category: str) -> datetime | None:
-        return super().get_latest_high_water_mark(category)
-
-    async def finish_run(self, run_id: str, status: str, items_fetched: int, high_water_mark=None) -> None:
-        super().finish_run(run_id, status, items_fetched, high_water_mark)
-
-    async def has_response(self, endpoint_url: str) -> bool:
-        return super().has_response(endpoint_url)
-
-    async def get_stored_node(self, endpoint_url: str):
-        return super().get_stored_node(endpoint_url)
-
-    async def list_refresh_nodes(self, *, category: str, node_type: str, limit: int) -> list[object]:
-        return super().list_refresh_nodes(category=category, node_type=node_type, limit=limit)
-
-    async def upsert_response(self, **kwargs) -> str:
-        return super().upsert_response(**kwargs)
-
-    async def record_fetch(self, **kwargs) -> None:
-        super().record_fetch(**kwargs)
-
-    async def record_expected_fetch(self, **kwargs) -> None:
-        super().record_expected_fetch(**kwargs)
-
-    async def record_failed_request(self, **kwargs) -> None:
-        super().record_failed_request(**kwargs)
 
 
 def _load(name: str) -> dict:
@@ -400,7 +244,8 @@ class CrawlerTests(unittest.TestCase):
         seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-01T00%3A00%3A00Z&limit=250"
         detail_url = canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml")
         client = FakeClient({seed_url: bill_list, detail_url: bill_detail})
-        store = FakeStore(existing_urls={detail_url})
+        store = FakeStore()
+        store.add_stored(detail_url, {})
         crawler = SpecCrawler(
             base_url="https://api.congress.gov/v3",
             spec=self.spec,
@@ -417,6 +262,7 @@ class CrawlerTests(unittest.TestCase):
                 "crawl_run_id": "run-1",
                 "endpoint_url": detail_url,
                 "raw_response_id": None,
+                "raw_response_version_id": None,
                 "parent_endpoint_url": seed_url,
                 "node_type": "bill_detail",
                 "follow_mode": "recurse",
@@ -444,7 +290,8 @@ class CrawlerTests(unittest.TestCase):
         seed_url = "https://api.congress.gov/v3/bill?format=json&fromDateTime=2026-01-01T00%3A00%3A00Z&limit=250"
         detail_url = canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml")
         client = FakeClient({seed_url: bill_list, detail_url: bill_detail})
-        store = FakeStore(existing_urls={detail_url})
+        store = FakeStore()
+        store.add_stored(detail_url, {})
         crawler = SpecCrawler(
             base_url="https://api.congress.gov/v3",
             spec=self.spec,
@@ -467,11 +314,7 @@ class CrawlerTests(unittest.TestCase):
         )
         client = FakeClient({seed_url: bill_list, detail_url: bill_detail})
         store = FakeStore()
-        store.raw_by_url[detail_url] = {
-            "raw_id": "raw-existing-detail",
-            "endpoint_url": detail_url,
-            "response": bill_detail,
-        }
+        store.add_stored(detail_url, bill_detail, "raw-existing-detail")
         crawler = SpecCrawler(
             base_url="https://api.congress.gov/v3",
             spec=self.spec,
@@ -651,15 +494,7 @@ class CrawlerTests(unittest.TestCase):
         client = FakeClient({action_url: actions})
         store = FakeStore()
         store.refresh_nodes = [
-            type(
-                "StoredNode",
-                (),
-                {
-                    "raw_id": "raw-bill-1",
-                    "endpoint_url": canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml"),
-                    "response": bill_detail,
-                },
-            )()
+            StoredNode(raw_id="raw-bill-1", endpoint_url=canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml"), response=bill_detail)
         ]
         crawler = SpecCrawler(
             base_url="https://api.congress.gov/v3",
@@ -697,8 +532,8 @@ class CrawlerTests(unittest.TestCase):
         action_url = canonicalize_congress_api_url("https://api.congress.gov/v3/bill/117/hr/3076/actions?format=json&limit=250")
         client = FakeClient({action_url: actions})
         store = FakeStore()
-        store.raw_by_url[seed_url] = {"response": bill_list, "raw_id": "raw-seed"}
-        store.raw_by_url[detail_url] = {"response": bill_detail, "raw_id": "raw-detail"}
+        store.add_stored(seed_url, bill_list, "raw-seed")
+        store.add_stored(detail_url, bill_detail, "raw-detail")
 
         crawler = SpecCrawler(base_url="https://api.congress.gov/v3", spec=self.spec, client=client, store=store)
         crawler.run(CrawlOptions(mode="backfill_descendants", max_pages=1))
@@ -724,14 +559,12 @@ class CrawlerTests(unittest.TestCase):
         seed_url = with_query_params("https://api.congress.gov/v3/bill?format=json", {"limit": 250})
         detail_url = canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml")
 
-        client = FailingFakeClient(
+        client = FakeClient(
             {
                 seed_url: bill_list,
                 detail_url: bill_detail,
             },
-            {
-                text_url: (500, "500 Server Error"),
-            },
+            failures={text_url: http_error(500, "500 Server Error", text_url)},
         )
         store = FakeStore()
         crawler = SpecCrawler(
@@ -765,13 +598,16 @@ class CrawlerTests(unittest.TestCase):
     def test_fetch_telemetry_is_recorded_for_successful_requests(self) -> None:
         bill_list = {"bills": [], "pagination": {"count": 0, "next": "", "prev": ""}, "request": {"format": "json"}}
         seed_url = with_query_params("https://api.congress.gov/v3/bill?format=json", {"limit": 250})
-        client = TelemetryFakeClient(
+        client = FakeClient(
             {seed_url: bill_list},
-            api_key_name="alpha",
-            duration_ms=321,
-            attempt_count=2,
-            rate_limit_attempts=1,
-            pool_allocation={"endpoint_name": "bills", "selected_key_name": "alpha"},
+            metadata=FetchMetadata(
+                status_code=200,
+                api_key_name="alpha",
+                duration_ms=321,
+                attempt_count=2,
+                rate_limit_attempts=1,
+                pool_allocation={"endpoint_name": "bills", "selected_key_name": "alpha"},
+            ),
         )
         store = FakeStore()
         crawler = SpecCrawler(
@@ -800,9 +636,6 @@ class CrawlerTests(unittest.TestCase):
             store.expected_fetches,
         )
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class AsyncCrawlerTests(unittest.IsolatedAsyncioTestCase):
@@ -912,14 +745,12 @@ class AsyncCrawlerTests(unittest.IsolatedAsyncioTestCase):
         seed_url = with_query_params("https://api.congress.gov/v3/bill?format=json", {"limit": 250})
         detail_url = canonicalize_congress_api_url("http://api.congress.gov/v3/bill/119/s/3281?format=xml")
 
-        client = AsyncFailingFakeClient(
+        client = AsyncFakeClient(
             {
                 seed_url: bill_list,
                 detail_url: bill_detail,
             },
-            {
-                text_url: (500, "500 Server Error"),
-            },
+            failures={text_url: http_error(500, "500 Server Error", text_url)},
         )
         store = AsyncFakeStore()
         crawler = AsyncSpecCrawler(
@@ -948,11 +779,7 @@ class AsyncCrawlerTests(unittest.IsolatedAsyncioTestCase):
         )
         client = AsyncFakeClient({seed_url: bill_list, detail_url: bill_detail})
         store = AsyncFakeStore()
-        store.raw_by_url[detail_url] = {
-            "raw_id": "raw-existing-detail",
-            "endpoint_url": detail_url,
-            "response": bill_detail,
-        }
+        store.add_stored(detail_url, bill_detail, "raw-existing-detail")
         crawler = AsyncSpecCrawler(
             base_url="https://api.congress.gov/v3",
             spec=self.spec,

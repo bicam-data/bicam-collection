@@ -350,11 +350,11 @@ def _get_or_create_shared_pool(
 
 @dataclass(slots=True)
 class FetchMetadata:
-    status_code: int | None
-    api_key_name: str | None
-    attempt_count: int
-    rate_limit_attempts: int
-    duration_ms: int
+    status_code: int | None = None
+    api_key_name: str | None = None
+    attempt_count: int | None = None
+    rate_limit_attempts: int | None = None
+    duration_ms: int | None = None
     pool_allocation: dict[str, Any] | None = None
 
 
