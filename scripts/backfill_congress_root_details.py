@@ -11,18 +11,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
 from pathlib import Path
-import time
-from typing import Any
 
 import psycopg
 
-from bicam_collection.client import fetch_metadata_values
 from bicam_collection.config import Settings
 from bicam_collection.runtime import build_client
 from bicam_collection.spec_loader import load_spec
 from bicam_collection.storage import AsyncPostgresStore
+from bicam_collection.targeted_backfill import (
+    TargetedCandidate,
+    TargetedFamily,
+    run_targeted_backfill,
+)
 from bicam_collection.urls import canonicalize_congress_api_url
 
 
@@ -30,13 +31,6 @@ ROOTS: dict[str, tuple[str, str, str]] = {
     "bills": ("bill_list", "bills", "bill_detail"),
     "amendments": ("amendment_list", "amendments", "amendment_detail"),
 }
-
-
-@dataclass(frozen=True, slots=True)
-class RootDetail:
-    endpoint_url: str
-    parent_raw_id: str
-    parent_endpoint_url: str
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -80,7 +74,7 @@ def load_missing(
     congress_end: int,
     limit: int,
     max_source_error_attempts: int = 3,
-) -> list[RootDetail]:
+) -> list[TargetedCandidate]:
     list_node, item_key, detail_node = ROOTS[category]
     pattern = _path_pattern(category, congress_start, congress_end)
     # List payloads contain the canonical Congress URL (including the
@@ -148,9 +142,9 @@ def load_missing(
             ),
         ).fetchall()
     return [
-        RootDetail(
+        TargetedCandidate(
             endpoint_url=canonicalize_congress_api_url(row[2]),
-            parent_raw_id=str(row[0]),
+            parent_id=str(row[0]),
             parent_endpoint_url=str(row[1]),
         )
         for row in rows
@@ -184,102 +178,28 @@ async def run(args: argparse.Namespace) -> int:
         active_key_budget=max(1, args.active_key_budget),
     )
     store = AsyncPostgresStore(settings.database_url)
-    run_id = await store.start_run(args.category, "targeted_root_detail_backfill")
-    semaphore = asyncio.Semaphore(max(1, args.concurrency))
-    succeeded = 0
-    failed = 0
-    counter_lock = asyncio.Lock()
-
-    async def fetch(detail: RootDetail) -> None:
-        nonlocal succeeded, failed
-        started_at = time.perf_counter()
-        metadata_values: dict[str, Any] = {}
-        try:
-            async with semaphore:
-                result = await client.get_json(
-                    detail.endpoint_url,
-                    endpoint_name=f"congress-{args.category}-root-detail",
-                    endpoint_priority=4,
-                )
-            metadata_values = fetch_metadata_values(result.metadata)
-            response_ref = await store.upsert_response(
-                endpoint_url=detail.endpoint_url,
-                source="congress",
-                category=args.category,
-                node_type=ROOTS[args.category][2],
-                parent_id=detail.parent_raw_id,
-                response=result.payload,
-                latest_crawl_run_id=run_id,
-            )
-            await store.record_fetch(
-                crawl_run_id=run_id,
-                endpoint_url=detail.endpoint_url,
-                raw_response_id=response_ref.raw_response_id,
-                parent_endpoint_url=detail.parent_endpoint_url,
-                node_type=ROOTS[args.category][2],
-                follow_mode="targeted",
-                http_status=metadata_values["status_code"],
-                outcome="fetched",
-                raw_response_version_id=response_ref.raw_response_version_id,
-                duration_ms=metadata_values["duration_ms"],
-                attempt_count=metadata_values["attempt_count"],
-                rate_limit_attempts=metadata_values["rate_limit_attempts"],
-                api_key_name=metadata_values["api_key_name"],
-                pool_allocation=metadata_values["pool_allocation"],
-            )
-            async with counter_lock:
-                succeeded += 1
-        except Exception as exc:
-            response = getattr(exc, "response", None)
-            metadata = fetch_metadata_values(getattr(exc, "fetch_metadata", None))
-            duration_ms = metadata["duration_ms"]
-            if duration_ms is None:
-                duration_ms = max(1, round((time.perf_counter() - started_at) * 1000))
-            await store.record_failed_request(
-                crawl_run_id=run_id,
-                category=args.category,
-                node_type=ROOTS[args.category][2],
-                endpoint_url=detail.endpoint_url,
-                parent_endpoint_url=detail.parent_endpoint_url,
-                http_status=getattr(response, "status_code", metadata["status_code"]),
-                error=str(exc),
-                duration_ms=duration_ms,
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            await store.record_fetch(
-                crawl_run_id=run_id,
-                endpoint_url=detail.endpoint_url,
-                raw_response_id=None,
-                parent_endpoint_url=detail.parent_endpoint_url,
-                node_type=ROOTS[args.category][2],
-                follow_mode="targeted",
-                http_status=getattr(response, "status_code", metadata["status_code"]),
-                outcome="failed",
-                duration_ms=duration_ms,
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            async with counter_lock:
-                failed += 1
-
-    try:
-        batch_size = max(1, args.batch_size)
-        for batch_start in range(0, len(details), batch_size):
-            batch = details[batch_start : batch_start + batch_size]
-            await asyncio.gather(*(fetch(detail) for detail in batch))
-        await store.finish_run(run_id, "completed", succeeded)
-    except BaseException:
-        await store.finish_run(run_id, "failed", succeeded)
-        raise
-    finally:
-        await store.close()
-    print(f"[root-detail] completed run={run_id} fetched={succeeded} failed={failed}", flush=True)
-    return 1 if failed else 0
+    family = TargetedFamily(
+        category=args.category,
+        node_type=ROOTS[args.category][2],
+        endpoint_name=f"congress-{args.category}-root-detail",
+        endpoint_priority=4,
+        run_mode="targeted_root_detail_backfill",
+        record_failed_fetches=True,
+    )
+    outcome = await run_targeted_backfill(
+        family,
+        details,
+        client=client,
+        store=store,
+        concurrency=args.concurrency,
+        batch_size=args.batch_size,
+    )
+    print(
+        f"[root-detail] completed run={outcome.run_id} "
+        f"fetched={outcome.fetched} failed={outcome.failed}",
+        flush=True,
+    )
+    return 1 if outcome.failed else 0
 
 
 if __name__ == "__main__":

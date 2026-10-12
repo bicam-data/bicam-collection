@@ -11,31 +11,31 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
 import math
 from pathlib import Path
-import time
-from typing import Any
 
 import psycopg
 
-from bicam_collection.client import fetch_metadata_values
 from bicam_collection.config import Settings
 from bicam_collection.runtime import build_client
 from bicam_collection.spec_loader import load_spec
 from bicam_collection.storage import AsyncPostgresStore
+from bicam_collection.targeted_backfill import (
+    TargetedCandidate,
+    TargetedFamily,
+    run_targeted_backfill,
+)
 from bicam_collection.urls import canonicalize_congress_api_url
 
 
-CATEGORY = "committee-meetings"
-NODE_TYPE = "committee_meeting_detail"
-
-
-@dataclass(frozen=True, slots=True)
-class MissingHearingMeeting:
-    hearing_raw_id: str
-    hearing_endpoint_url: str
-    endpoint_url: str
+FAMILY = TargetedFamily(
+    category="committee-meetings",
+    node_type="committee_meeting_detail",
+    endpoint_name="congress-committee-meeting-from-hearing",
+    endpoint_priority=3,
+    run_mode="targeted_hearing_committee_meeting_backfill",
+    record_failed_fetches=True,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -59,7 +59,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def load_missing(
     *, database_url: str, limit: int, refresh: bool = False, retry_404_after_hours: float = 168.0
-) -> list[MissingHearingMeeting]:
+) -> list[TargetedCandidate]:
     if not math.isfinite(retry_404_after_hours) or retry_404_after_hours <= 0:
         raise ValueError("retry_404_after_hours must be positive and finite")
 
@@ -120,10 +120,10 @@ def load_missing(
             params = (retry_404_after_hours, max(1, limit))
         rows = connection.execute(query, params).fetchall()
     return [
-        MissingHearingMeeting(
-            hearing_raw_id=str(row[0]),
-            hearing_endpoint_url=str(row[1]),
+        TargetedCandidate(
             endpoint_url=canonicalize_congress_api_url(str(row[2])),
+            parent_id=str(row[0]),
+            parent_endpoint_url=str(row[1]),
         )
         for row in rows
     ]
@@ -150,102 +150,20 @@ async def run(args: argparse.Namespace, *, project_root: Path) -> tuple[int, int
         active_key_budget=max(1, args.active_key_budget),
     )
     store = AsyncPostgresStore(settings.database_url)
-    run_id = await store.start_run(CATEGORY, "targeted_hearing_committee_meeting_backfill")
-    semaphore = asyncio.Semaphore(max(1, args.concurrency))
-    succeeded = 0
-    failed = 0
-    counter_lock = asyncio.Lock()
-
-    async def fetch(link: MissingHearingMeeting) -> None:
-        nonlocal succeeded, failed
-        started_at = time.perf_counter()
-        endpoint_url = canonicalize_congress_api_url(link.endpoint_url)
-        metadata_values: dict[str, Any] = {}
-        try:
-            async with semaphore:
-                result = await client.get_json(
-                    endpoint_url,
-                    endpoint_name="congress-committee-meeting-from-hearing",
-                    endpoint_priority=3,
-                )
-            metadata_values = fetch_metadata_values(result.metadata)
-            response_ref = await store.upsert_response(
-                endpoint_url=endpoint_url,
-                source="congress",
-                category=CATEGORY,
-                node_type=NODE_TYPE,
-                parent_id=link.hearing_raw_id,
-                response=result.payload,
-                latest_crawl_run_id=run_id,
-            )
-            await store.record_fetch(
-                crawl_run_id=run_id,
-                endpoint_url=endpoint_url,
-                raw_response_id=response_ref.raw_response_id,
-                raw_response_version_id=response_ref.raw_response_version_id,
-                parent_endpoint_url=link.hearing_endpoint_url,
-                node_type=NODE_TYPE,
-                follow_mode="targeted",
-                http_status=metadata_values["status_code"],
-                outcome="fetched",
-                duration_ms=metadata_values["duration_ms"],
-                attempt_count=metadata_values["attempt_count"],
-                rate_limit_attempts=metadata_values["rate_limit_attempts"],
-                api_key_name=metadata_values["api_key_name"],
-                pool_allocation=metadata_values["pool_allocation"],
-            )
-            async with counter_lock:
-                succeeded += 1
-        except Exception as exc:
-            response = getattr(exc, "response", None)
-            metadata = fetch_metadata_values(getattr(exc, "fetch_metadata", None))
-            duration_ms = metadata["duration_ms"]
-            if duration_ms is None:
-                duration_ms = max(1, round((time.perf_counter() - started_at) * 1000))
-            await store.record_failed_request(
-                crawl_run_id=run_id,
-                category=CATEGORY,
-                node_type=NODE_TYPE,
-                endpoint_url=endpoint_url,
-                parent_endpoint_url=link.hearing_endpoint_url,
-                http_status=getattr(response, "status_code", metadata["status_code"]),
-                error=str(exc),
-                duration_ms=duration_ms,
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            await store.record_fetch(
-                crawl_run_id=run_id,
-                endpoint_url=endpoint_url,
-                raw_response_id=None,
-                parent_endpoint_url=link.hearing_endpoint_url,
-                node_type=NODE_TYPE,
-                follow_mode="targeted",
-                http_status=getattr(response, "status_code", metadata["status_code"]),
-                outcome="failed",
-                duration_ms=duration_ms,
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            async with counter_lock:
-                failed += 1
-
-    try:
-        batch_size = max(1, args.batch_size)
-        for start in range(0, len(links), batch_size):
-            await asyncio.gather(*(fetch(link) for link in links[start : start + batch_size]))
-        await store.finish_run(run_id, "completed", succeeded)
-    except BaseException:
-        await store.finish_run(run_id, "failed", succeeded)
-        raise
-    finally:
-        await store.close()
-    print(f"[hearing-meeting] completed run={run_id} fetched={succeeded} failed={failed}", flush=True)
-    return succeeded, failed
+    outcome = await run_targeted_backfill(
+        FAMILY,
+        links,
+        client=client,
+        store=store,
+        concurrency=args.concurrency,
+        batch_size=args.batch_size,
+    )
+    print(
+        f"[hearing-meeting] completed run={outcome.run_id} "
+        f"fetched={outcome.fetched} failed={outcome.failed}",
+        flush=True,
+    )
+    return outcome.fetched, outcome.failed
 
 
 def main(argv: list[str] | None = None) -> int:

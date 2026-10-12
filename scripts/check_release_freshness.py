@@ -2,8 +2,8 @@
 
 This is a read-only release check.  It is safe to run from a timer after an
 export or reconciliation refresh and returns non-zero when a snapshot is too
-old, its files have drifted, or the materialized main-11 quality tables have
-regressed.
+old, its files have drifted, or the materialized main-11 quality tables or
+Congress.gov reciprocity acceptance metrics have regressed.
 """
 
 from __future__ import annotations
@@ -177,6 +177,49 @@ def _database_checks(connection: psycopg.Connection, *, max_stale_run_hours: flo
         from fct_reconciliation_metrics
         """
     ).fetchone()
+    reciprocity = connection.execute(
+        """
+        select count(*)::bigint,
+               count(*) filter (where release_acceptance_status is null
+                   or release_acceptance_status not in
+                   ('accepted', 'accepted_with_source_boundaries'))::bigint,
+               coalesce(sum(contradiction_count), 0)::bigint,
+               coalesce(sum(unclassified_count), 0)::bigint
+        from fct_congress_internal_reciprocity_metrics
+        """
+    ).fetchone()
+    govinfo_identity = connection.execute(
+        """
+        select count(*) filter (
+                   where metric_name = any(%s)
+                     and metric_value > 0
+               )::bigint
+        from fct_govinfo_data_quality_metrics
+        """,
+        (
+            [
+                "committee_id_unmapped_identifier",
+                "committee_id_non_identifier_text",
+                "committee_id_map_unmapped_identifier",
+                "committee_id_map_non_identifier_text",
+                "member_provided_invalid",
+                "member_multi_legislator_review",
+                "submittedby_multi_legislator_review",
+                "nested_invalid_bioguide",
+                "nested_non_identifier_text",
+                "member_component_pending_review",
+                "member_component_ambiguous",
+                "member_component_no_candidate",
+                "member_reference_unresolved_missing_source_identifier",
+                "member_reference_pending_review",
+                "member_reference_ambiguous",
+                "member_reference_multi_legislator_review",
+                "member_reference_component_pending_review",
+                "member_reference_component_ambiguous",
+                "member_reference_component_no_candidate",
+            ],
+        ),
+    ).fetchone()
     stale_runs = connection.execute(
         """
         select count(*)
@@ -193,6 +236,11 @@ def _database_checks(connection: psycopg.Connection, *, max_stale_run_hours: flo
         "reconciliation_nonpass_rows": int(reconciliation[0] if reconciliation else 0),
         "reconciliation_open_exception_rows": int(reconciliation[1] if reconciliation else 0),
         "reconciliation_unexcused_unmatched_rows": int(reconciliation[2] if reconciliation else 0),
+        "reciprocity_metric_family_count": int(reciprocity[0] if reciprocity else 0),
+        "reciprocity_release_rejected_count": int(reciprocity[1] if reciprocity else 0),
+        "reciprocity_contradiction_count": int(reciprocity[2] if reciprocity else 0),
+        "reciprocity_unclassified_count": int(reciprocity[3] if reciprocity else 0),
+        "govinfo_identity_quality_issue_count": int(govinfo_identity[0] if govinfo_identity else 0),
         "stale_running_crawl_runs": int(stale_runs[0] if stale_runs else 0),
     }
 
@@ -222,8 +270,11 @@ def check_release(
     issues = [
         name
         for name, value in database_check.items()
-        if name != "classified_source_error_details" and value
+        if name not in {"classified_source_error_details", "reciprocity_metric_family_count"}
+        and value
     ]
+    if database_check.get("reciprocity_metric_family_count") != 11:
+        issues.append("reciprocity_metric_family_count")
     return {
         "status": "pass" if not issues else "fail",
         "checked_at": now.isoformat(),

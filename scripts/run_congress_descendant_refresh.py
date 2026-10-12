@@ -56,6 +56,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="JSON cursor file used to resume completed root batches",
     )
+    parser.add_argument(
+        "--start-after-endpoint-url",
+        help=(
+            "Begin the selected single-category keyset scan after this stored "
+            "root endpoint URL. This is a bounded repair aid; it overrides the "
+            "category cursor for this invocation."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -174,6 +182,8 @@ async def run(args: argparse.Namespace, *, project_root: Path) -> int:
         raise ValueError("request-interval must be non-negative; key-wait-timeout and active-key-budget must be positive")
     if args.max_batches < 0:
         raise ValueError("max-batches must be non-negative")
+    if args.start_after_endpoint_url and len(args.categories) != 1:
+        raise ValueError("--start-after-endpoint-url requires exactly one category")
 
     settings = Settings.from_env(project_root)
     specs = {
@@ -230,6 +240,10 @@ async def run(args: argparse.Namespace, *, project_root: Path) -> int:
                 root_count=root_count,
                 spec_fingerprint=spec_fingerprints[category],
             )
+            if args.start_after_endpoint_url:
+                cursor["after_endpoint_url"] = args.start_after_endpoint_url
+                cursor["cycle_start_root_count"] = root_count
+                cursor["completed"] = False
             if root_count == 0:
                 cursor["completed"] = True
             states[category] = (spec, cursor, root_count)

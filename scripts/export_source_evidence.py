@@ -4,8 +4,8 @@ The research release contains public derived tables, but a manifest that only
 points at private raw IDs is not independently reproducible.  This small,
 explicitly bounded exporter packages selected ``raw_response_versions`` rows
 with sanitized endpoint identity and observation metadata.  It is read-only,
-does not alter the crawler archive, and never includes credentials from query
-parameters.
+does not alter the crawler archive. Endpoint metadata is sanitized, but payloads
+are preserved: inspect them for echoed credentials before distribution.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def sanitize_endpoint(url: str) -> str:
     query: list[tuple[str, str]] = []
     for key, value in parse_qsl(parts.query, keep_blank_values=True):
         query.append((key, "[redacted]" if key.lower() in _SECRET_QUERY_KEYS else value))
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(sorted(query)), ""))
+    return urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, urlencode(sorted(query)), ""))
 
 
 def canonical_payload_bytes(payload: Any) -> bytes:
@@ -151,18 +151,11 @@ def write_bundle(
             "payloads": [payload_files[digest] for digest in sorted(payload_files)],
             "observations": observations,
         }
+        if manifest["selection"].get("endpoint_prefix"):
+            manifest["selection"]["endpoint_prefix"] = sanitize_endpoint(manifest["selection"]["endpoint_prefix"])
         manifest_path = temporary_dir / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        manifest_size = manifest_path.stat().st_size
-        manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-        (temporary_dir / "manifest.sha256").write_text(f"{manifest_digest}  manifest.json\n", encoding="ascii")
-        manifest["manifest_bytes"] = manifest_size
-        manifest["manifest_sha256"] = manifest_digest
-        # Rewrite once with its own digest fields omitted from the hashed body;
-        # the sidecar is authoritative for verifying manifest bytes.
-        manifest.pop("manifest_bytes")
-        manifest.pop("manifest_sha256")
-        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        # The digest belongs in a sidecar, never in the body it hashes.
         manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
         (temporary_dir / "manifest.sha256").write_text(f"{manifest_digest}  manifest.json\n", encoding="ascii")
         temporary_dir.rename(final_dir)

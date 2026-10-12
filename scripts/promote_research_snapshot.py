@@ -168,17 +168,27 @@ def validate_candidate(
         bundle_relative = Path(bundle_path)
         if ".." in bundle_relative.parts:
             raise ValueError("candidate source evidence bundle path escapes the candidate")
+        if len(bundle_relative.parts) != 2 or bundle_relative.parts[0] != "source-evidence" or bundle_relative.as_posix() != bundle_path:
+            raise ValueError("candidate source evidence bundle path must be source-evidence/<bundle>")
+        evidence_root = candidate_dir / "source-evidence"
+        if evidence_root.is_symlink() or not evidence_root.is_dir():
+            raise ValueError("candidate source evidence directory is missing or symlinked")
+        if {path.name for path in evidence_root.iterdir()} != {bundle_relative.name}:
+            raise ValueError("candidate source evidence directory contains undeclared entries")
         bundle_dir = candidate_dir / bundle_relative
         evidence_report = _verify_source_evidence_bundle(bundle_dir)
         if evidence_report.get("manifest_sha256") != source_evidence.get("manifest_sha256"):
             raise ValueError("candidate source evidence manifest digest differs")
         evidence_manifest = json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
-        if evidence_manifest.get("database_snapshot_at") != manifest.get("database_snapshot_at"):
+        if not evidence_report.get("database_snapshot_at") or evidence_report["database_snapshot_at"] != manifest.get("database_snapshot_at"):
             raise ValueError("candidate source evidence is not bound to the database snapshot")
         if source_evidence.get("database_snapshot_at") != manifest.get("database_snapshot_at"):
             raise ValueError("candidate source evidence metadata is not bound to the database snapshot")
-        if source_evidence.get("observation_count") != evidence_manifest.get("observation_count"):
-            raise ValueError("candidate source evidence observation count differs")
+        for field in ("observation_count", "unique_payload_count", "selection"):
+            if type(source_evidence.get(field)) is not type(evidence_manifest.get(field)) or source_evidence.get(field) != evidence_manifest.get(field):
+                raise ValueError(f"candidate source evidence {field} differs")
+        if require_source_evidence and evidence_report["observation_count"] == 0:
+            raise ValueError("candidate required source evidence is empty")
         source_evidence_root = bundle_relative.parts[0]
     expected_scope_tables = [{"name": name, "relation": name} for name in expected_names]
     if scope.get("relation_count") != len(expected_names) or scope.get("tables") != expected_scope_tables:

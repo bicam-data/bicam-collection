@@ -31,6 +31,7 @@ PG_TYPES = {
     "text",
     "integer",
     "numeric",
+    "numeric_2",
     "boolean",
     "date",
     "timestamptz",

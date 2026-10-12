@@ -46,10 +46,12 @@ TYPE_ALIASES: dict[str, frozenset[str]] = {
     "text": frozenset({"text", "character varying", "character", "varchar", "bpchar"}),
     "integer": frozenset({"smallint", "integer", "bigint", "int2", "int4", "int8"}),
     "numeric": frozenset({"numeric", "decimal"}),
+    "numeric_2": frozenset({"numeric", "decimal"}),
     "boolean": frozenset({"boolean", "bool"}),
     "date": frozenset({"date"}),
     "timestamptz": frozenset({"timestamp with time zone", "timestamptz"}),
 }
+CHAMBER_COLUMNS = frozenset({"chamber", "origin_chamber", "current_chamber"})
 
 
 def load_contract(path: Path = DEFAULT_CONTRACT) -> dict[str, Any]:
@@ -477,6 +479,24 @@ def validate_product_data(
         columns = relation.get("columns", {})
         if not isinstance(columns, Mapping):
             continue
+        # Case is part of the public semantic contract.  Keep this check in
+        # the release validator as well as the dbt assertion so an export or
+        # manually materialized table cannot bypass model-level tests.
+        for chamber_column in sorted(CHAMBER_COLUMNS.intersection(columns)):
+            identifier = sql.Identifier(chamber_column)
+            checks.append(
+                _data_check(
+                    connection,
+                    check_id=f"lowercase:{name}.{chamber_column}",
+                    relation=name,
+                    predicate=sql.SQL("{} IS NOT NULL AND {} <> lower({})").format(
+                        identifier, identifier, identifier
+                    ),
+                    select_columns=[chamber_column],
+                    schema=schema,
+                    max_examples=max_examples,
+                )
+            )
         required = relation.get("required_columns", [])
         if isinstance(required, list):
             for column in required:

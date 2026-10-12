@@ -143,7 +143,13 @@ def _fetch_manifest(connection: psycopg.Connection) -> dict[str, Any]:
         select relationship_type, relationship_count, reciprocal_count,
                unavailable_count, asymmetric_count, contradiction_count,
                unclassified_count, reciprocal_rate, contradiction_rate,
-               quality_status
+               quality_status,
+               case
+                   when relationship_count = 0 then 'reject_no_evidence'
+                   when contradiction_count > 0 then 'reject_contradiction'
+                   when unclassified_count > 0 then 'reject_unclassified'
+                   else 'accepted_with_source_boundaries'
+               end as release_acceptance_status
         from fct_congress_internal_reciprocity_metrics
         order by relationship_type
         """,
@@ -550,6 +556,7 @@ def _fetch_manifest(connection: psycopg.Connection) -> dict[str, Any]:
                     "reciprocal_rate",
                     "contradiction_rate",
                     "quality_status",
+                    "release_acceptance_status",
                 ),
             ),
             "release_bridges": _records(

@@ -27,6 +27,7 @@ import psycopg
 import requests
 
 from bicam_collection.config import Settings
+from bicam_collection.bill_text_identity import inspect_bill_text_identity
 
 
 URL_SQL = """
@@ -278,6 +279,12 @@ def _fetch_sync(
             response.close()
         if not text:
             return FetchResult(url, response_hash, content_type, response.status_code, "empty", "", "no visible text", fetched_at)
+        identity = inspect_bill_text_identity(url, text)
+        if identity["status"] == "contradiction":
+            # Preserve the response hash and evidence, but do not publish this
+            # response as successful prose or infer a different bill target.
+            return FetchResult(url, response_hash, content_type, response.status_code,
+                               "identity_conflict", None, json.dumps(identity, sort_keys=True), fetched_at)
         return FetchResult(url, response_hash, content_type, response.status_code, "success", text, None, fetched_at)
     except Exception as error:  # network and parser failures are queue evidence
         detail = f"{type(error).__name__}: {error}"

@@ -358,10 +358,12 @@ def _capture_build_evidence(
 ) -> dict[str, Any]:
     """Capture candidate-bound build, frontier, and quality evidence.
 
-    All queries run on the exporter's repeatable-read connection.  The result
-    therefore describes the same database generation as the CSV files rather
-    than a later live refresh.  Missing quality relations are recorded as
-    incomplete evidence and cannot be promoted.
+    All queries run on the exporter's repeatable-read connection, binding
+    these checks to the same database snapshot as the CSV files. This alone
+    does NOT establish that all materialized models share a completed build
+    generation; independent input/run/row binding is required for that claim.
+    Missing quality relations are recorded as incomplete evidence and cannot
+    be promoted.
     """
 
     # Public product relations live in ``bicam``; operational dbt facts use
@@ -392,7 +394,12 @@ def _capture_build_evidence(
             f"""
             select count(*)::bigint,
                    count(*) filter (where quality_status = 'pass')::bigint,
-                   count(*) filter (where quality_status <> 'pass')::bigint
+                   count(*) filter (where quality_status <> 'pass')::bigint,
+                   count(*) filter (
+                       where relationship_count = 0
+                          or contradiction_count > 0
+                          or unclassified_count > 0
+                   )::bigint
             from {quote_identifier(quality_schema)}.{quote_identifier('fct_congress_internal_reciprocity_metrics')}
             """
         ).fetchone()
@@ -432,6 +439,11 @@ def _capture_build_evidence(
                     "row_count": int(reciprocity[0] if reciprocity else 0),
                     "pass_count": int(reciprocity[1] if reciprocity else 0),
                     "nonpass_count": int(reciprocity[2] if reciprocity else 0),
+                    "release_rejected_count": int(
+                        reciprocity[3]
+                        if reciprocity is not None and len(reciprocity) > 3
+                        else 0
+                    ),
                 },
                 "coverage": {
                     "actionable_missing_detail_count": int(root_coverage[0] if root_coverage else 0),
@@ -483,6 +495,8 @@ def _capture_build_evidence(
     elif not data_validation.get("valid"):
         quality_status = "fail"
     elif quality.get("reconciliation", {}).get("nonpass_count", 0):
+        quality_status = "fail"
+    elif quality.get("reciprocity", {}).get("release_rejected_count", 0):
         quality_status = "fail"
     elif quality.get("coverage", {}).get("actionable_missing_detail_count", 0):
         quality_status = "fail"

@@ -4,22 +4,30 @@ import argparse
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-import time
 from typing import Any
 from uuid import UUID
 
 import psycopg
 
-from bicam_collection.client import fetch_metadata_values
 from bicam_collection.config import Settings
 from bicam_collection.runtime import build_client
 from bicam_collection.spec_loader import load_spec
 from bicam_collection.storage import AsyncPostgresStore
+from bicam_collection.targeted_backfill import (
+    TargetedCandidate,
+    TargetedFamily,
+    run_targeted_backfill,
+)
 from bicam_collection.urls import canonicalize_congress_api_url
 
 
-CATEGORY = "bills"
-NODE_TYPE = "bill_text"
+FAMILY = TargetedFamily(
+    category="bills",
+    node_type="bill_text",
+    endpoint_name="congress-bill-text-targeted-backfill",
+    endpoint_priority=3,
+    run_mode="targeted_bill_text_backfill",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,85 +128,28 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
     spec = load_spec(project_root / "specs" / "bills.yaml")
     client = build_client(spec=spec, env_path=settings.env_path, use_async=True)
     store = AsyncPostgresStore(settings.database_url)
-    run_id = await store.start_run(CATEGORY, "targeted_bill_text_backfill")
-    semaphore = asyncio.Semaphore(max(1, args.concurrency))
-    succeeded = 0
-    failed = 0
-    counter_lock = asyncio.Lock()
-
-    async def fetch(bill_text: BillText) -> None:
-        nonlocal succeeded, failed
-        endpoint_url = canonicalize_congress_api_url(bill_text.endpoint_url)
-        started_at = time.perf_counter()
-        try:
-            async with semaphore:
-                result = await client.get_json(
-                    endpoint_url,
-                    endpoint_name="congress-bill-text-targeted-backfill",
-                    endpoint_priority=3,
-                )
-            metadata = fetch_metadata_values(result.metadata)
-            response_ref = await store.upsert_response(
-                endpoint_url=endpoint_url,
-                source="congress",
-                category=CATEGORY,
-                node_type=NODE_TYPE,
-                parent_id=bill_text.parent_raw_id,
-                response=result.payload,
-                latest_crawl_run_id=run_id,
-            )
-            raw_id = response_ref.raw_response_id
-            await store.record_fetch(
-                crawl_run_id=run_id,
-                endpoint_url=endpoint_url,
-                raw_response_id=raw_id,
-                parent_endpoint_url=bill_text.parent_endpoint_url,
-                node_type=NODE_TYPE,
-                follow_mode="targeted",
-                http_status=metadata["status_code"],
-                outcome="fetched",
-                raw_response_version_id=response_ref.raw_response_version_id,
-                duration_ms=metadata["duration_ms"],
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            async with counter_lock:
-                succeeded += 1
-        except Exception as exc:
-            response = getattr(exc, "response", None)
-            metadata = fetch_metadata_values(getattr(exc, "fetch_metadata", None))
-            duration_ms = metadata["duration_ms"]
-            if duration_ms is None:
-                duration_ms = round((time.perf_counter() - started_at) * 1000)
-            await store.record_failed_request(
-                crawl_run_id=run_id,
-                category=CATEGORY,
-                node_type=NODE_TYPE,
-                endpoint_url=endpoint_url,
-                parent_endpoint_url=bill_text.parent_endpoint_url,
-                http_status=getattr(response, "status_code", metadata["status_code"]),
-                error=str(exc),
-                duration_ms=duration_ms,
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            async with counter_lock:
-                failed += 1
-
-    try:
-        await asyncio.gather(*(fetch(bill_text) for bill_text in bill_texts))
-        await store.finish_run(run_id, "completed", succeeded)
-    except BaseException:
-        await store.finish_run(run_id, "failed", succeeded)
-        raise
-    finally:
-        await store.close()
-    print(f"completed targeted bill text backfill {run_id}: fetched={succeeded} failed={failed}")
-    return succeeded, failed
+    candidates = [
+        TargetedCandidate(
+            endpoint_url=canonicalize_congress_api_url(bill_text.endpoint_url),
+            parent_id=str(bill_text.parent_raw_id),
+            parent_endpoint_url=bill_text.parent_endpoint_url,
+        )
+        for bill_text in bill_texts
+    ]
+    # This script does not validate its arguments, so clamp here rather than
+    # letting a zero concurrency deadlock the semaphore.
+    outcome = await run_targeted_backfill(
+        FAMILY,
+        candidates,
+        client=client,
+        store=store,
+        concurrency=max(1, args.concurrency),
+    )
+    print(
+        f"completed targeted bill text backfill {outcome.run_id}: "
+        f"fetched={outcome.fetched} failed={outcome.failed}"
+    )
+    return outcome.fetched, outcome.failed
 
 
 def main(argv: list[str] | None = None) -> int:

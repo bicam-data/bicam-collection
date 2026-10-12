@@ -17,20 +17,29 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import re
-import time
 
 import psycopg
 
-from bicam_collection.client import fetch_metadata_values
 from bicam_collection.config import Settings
 from bicam_collection.runtime import build_client
 from bicam_collection.spec_loader import load_spec
 from bicam_collection.storage import AsyncPostgresStore
+from bicam_collection.targeted_backfill import (
+    TargetedCandidate,
+    TargetedFamily,
+    run_targeted_backfill,
+)
 from bicam_collection.urls import canonicalize_congress_api_url
 
 
-CATEGORY = "hearings"
-NODE_TYPE = "hearing_detail"
+FAMILY = TargetedFamily(
+    category="hearings",
+    node_type="hearing_detail",
+    endpoint_name="congress-hearing-from-govinfo-package",
+    endpoint_priority=3,
+    run_mode="targeted_govinfo_hearing_backfill",
+    record_failed_fetches=True,
+)
 _PACKAGE_RE = re.compile(r"^CHRG-(?P<congress>[0-9]+)(?P<kind>[hsj]hrg)(?P<number>[0-9]+).*$", re.I)
 _ROUTE_CHAMBERS = {"hhrg": "house", "shrg": "senate", "jhrg": "nochamber"}
 
@@ -197,102 +206,28 @@ async def run(args: argparse.Namespace, *, project_root: Path) -> tuple[int, int
         active_key_budget=max(1, args.active_key_budget),
     )
     store = AsyncPostgresStore(settings.database_url)
-    run_id = await store.start_run(CATEGORY, "targeted_govinfo_hearing_backfill")
-    semaphore = asyncio.Semaphore(max(1, args.concurrency))
-    succeeded = 0
-    failed = 0
-    counter_lock = asyncio.Lock()
-
-    async def fetch(hearing: GovInfoHearing) -> None:
-        nonlocal succeeded, failed
-        started_at = time.perf_counter()
-        endpoint_url = canonicalize_congress_api_url(hearing.endpoint_url)
-        try:
-            async with semaphore:
-                result = await client.get_json(
-                    endpoint_url,
-                    endpoint_name="congress-hearing-from-govinfo-package",
-                    endpoint_priority=3,
-                )
-            metadata = fetch_metadata_values(result.metadata)
-            response_ref = await store.upsert_response(
-                endpoint_url=endpoint_url,
-                source="congress",
-                category=CATEGORY,
-                node_type=NODE_TYPE,
-                parent_id=hearing.parent_raw_id,
-                response=result.payload,
-                latest_crawl_run_id=run_id,
-            )
-            await store.record_fetch(
-                crawl_run_id=run_id,
-                endpoint_url=endpoint_url,
-                raw_response_id=response_ref.raw_response_id,
-                raw_response_version_id=response_ref.raw_response_version_id,
-                parent_endpoint_url=hearing.parent_endpoint_url,
-                node_type=NODE_TYPE,
-                follow_mode="targeted",
-                http_status=metadata["status_code"],
-                outcome="fetched",
-                duration_ms=metadata["duration_ms"],
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            async with counter_lock:
-                succeeded += 1
-        except Exception as exc:
-            response = getattr(exc, "response", None)
-            metadata = fetch_metadata_values(getattr(exc, "fetch_metadata", None))
-            duration_ms = metadata["duration_ms"]
-            if duration_ms is None:
-                duration_ms = max(1, round((time.perf_counter() - started_at) * 1000))
-            status_code = getattr(response, "status_code", metadata["status_code"])
-            await store.record_failed_request(
-                crawl_run_id=run_id,
-                category=CATEGORY,
-                node_type=NODE_TYPE,
-                endpoint_url=endpoint_url,
-                parent_endpoint_url=hearing.parent_endpoint_url,
-                http_status=status_code,
-                error=str(exc),
-                duration_ms=duration_ms,
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            await store.record_fetch(
-                crawl_run_id=run_id,
-                endpoint_url=endpoint_url,
-                raw_response_id=None,
-                parent_endpoint_url=hearing.parent_endpoint_url,
-                node_type=NODE_TYPE,
-                follow_mode="targeted",
-                http_status=status_code,
-                outcome="failed",
-                duration_ms=duration_ms,
-                attempt_count=metadata["attempt_count"],
-                rate_limit_attempts=metadata["rate_limit_attempts"],
-                api_key_name=metadata["api_key_name"],
-                pool_allocation=metadata["pool_allocation"],
-            )
-            async with counter_lock:
-                failed += 1
-
-    try:
-        batch_size = max(1, args.batch_size)
-        for start in range(0, len(hearings), batch_size):
-            await asyncio.gather(*(fetch(item) for item in hearings[start : start + batch_size]))
-        await store.finish_run(run_id, "completed", succeeded)
-    except BaseException:
-        await store.finish_run(run_id, "failed", succeeded)
-        raise
-    finally:
-        await store.close()
-    print(f"[govinfo-hearing] completed run={run_id} fetched={succeeded} failed={failed}", flush=True)
-    return succeeded, failed
+    candidates = [
+        TargetedCandidate(
+            endpoint_url=canonicalize_congress_api_url(hearing.endpoint_url),
+            parent_id=hearing.parent_raw_id,
+            parent_endpoint_url=hearing.parent_endpoint_url,
+        )
+        for hearing in hearings
+    ]
+    outcome = await run_targeted_backfill(
+        FAMILY,
+        candidates,
+        client=client,
+        store=store,
+        concurrency=args.concurrency,
+        batch_size=args.batch_size,
+    )
+    print(
+        f"[govinfo-hearing] completed run={outcome.run_id} "
+        f"fetched={outcome.fetched} failed={outcome.failed}",
+        flush=True,
+    )
+    return outcome.fetched, outcome.failed
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -68,6 +68,7 @@ class InternalReciprocityStatus:
     reciprocal_rate: float | None
     contradiction_rate: float | None
     quality_status: str
+    release_acceptance_status: str = "accepted_with_source_boundaries"
     asymmetric_count: int = 0
 
 
@@ -904,6 +905,12 @@ def _load_internal_reciprocity(connection: psycopg.Connection) -> list[InternalR
             reciprocal_rate=float(row[7]) if row[7] is not None else None,
             contradiction_rate=float(row[8]) if row[8] is not None else None,
             quality_status=str(row[9]),
+            release_acceptance_status=(
+                "reject_no_evidence" if int(row[1]) == 0
+                else "reject_contradiction" if int(row[5]) > 0
+                else "reject_unclassified" if int(row[6]) > 0
+                else "accepted_with_source_boundaries"
+            ),
         )
         for row in rows
     ]
@@ -1273,15 +1280,15 @@ def render_report(
                 "",
                 "## Congress.gov internal reciprocity",
                 "",
-                "| Relationship | Edges | Reciprocal | Reciprocal rate | Counterpart unavailable | Asymmetric source | Contradictions | Quality |",
-                "|---|---:|---:|---:|---:|---:|---:|---|",
+                "| Relationship | Edges | Reciprocal | Reciprocal rate | Counterpart unavailable | Asymmetric source | Contradictions | Quality | Release acceptance |",
+                "|---|---:|---:|---:|---:|---:|---:|---|---|",
             ]
         )
         for row in internal_reciprocity:
             lines.append(
                 f"| {row.relationship_type} | {row.relationship_count} | {row.reciprocal_count} "
                 f"| {float(row.reciprocal_rate or 0):.2%} | {row.unavailable_count} "
-                f"| {row.asymmetric_count} | {row.contradiction_count} | {row.quality_status} |"
+                f"| {row.asymmetric_count} | {row.contradiction_count} | {row.quality_status} | {row.release_acceptance_status} |"
             )
     else:
         lines.extend(
