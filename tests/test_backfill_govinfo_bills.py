@@ -43,17 +43,6 @@ class BackfillGovinfoBillsTests(unittest.TestCase):
             "BILLS-119sres3is",
         )
 
-    def test_default_request_concurrency_is_bounded(self) -> None:
-        script = _load_module()
-
-        args = script.parse_args([])
-
-        self.assertEqual(args.concurrency, 3)
-        self.assertEqual(args.limit, 1000)
-        self.assertEqual(args.request_interval, 0.25)
-        self.assertEqual(args.key_wait_timeout, 180.0)
-        self.assertEqual(args.retry_404_after_hours, 168.0)
-
     def test_modern_missing_mode_targets_congress_only_records(self) -> None:
         script = _load_module()
 

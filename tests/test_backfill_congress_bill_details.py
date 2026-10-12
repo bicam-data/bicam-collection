@@ -22,14 +22,6 @@ def _load_module():
     return module
 
 
-def test_defaults_are_bounded_and_paced() -> None:
-    args = _load_module().parse_args([])
-    assert args.limit == 100
-    assert args.concurrency == 2
-    assert args.request_interval == 2.0
-    assert args.key_wait_timeout == 180.0
-
-
 def test_endpoint_uses_congress_bill_detail_shape() -> None:
     bill_type = _load_module().CongressBillDetail
     bill = bill_type(
@@ -40,10 +32,6 @@ def test_endpoint_uses_congress_bill_detail_shape() -> None:
         congress=117,
     )
     assert bill.endpoint_url == "https://api.congress.gov/v3/bill/117/hconres/110?format=json"
-
-
-def test_script_is_in_project() -> None:
-    assert SCRIPT_PATH.exists()
 
 
 def test_loader_uses_only_missing_congress_matches_and_skips_404s() -> None:

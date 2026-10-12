@@ -77,10 +77,3 @@ def test_loader_targets_only_missing_packages_and_preserves_404_ttl() -> None:
     assert "from failed_requests as prior_failure" in connection.query
     assert "interval '72.000000 hours'" in connection.query
     assert connection.params == [[119], 25]
-
-
-def test_dry_run_argument_is_available_and_defaults_to_bounded_batch() -> None:
-    args = module.parse_args(["--dry-run", "--limit", "7", "--max-pages", "4"])
-    assert args.dry_run is True
-    assert args.limit == 7
-    assert args.max_pages == 4

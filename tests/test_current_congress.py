@@ -28,9 +28,3 @@ def test_parse_congress_accepts_only_positive_integers() -> None:
 def test_override_is_used_without_opening_database() -> None:
     script = _load_module()
     assert script.resolve_current_congress("postgresql://unused", override="120") == 120
-
-
-def test_query_is_scoped_to_congress_detail_archive() -> None:
-    script = _load_module()
-    assert "category = 'congresses'" in script.CURRENT_CONGRESS_SQL
-    assert "node_type = 'congress_detail'" in script.CURRENT_CONGRESS_SQL

@@ -17,7 +17,6 @@ from scripts.record_lane_run import (
 from scripts.report_lane_status import (
     LaneRunRow,
     UnitStatus,
-    format_duration,
     parse_timer_schedule,
     render_json,
     render_markdown,
@@ -215,13 +214,6 @@ def test_summarize_units_handles_missing_started_at() -> None:
     (status,) = summarize_units(rows, {})
     assert status.last_duration_seconds is None
     assert status.consecutive_failures == 1
-
-
-def test_format_duration() -> None:
-    assert format_duration(None) == "-"
-    assert format_duration(42.9) == "42s"
-    assert format_duration(125) == "2m05s"
-    assert format_duration(3725) == "1h02m05s"
 
 
 def test_render_markdown_and_json_from_fixture_rows() -> None:

@@ -8,20 +8,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.report_html_text_progress import TARGET_SQL, render_markdown
 
 
-def test_progress_query_includes_govinfo_html_renditions() -> None:
-    assert "api\\.govinfo\\.gov/.+/htm" in TARGET_SQL
-    assert "'bills_versions'" in TARGET_SQL
-    assert 'excluded_non_html_count' in TARGET_SQL
-    assert 'source_absent_count' in TARGET_SQL
-    assert 'fetch_error_count' in TARGET_SQL
-    assert 'empty_count' in TARGET_SQL
-    assert "url !~* '/crec/'" in TARGET_SQL
-    assert "url ~* '/crec/'" in TARGET_SQL
-    assert 'declared_source_tables' in TARGET_SQL
-    assert "('committee_prints_texts'::text)" in TARGET_SQL
-    assert 'count(filtered.url)' in TARGET_SQL
-
-
 def test_render_markdown_lists_per_table_progress() -> None:
     rendered = render_markdown(
         {

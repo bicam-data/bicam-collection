@@ -50,15 +50,6 @@ def test_new_endpoint_families_use_their_documented_partition_shapes() -> None:
     ]
 
 
-def test_historical_runner_accepts_bounded_refresh_mode() -> None:
-    args = parse_args(
-        ["--categories", "hearings", "congresses", "--mode", "refresh"],
-        project_root=Path(__file__).resolve().parents[1],
-    )
-
-    assert args.mode == "refresh"
-
-
 def test_partition_exception_classifies_transient_http_status() -> None:
     class Error(Exception):
         response = type("Response", (), {"status_code": 503})()

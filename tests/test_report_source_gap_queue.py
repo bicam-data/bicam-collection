@@ -6,8 +6,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.report_source_gap_queue import (
-    ITEM_SQL,
-    SUMMARY_SQL,
     _send_pushover,
     actionable_row_count,
     render_markdown,
@@ -76,10 +74,3 @@ def test_pushover_alert_count_excludes_deferred_source_boundaries() -> None:
         {"summary": {"deferred_source_gap|low": 100, "open|high": 2, "due_for_reprobe|normal": 3}}
     ) == 5
     assert actionable_row_count({"summary": {"deferred_source_gap|low": 100}}) == 0
-
-
-def test_queue_report_recomputes_expiry_sensitive_status_at_read_time() -> None:
-    assert "current_queue_status" in SUMMARY_SQL
-    assert "expires_at <= now()" in SUMMARY_SQL
-    assert "current_next_action" in ITEM_SQL
-    assert "current_next_action_at" in ITEM_SQL

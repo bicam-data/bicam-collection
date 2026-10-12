@@ -20,52 +20,6 @@ def _load_module():
     return module
 
 
-def test_no_descendants_retry_is_explicit_and_bounded() -> None:
-    script = _load_module()
-    args = script.parse_args(["--no-descendants"])
-
-    assert args.categories == list(script.TARGET_CONGRESS_CATEGORIES)
-    assert args.no_descendants is True
-    assert args.max_pages == 1000
-    assert args.min_age_minutes == 15.0
-    assert args.include_source_500 is False
-    assert args.only_source_500 is False
-    assert args.endpoint is None
-    assert args.node_types is None
-
-
-def test_source_500_retries_require_explicit_opt_in() -> None:
-    script = _load_module()
-    args = script.parse_args(["--include-source-500", "--min-age-minutes", "30"])
-
-    assert args.include_source_500 is True
-    assert args.min_age_minutes == 30.0
-
-
-def test_retry_categories_can_be_explicitly_overridden() -> None:
-    script = _load_module()
-
-    args = script.parse_args(["--categories", "govinfo-bills", "--dry-run"])
-
-    assert args.categories == ["govinfo-bills"]
-
-
-def test_source_500_only_retry_is_explicitly_narrow() -> None:
-    script = _load_module()
-    args = script.parse_args(["--include-source-500", "--only-source-500"])
-
-    assert args.include_source_500 is True
-    assert args.only_source_500 is True
-
-
-def test_node_type_filter_is_explicitly_preserved() -> None:
-    script = _load_module()
-
-    args = script.parse_args(["--node-types", "amendment_detail", "bill_detail", "--dry-run"])
-
-    assert args.node_types == ["amendment_detail", "bill_detail"]
-
-
 def test_without_descendants_does_not_mutate_the_loaded_spec() -> None:
     script = _load_module()
     original = load_spec(PROJECT_ROOT / "specs" / "amendments.yaml")

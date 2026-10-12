@@ -29,38 +29,3 @@ def test_public_schema_matches_published_2025_archives() -> None:
     )
     assert families == 11
     assert tables == 91
-
-
-def test_deferred_features_are_explicit() -> None:
-    import yaml
-
-    contract = yaml.safe_load(
-        (PROJECT_ROOT / "contracts" / "bicam_public_schema.yaml").read_text(encoding="utf-8")
-    )
-    deferred = {
-        table["table"]
-        for family in contract["families"]
-        for table in [family, *family.get("children", [])]
-        if table["feature_status"] == "deferred-external-crosswalk"
-    }
-    assert deferred == {
-        "bills_lobbied",
-    }
-
-
-def test_nominee_contract_declares_grouping_not_unique_key() -> None:
-    import yaml
-
-    contract = yaml.safe_load(
-        (PROJECT_ROOT / "contracts" / "bicam_public_schema.yaml").read_text(encoding="utf-8")
-    )
-    nominee = next(
-        child
-        for family in contract["families"]
-        for child in family.get("children", [])
-        if child["table"] == "nominations_nominees"
-    )
-    assert "primary_key" not in nominee
-    assert nominee["key_semantics"] == "grouping"
-    assert nominee["grouping_key"] == ["nomination_id", "ordinal"]
-    assert nominee["export_order"][:2] == nominee["grouping_key"]

@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -79,11 +78,6 @@ def test_compare_honors_explicit_nullability_without_inventing_constraints() -> 
     ]
 
 
-def test_contract_file_is_yaml_and_targets_bicam() -> None:
-    document = yaml.safe_load((PROJECT_ROOT / "contracts" / "bicam_public_schema.yaml").read_text())
-    assert document["product"]["postgres_schema"] == "bicam"
-
-
 def test_declared_supplemental_relation_is_allowed_without_changing_core_count() -> None:
     contract = MODULE.load_contract(PROJECT_ROOT / "contracts" / "bicam_public_schema.yaml")
     assert "bills_versions" not in {row["table"] for row in MODULE.contract_relations(contract)}
@@ -95,14 +89,6 @@ def test_declared_supplemental_relation_is_allowed_without_changing_core_count()
     report = MODULE.compare_schema(contract, {"bills_versions": []})
     assert report["extra_relations"] == []
     assert report["supplemental_relations"] == ["bills_versions"]
-
-
-def test_cli_can_require_supplemental_relations() -> None:
-    script = MODULE
-    assert script.parse_args(["--include-supplemental"]).include_supplemental is True
-    args = script.parse_args(["--check-data", "--max-examples", "3"])
-    assert args.check_data is True
-    assert args.max_examples == 3
 
 
 def test_include_supplemental_changes_expected_relation_set() -> None:

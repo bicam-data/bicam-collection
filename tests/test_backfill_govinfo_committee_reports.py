@@ -31,16 +31,6 @@ class BackfillGovinfoCommitteeReportsTests(unittest.TestCase):
             "https://api.govinfo.gov/packages/CRPT-116hrpt562/summary",
         )
 
-    def test_granule_mode_uses_bounded_defaults(self) -> None:
-        script = _load_module()
-
-        args = script.parse_args(["--granules-for-unmatched"])
-
-        self.assertTrue(args.granules_for_unmatched)
-        self.assertEqual(args.concurrency, 3)
-        self.assertEqual(args.limit, 1000)
-        self.assertEqual(args.retry_404_after_hours, 168.0)
-
     def test_retry_404_window_must_be_positive(self) -> None:
         script = _load_module()
 

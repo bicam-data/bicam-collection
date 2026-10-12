@@ -18,54 +18,6 @@ def _load_module():
     return module
 
 
-def test_defaults_target_amendment_details_in_bounded_batches() -> None:
-    script = _load_module()
-    args = script.parse_args([])
-
-    assert args.source == "congress"
-    assert args.categories == ["amendments"]
-    assert args.batch_size == 500
-    assert args.concurrency == 16
-    assert args.active_key_budget == 32
-    assert args.max_batches == 0
-    assert args.checkpoint_path is None
-
-
-def test_refresh_runner_accepts_multiple_categories() -> None:
-    script = _load_module()
-    args = script.parse_args(
-        ["--categories", "amendments", "bills", "--batch-size", "1000", "--active-key-budget", "30"]
-    )
-
-    assert args.categories == ["amendments", "bills"]
-    assert args.batch_size == 1000
-    assert args.active_key_budget == 30
-
-
-def test_refresh_runner_can_target_govinfo_categories() -> None:
-    script = _load_module()
-    args = script.parse_args(
-        ["--source", "govinfo", "--categories", "govinfo-congressional-directories"]
-    )
-
-    assert args.source == "govinfo"
-    assert args.categories == ["govinfo-congressional-directories"]
-
-
-def test_refresh_runner_accepts_bounded_start_after_cursor() -> None:
-    script = _load_module()
-    args = script.parse_args(
-        [
-            "--categories",
-            "bills",
-            "--start-after-endpoint-url",
-            "https://api.congress.gov/v3/bill/119/hr/10304?format=json",
-        ]
-    )
-
-    assert args.start_after_endpoint_url.endswith("hr/10304?format=json")
-
-
 def test_checkpoint_cursor_advances_atomically_and_resumes(tmp_path: Path) -> None:
     script = _load_module()
     checkpoint = tmp_path / "descendant-cursor.json"

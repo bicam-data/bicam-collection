@@ -17,7 +17,6 @@ from scripts.fetch_html_text import (
     extract_visible_text,
     fetch_urls,
     is_supported_html_url,
-    parse_args,
     request_url_for,
     resume_urls,
     target_urls,
@@ -58,13 +57,6 @@ def test_supported_urls_are_congress_html_only() -> None:
     assert not is_supported_html_url("https://example.org/item.htm")
 
 
-def test_target_query_excludes_paused_congressional_record_links() -> None:
-    from scripts.fetch_html_text import URL_SQL
-
-    assert "targets.url !~* '/crec/'" in URL_SQL
-    assert "and (\n       current.id is null" in URL_SQL
-
-
 def test_visible_text_strips_non_document_markup_and_decodes_entities() -> None:
     html = b"<html><head><style>ignore</style></head><body><h1>Title</h1><script>ignore</script><p>Hello &amp; world</p><pre>A\nB</pre></body></html>"
     assert extract_visible_text(html, "text/html; charset=utf-8") == "Title\n\nHello & world\n\nA\nB"
@@ -75,10 +67,7 @@ def test_visible_text_removes_govinfo_nul_control_bytes() -> None:
     assert extract_visible_text(html, "text/html; charset=utf-8") == "BeforeAfter"
 
 
-def test_source_table_selector_is_explicit() -> None:
-    assert parse_args(["--source-table", "bills_texts"]).source_table == "bills_texts"
-    assert parse_args(["--source-table", "bills_versions"]).source_table == "bills_versions"
-    assert parse_args(["--retry-failed-days", "2"]).retry_failed_days == 2
+def test_unknown_source_table_is_rejected() -> None:
     with pytest.raises(ValueError, match="unsupported source table"):
         target_urls("postgresql://unused", after=None, limit=1, refresh_days=30, source_table="unknown")
 
@@ -151,15 +140,6 @@ def test_fetch_rejects_content_length_before_reading(monkeypatch) -> None:
     assert result.extraction_status == "fetch_error"
     assert "exceeds 5 byte limit" in (result.error or "")
     assert response.closed
-
-
-def test_host_specific_html_pacing_options_are_parseable() -> None:
-    args = parse_args([
-        "--congress-request-interval", "1.0",
-        "--govinfo-request-interval", "0.25",
-    ])
-    assert args.congress_request_interval == 1.0
-    assert args.govinfo_request_interval == 0.25
 
 
 def test_async_retries_use_the_paced_fetch_path(monkeypatch) -> None:

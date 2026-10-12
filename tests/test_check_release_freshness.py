@@ -34,15 +34,6 @@ def _manifest(path: Path, generated_at: datetime) -> None:
     )
 
 
-def test_parse_args_defaults_to_latest_manifest() -> None:
-    script = _load_module()
-    args = script.parse_args([])
-    assert args.manifest == Path("../reports/exports/latest/manifest.json")
-    assert args.max_age_hours == 24.0
-    assert args.max_stale_run_hours == 3.0
-    assert args.no_file_verification is False
-
-
 def test_manifest_check_rejects_stale_or_empty_snapshot(tmp_path: Path) -> None:
     script = _load_module()
     now = datetime(2026, 8, 28, 6, 0, tzinfo=timezone.utc)

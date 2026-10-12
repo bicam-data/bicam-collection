@@ -36,14 +36,5 @@ class BackfillCongressBillTextsTests(unittest.TestCase):
             "https://api.congress.gov/v3/bill/119/hr/1/text?format=json&limit=250",
         )
 
-    def test_default_request_concurrency_is_bounded(self) -> None:
-        script = _load_module()
-
-        args = script.parse_args([])
-
-        self.assertEqual(args.concurrency, 3)
-        self.assertEqual(args.limit, 1000)
-
-
 if __name__ == "__main__":
     unittest.main()

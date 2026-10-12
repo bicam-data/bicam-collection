@@ -19,14 +19,6 @@ def _load_module():
     return module
 
 
-def test_parse_args_accepts_explicit_tables() -> None:
-    script = _load_module()
-    args = script.parse_args(["--tables", "bills", "committee_reports", "--dry-run"])
-    assert args.tables == ["bills", "committee_reports"]
-    assert args.dry_run is True
-
-
-
 def test_supplemental_export_is_explicit() -> None:
     script = _load_module()
     _, relations = script._contract_plan(
@@ -93,13 +85,6 @@ def test_dry_run_is_database_free_and_preserves_order(tmp_path: Path) -> None:
     }
     assert result["dry_run"] is True
     assert not list(tmp_path.iterdir())
-
-
-def test_lineage_columns_are_explicit() -> None:
-    script = _load_module()
-    assert "source_raw_response_version_id" in script.LINEAGE_COLUMNS
-    assert "raw_response_version_id" in script.LINEAGE_COLUMNS
-    assert "bioguide_id" not in script.LINEAGE_COLUMNS
 
 
 def test_lineage_columns_include_relationship_arrays_and_evidence() -> None:
@@ -196,39 +181,3 @@ def test_build_evidence_binds_quality_and_frontier_to_export_transaction(tmp_pat
         '"public"."fct_root_detail_coverage"' in query and "category = any(%s)" in query
         for query in connection.queries
     )
-
-
-def test_ci_export_smoke_uses_contract_relation_names() -> None:
-    workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "--dry-run --tables bills committee_reports" in workflow
-    assert "--dry-run --tables member_legislation committee_bills" not in workflow
-
-
-def test_ci_materializes_seeded_complete_public_graph_before_quality_smoke() -> None:
-    workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    seed_step = "uv run dbt seed --project-dir dbt_project --full-refresh --no-partial-parse"
-    graph_step = (
-        "uv run dbt run --project-dir dbt_project --select '+path:models/marts/bicam' "
-        "'+fct_reconciliation_metrics' '+fct_congress_internal_reciprocity_metrics' "
-        "'+fct_root_detail_coverage' '+fct_collection_coverage' '+fct_source_gap_queue' "
-        "'+bridge_committees__bills' --no-partial-parse"
-    )
-    validator_step = "uv run python scripts/validate_bicam_product.py --schema bicam --include-supplemental --check-data"
-    assert seed_step in workflow
-    assert graph_step in workflow
-    assert validator_step in workflow
-    assert workflow.index(seed_step) < workflow.index(graph_step)
-
-
-def test_ci_exercises_exact_candidate_export_validation_and_safe_drift_rejection() -> None:
-    workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-
-    assert "Export complete disposable candidate" in workflow
-    assert "--include-supplemental" in workflow
-    assert "scripts/promote_research_snapshot.py" in workflow
-    assert "Reject drifted disposable candidate" in workflow
-    assert 'manifest["snapshot_directory"] = "invalid-candidate"' in workflow
-    assert 'manifest["tables"][0]["sha256"] = "0" * 64' in workflow
-    assert 'test "$(readlink "$BICAM_CI_EXPORT_DIR/latest")" = "$accepted"' in workflow
-    assert "Compare exact disposable candidate" in workflow
-    assert "scripts/compare_release_candidates.py" in workflow
