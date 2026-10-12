@@ -1,10 +1,8 @@
-"""Resumable HTML text extraction lane.
+"""Resumable HTML text extraction lane, run by the bicam-html-text timer.
 
-Each batch is small enough to stop safely; one lexical cursor per source table
-is persisted in reports/html-text/checkpoint.json and resumes after a restart
-or usage-window reset.  Fetching reads public HTML renditions and consumes no
-Congress.gov API keys, so it runs without the shared ingestion lock; only dbt
-propagation touches the shared intermediate tables and takes the lock.
+One cursor per source table is kept in reports/html-text/checkpoint.json.
+Fetching uses public HTML renditions (no API keys) and runs without the shared
+ingestion lock; only the dbt propagation step takes it.
 """
 
 from __future__ import annotations
@@ -13,7 +11,6 @@ import contextlib
 import fcntl
 import json
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -30,10 +27,7 @@ from bicam_collection import config
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = Path(f"/run/user/{os.getuid()}/bicam-ingestion.lock")
 
-# Rotate one public text table per batch.  A single lexical cursor could spend
-# days in the hearing URL range before reaching bills, amendments, or GovInfo
-# bill versions.  Successful rows are filtered by the database, so an old
-# checkpoint is safely restarted at the beginning of the fair queue.
+# Rotated one batch at a time so no table starves the rest.
 SOURCE_TABLES = (
     "amendments_texts",
     "bills_texts",
@@ -43,16 +37,8 @@ SOURCE_TABLES = (
     "bills_versions",
 )
 
-# Rebuild each text model's selected child-state ancestors as well.  The
-# public text tables depend on resolver-backed intermediate tables (most
-# visibly committee-print text); selecting only the leaf can otherwise leave a
-# freshly harvested raw response invisible to the public product.  Keep this
-# graph explicit instead of selecting every ancestor of each leaf: the
-# ``+bills_texts`` form also rebuilds the entire bills/reconciliation graph,
-# which makes a bounded HTML checkpoint spend its timeout on unrelated title
-# and match models.  These are the raw/current, shared child-state,
-# text-specific, and public relations required for the six HTML sources;
-# root/public identity tables are refreshed by their source lanes.
+# The text tables plus the intermediates between them and the raw responses.
+# Listed explicitly: +bills_texts would rebuild all of bills/reconciliation.
 DBT_SELECT = (
     "int_raw_response_versions", "int_raw_responses__current",
     "int_congress_child_response_selection", "int_congress_child_response_selections",
@@ -75,27 +61,11 @@ DBT_TEST_SELECT = (
     "html_successful_extractions_have_text",
     "html_successful_current_prefers_last_success",
 )
-# Mirrors ``timeout --signal=TERM --kill-after=20s``: a dbt client that ignores
-# TERM is killed rather than allowed to outlive the bounded checkpoint.
 DBT_KILL_AFTER_SECONDS = 20.0
 
 
 def utc_now(fmt: str) -> str:
     return datetime.now(timezone.utc).strftime(fmt)
-
-
-def load_dotenv(path: Path) -> None:
-    # ``set -a; . ./.env`` semantics: every assignment becomes exported and
-    # overrides an existing variable.  The file is plain KEY=VALUE lines with
-    # blank lines and ``#`` comments.
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, value = line.split("=", 1)
-        os.environ[key] = value
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -128,8 +98,12 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         env = os.environ
+        reports_dir = Path(env.get("BICAM_REPORTS_DIR") or REPO_ROOT.parent / "reports")
+        dbt_batch_interval = int(env.get("BICAM_HTML_DBT_BATCH_INTERVAL", "6"))
+        if dbt_batch_interval < 1:
+            raise ValueError(f"BICAM_HTML_DBT_BATCH_INTERVAL must be positive, got {dbt_batch_interval}")
         return cls(
-            output_dir=Path(env.get("BICAM_HTML_REPORT_DIR") or REPO_ROOT / ".." / "reports" / "html-text"),
+            output_dir=Path(env.get("BICAM_HTML_REPORT_DIR") or reports_dir / "html-text"),
             batch_limit=int(env.get("BICAM_HTML_BATCH_LIMIT", "500")),
             max_batches=int(env.get("BICAM_HTML_MAX_BATCHES", "1")),
             fetch_options=[
@@ -143,15 +117,11 @@ class Settings:
                 "--timeout", env.get("BICAM_HTML_REQUEST_TIMEOUT", "12"),
                 "--max-bytes", env.get("BICAM_HTML_MAX_BYTES", "20000000"),
             ],
-            dbt_batch_interval=int(env.get("BICAM_HTML_DBT_BATCH_INTERVAL", "6")),
+            dbt_batch_interval=dbt_batch_interval,
             skip_dbt=env.get("BICAM_HTML_SKIP_DBT", "0") == "1",
             dbt_force=env.get("BICAM_HTML_DBT_FORCE", "0") == "1",
-            # The resolver-backed bill-text-version model needs more than ten
-            # minutes on the production archive.  Keep propagation bounded, but
-            # allow one complete graph attempt to finish rather than repeatedly
-            # cancelling during its largest table.  PostgreSQL stops the
-            # statement slightly before the client timeout so cancellation
-            # cannot leave a server-side table build running after exit.
+            # Statement timeouts sit just inside the client timeouts so a
+            # killed dbt leaves no query running.
             dbt_timeout_seconds=float(env.get("BICAM_HTML_DBT_TIMEOUT_SECONDS", "1800")),
             dbt_statement_timeout_ms=env.get("BICAM_HTML_DBT_STATEMENT_TIMEOUT_MS", "1740000"),
             dbt_test_timeout_seconds=float(env.get("BICAM_HTML_DBT_TEST_TIMEOUT_SECONDS", "300")),
@@ -164,8 +134,7 @@ class Settings:
 @dataclass
 class Checkpoint:
     path: Path
-    # The most recent fetch result (``requested``/``statuses``) plus the lane
-    # keys below; written after every batch so a stop at any point resumes.
+    # The latest fetch result plus the cursor fields below, saved after every batch.
     payload: dict[str, Any]
     last_urls: dict[str, str]
     next_source_table: str
@@ -223,11 +192,9 @@ def fetch_batch(settings: Settings, source_table: str, after: str) -> dict[str, 
 
 
 def run_batches(settings: Settings, checkpoint: Checkpoint) -> None:
-    # Count only full/useful batches against the configured cap.  A short
-    # batch means that table is exhausted (or has no currently eligible URLs),
-    # so it is reset and skipped without making the next useful table wait for
-    # another timer tick.  The finite attempt bound prevents an all-exhausted
-    # queue from turning the fairness loop into an infinite cycle.
+    # Only full batches count against the cap; a short batch means the table
+    # is exhausted, so its cursor resets and the next table runs. The attempt
+    # bound ends an all-exhausted loop.
     useful_batches = 0
     max_attempts = settings.max_batches + len(SOURCE_TABLES)
     for _attempt in range(max_attempts):
@@ -244,9 +211,6 @@ def run_batches(settings: Settings, checkpoint: Checkpoint) -> None:
         checkpoint.payload = result
         checkpoint.save()
         if result.get("requested", 0) < settings.batch_limit:
-            # A complete pass for this table starts from the beginning next
-            # time so newly added URLs and URLs past the refresh age are
-            # reconsidered.
             checkpoint.last_urls[current_source_table] = ""
             checkpoint.save()
             continue
@@ -268,15 +232,13 @@ def acquire_ingestion_lock(timeout_seconds: float) -> IO[str] | None:
 
 
 def run_bounded(command: list[str], env: dict[str, str], timeout_seconds: float) -> int:
-    # ``timeout --signal=TERM --kill-after=20s`` semantics, including its exit
-    # statuses: 124 when TERM ended the client, 137 when KILL was needed.
+    """Like ``timeout --kill-after``: 124 if TERM ended the command, 137 if KILL was needed."""
     process = subprocess.Popen(command, env=env)
     try:
         status = process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         process.terminate()
     else:
-        # A client killed by a signal reports 128+signal in a shell.
         return status if status >= 0 else 128 - status
     try:
         process.wait(timeout=DBT_KILL_AFTER_SECONDS)
@@ -288,18 +250,17 @@ def run_bounded(command: list[str], env: dict[str, str], timeout_seconds: float)
 
 
 def cancel_dbt_backends(app_name: str) -> None:
-    # A client-side timeout can leave a PostgreSQL backend alive until TCP
-    # keepalive notices the disconnect.  Cancel only this checkpoint's unique
-    # application name; never touch another ingestion lane.
+    """Stop backends a killed dbt left behind, matched by this run's unique application name.
+
+    Cancels twice (the first can race the client disconnect), then terminates
+    any stuck in I/O.
+    """
     database_url = config.Settings.from_env(REPO_ROOT).database_url
 
     def run_statement(statement: str) -> None:
         with contextlib.suppress(psycopg.Error), psycopg.connect(database_url, autocommit=True) as connection:
             connection.execute(statement, {"app_name": app_name})
 
-    # The first cancellation can race the client-side timeout while its
-    # connection is still unwinding.  A short second pass catches that backend
-    # without broad termination or touching another run.
     for cancel_attempt in (1, 2):
         run_statement(
             "select pg_cancel_backend(pid) from pg_stat_activity"
@@ -307,8 +268,6 @@ def cancel_dbt_backends(app_name: str) -> None:
         )
         if cancel_attempt == 1:
             time.sleep(2)
-    # A backend in uninterruptible I/O can survive cancellation after the
-    # client has exited.  Terminate only this exact abandoned application name.
     run_statement(
         "select pg_terminate_backend(pid) from pg_stat_activity"
         " where application_name = %(app_name)s and pid <> pg_backend_pid()"
@@ -339,9 +298,7 @@ def propagate(settings: Settings, checkpoint: Checkpoint) -> None:
             print("html_text_lock_busy; retrying on the next timer interval", flush=True)
             return
     app_name = f"bicam-html-dbt-{utc_now('%Y%m%dT%H%M%SZ')}-{os.getpid()}"
-    # A systemd start-timeout can terminate the driver after its child client
-    # exits.  Turn TERM/INT into an ordinary exit so the finally clause below
-    # cannot leave an unowned server-side dbt backend behind.
+    # Turn a systemd TERM into a normal exit so the cleanup below still runs.
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
     signal.signal(signal.SIGINT, lambda signum, frame: sys.exit(130))
     try:
@@ -359,13 +316,8 @@ def propagate(settings: Settings, checkpoint: Checkpoint) -> None:
         if run_status == 0 and test_status == 0:
             checkpoint.pending_dbt = 0
         else:
-            # Keep the extraction cursor and the pending flag durable.  The
-            # next checkpoint retries propagation without discarding
-            # successfully fetched HTML or pretending the public models are
-            # current.  Zeroing the counter avoids retrying the same expensive
-            # graph on every short extraction tick; new successful batches
-            # advance it again and BICAM_HTML_DBT_FORCE=1 can still request an
-            # immediate refresh.
+            # Stay pending. Resetting the counter below waits for new batches
+            # (or BICAM_HTML_DBT_FORCE=1) before retrying the same graph.
             print("html_dbt_pending=1 reason=propagation_failed", flush=True)
         checkpoint.dbt_batches_since_last = 0
         checkpoint.save()
@@ -377,20 +329,15 @@ def propagate(settings: Settings, checkpoint: Checkpoint) -> None:
 
 def main() -> int:
     os.chdir(REPO_ROOT)
-    load_dotenv(REPO_ROOT / ".env")
+    os.environ.update(config.parse_dotenv(REPO_ROOT / ".env"))
     settings = Settings.from_env()
-    interval_text = os.environ.get("BICAM_HTML_DBT_BATCH_INTERVAL", "6")
-    if not re.fullmatch(r"[1-9][0-9]*", interval_text):
-        print(f"invalid BICAM_HTML_DBT_BATCH_INTERVAL={interval_text} (expected positive integer)", file=sys.stderr)
-        return 2
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint = Checkpoint.load(settings.output_dir / "checkpoint.json")
 
     run_batches(settings, checkpoint)
 
-    # A batch containing only HTTP/fetch failures cannot change the public
-    # tables, so the expensive rebuild waits for successful rows, and then for
-    # the batch interval or the end of a fair-queue cycle.
+    # Rebuild only after new text arrived, and then every N batches or at the
+    # end of a full rotation.
     cycle_boundary = checkpoint.next_source_table == SOURCE_TABLES[0]
     propagation_due = (
         checkpoint.dbt_batches_since_last >= settings.dbt_batch_interval
@@ -406,9 +353,7 @@ def main() -> int:
             flush=True,
         )
 
-    # Keep a per-public-table checkpoint alongside the URL cursor.  This is
-    # intentionally non-fatal: extraction results and the cursor are already
-    # durable, and a report query must not stop the next batch.
+    # Non-fatal: results and cursors are already saved.
     subprocess.run([sys.executable, "scripts/report_html_text_progress.py", "--output-dir", str(settings.output_dir)])
 
     print(f"html_text_checkpoint={checkpoint.path}", flush=True)

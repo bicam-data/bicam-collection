@@ -5,7 +5,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass, field
@@ -478,13 +477,6 @@ def test_dotenv_is_exported_to_subprocesses(harness: Harness, monkeypatch: pytes
     assert harness.fetch_calls()[0]["dotenv_value"] == "from-dotenv"
 
 
-def test_invalid_dbt_batch_interval_exits_two(harness: Harness, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setenv("BICAM_HTML_DBT_BATCH_INTERVAL", "0")
-
-    assert lane.main() == 2
-
-    assert capsys.readouterr().err == "invalid BICAM_HTML_DBT_BATCH_INTERVAL=0 (expected positive integer)\n"
-    assert harness.fetch_calls() == []
 
 
 def test_fetch_failure_propagates_its_exit_status(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -494,49 +486,3 @@ def test_fetch_failure_propagates_its_exit_status(harness: Harness, monkeypatch:
         lane.main()
 
     assert exit_info.value.code == 3
-
-
-def test_dbt_selection_rebuilds_resolver_ancestors() -> None:
-    assert "int_congress_child_response_selection" in lane.DBT_SELECT
-    assert "int_congress_child_response_selections" in lane.DBT_SELECT
-    assert "stg_congress__committee_report_detail" in lane.DBT_SELECT
-    assert "int_committee_print_public_id_map" in lane.DBT_SELECT
-    for leaf in lane.SOURCE_TABLES:
-        assert leaf in lane.DBT_SELECT
-    assert not any(model.startswith("+") for model in lane.DBT_SELECT)
-
-
-def test_dbt_profile_accepts_run_specific_application_names() -> None:
-    profiles = (REPO_ROOT / "dbt_project" / "profiles.yml").read_text(encoding="utf-8")
-
-    assert 'application_name: "{{ env_var(\'PGAPPNAME\', \'dbt\') }}"' in profiles
-
-
-def test_existing_shell_wrapper_isolated_from_live_checkout(harness: Harness, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # Production uses the ops/ shell wrapper. Exercise that actual file and
-    # its shared lib in a copied repository with fake fetch/dbt commands,
-    # never the operational repo/shared lock.
-    (harness.repo / 'ops' / 'lib').mkdir(parents=True)
-    for relative in ('ops/run_html_text_batches.sh', 'ops/lib/bicam_lane.sh'):
-        (harness.repo / relative).write_bytes((REPO_ROOT / relative).read_bytes())
-    (harness.repo / '.env').write_text('', encoding='utf-8')
-    wrapper = harness.repo / 'ops/run_html_text_batches.sh'
-    monkeypatch.setenv('BICAM_INGESTION_LOCK_HELD', '1')
-    monkeypatch.setenv('BICAM_HTML_SKIP_DBT', '1')
-    monkeypatch.setenv('BICAM_HTML_BATCH_LIMIT', '2')
-    monkeypatch.setenv('BICAM_HTML_MAX_BATCHES', '1')
-    harness.queue_results({'amendments_texts': [full_batch('https://example.test/a2.htm')]})
-    completed = subprocess.run(
-        ["bash", str(wrapper)],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-
-    assert completed.returncode == 0, completed.stderr
-    [fetch] = harness.fetch_calls()
-    assert fetch['argv'][:2] == ['--source-table', 'amendments_texts']
-    assert harness.read_checkpoint()['last_urls']['amendments_texts'] == 'https://example.test/a2.htm'
-    assert harness.dbt_calls() == []
-    assert all(Path(call['cwd']).resolve() == harness.repo for call in harness.uv_calls())

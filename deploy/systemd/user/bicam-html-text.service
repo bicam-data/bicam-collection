@@ -5,28 +5,19 @@ After=docker.service
 [Service]
 Type=oneshot
 WorkingDirectory=%h/bicam/bicam-collection
-ExecStart=%h/bicam/bicam-collection/ops/run_html_text_batches.sh
+ExecStart=%h/bicam/bicam-collection/.venv/bin/python scripts/run_html_text_lane.py
 Environment=BICAM_HTML_BATCH_LIMIT=250
-# Two bounded rounds keep the fair queue moving after an exhausted table;
-# with source-specific pacing this keeps each shared-lock hold below roughly
-# ten minutes while retaining one dbt propagation per cycle.
-# The wrapper skips exhausted tables and carries each cursor forward.
 Environment=BICAM_HTML_MAX_BATCHES=2
 Environment=BICAM_HTML_CONCURRENCY=12
-# Keep the aggregate HTML request pace below the observed Congress.gov 429
-# threshold; concurrency remains 12 for response processing.
+# Below the observed Congress.gov 429 threshold.
 Environment=BICAM_HTML_REQUEST_INTERVAL=0.5
-# Congress HTML has a stricter unauthenticated limiter than GovInfo's
-# authenticated rendition endpoint. Keep one shared Congress pace across both
-# congress.gov hostnames, while allowing the rotated GovInfo keys to progress.
+# Congress.gov's unauthenticated HTML limiter is stricter than GovInfo's.
 Environment=BICAM_HTML_CONGRESS_REQUEST_INTERVAL=1.0
 Environment=BICAM_HTML_GOVINFO_REQUEST_INTERVAL=0.25
 Environment=BICAM_HTML_REFRESH_DAYS=30
 Environment=BICAM_HTML_RETRY_FAILED_DAYS=1
 Environment=BICAM_HTML_REQUEST_TIMEOUT=12
-# Let a normal Congress/GovInfo materialization finish before abandoning a
-# ten-minute extraction tick. The wrapper's 15-minute bound is still finite;
-# it avoids repeatedly losing the entire batch to the shared ingestion lock.
+# How long dbt propagation waits for the shared lock before deferring.
 Environment=BICAM_HTML_LOCK_TIMEOUT_SECONDS=900
 MemoryMax=1G
 TasksMax=256

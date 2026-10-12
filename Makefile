@@ -128,7 +128,7 @@ release-check:
 	$(TOOLS_RUN) crawler uv run python scripts/check_release_freshness.py $(ARGS)
 
 html-text:
-	./scripts/run_html_text_batches.sh
+	uv run python scripts/run_html_text_lane.py
 
 html-text-progress:
 	uv run python scripts/report_html_text_progress.py $(ARGS)
