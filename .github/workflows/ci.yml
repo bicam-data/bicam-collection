@@ -5,6 +5,103 @@ on:
   pull_request:
 
 jobs:
+  raw-product-frozen-replay:
+    runs-on: ubuntu-latest
+    env:
+      BICAM_TEST_DATABASE_URL: postgresql://replay:test-password@127.0.0.1:5432/bicam_replay_raw_first
+      BICAM_SECOND_TEST_DATABASE_URL: postgresql://replay:test-password@127.0.0.1:5432/bicam_replay_raw_second
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: bicam_replay_raw_first
+          POSTGRES_USER: replay
+          POSTGRES_PASSWORD: test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --memory=512m --cpus=2
+          --health-cmd "pg_isready -U replay -d bicam_replay_raw_first"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bicam-collection
+      - uses: actions/checkout@v4
+        with:
+          repository: ryandelano/rotisserie
+          path: rotisserie
+          ref: 6666ed90affaf9dbe5036dc3bfeb2cd529c4ba80
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+        working-directory: bicam-collection
+      - name: Create second empty disposable database
+        working-directory: bicam-collection
+        run: |
+          uv run python - <<'PY'
+          import os
+          import psycopg
+          from scripts.replay_bill_version_slice import validate_test_url
+          validate_test_url(os.environ["BICAM_TEST_DATABASE_URL"])
+          with psycopg.connect(os.environ["BICAM_TEST_DATABASE_URL"], autocommit=True) as conn:
+              conn.execute("create database bicam_replay_raw_second")
+          PY
+      - name: Rebuild all public relations independently from raw fixtures
+        working-directory: bicam-collection
+        run: uv run python scripts/replay_raw_research_product.py --output-dir "$RUNNER_TEMP/bicam-raw-replay"
+      - name: Verify generation binding and tamper rejection
+        working-directory: bicam-collection
+        run: |
+          uv run python scripts/verify_replay_generation.py "$RUNNER_TEMP/bicam-raw-replay/build-1"
+          uv run python scripts/verify_replay_generation.py "$RUNNER_TEMP/bicam-raw-replay/build-2"
+          BICAM_REPLAY_BUILD_DIR="$RUNNER_TEMP/bicam-raw-replay/build-1" uv run pytest -q tests/test_verify_generation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: raw-product-frozen-replay
+          path: ${{ runner.temp }}/bicam-raw-replay
+          if-no-files-found: warn
+  bill-version-frozen-replay:
+    runs-on: ubuntu-latest
+    env:
+      BICAM_TEST_DATABASE_URL: postgresql://replay:test-password@127.0.0.1:5432/bicam_replay_ci
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: bicam_replay_ci
+          POSTGRES_USER: replay
+          POSTGRES_PASSWORD: test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --memory=256m --cpus=1
+          --health-cmd "pg_isready -U replay -d bicam_replay_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bicam-collection
+      - uses: actions/checkout@v4
+        with:
+          repository: ryandelano/rotisserie
+          path: rotisserie
+          ref: 6666ed90affaf9dbe5036dc3bfeb2cd529c4ba80
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+        working-directory: bicam-collection
+      - name: Replay actual bill-version SQL twice on frozen boundary inputs
+        working-directory: bicam-collection
+        run: uv run python scripts/replay_bill_version_slice.py --output-dir "$RUNNER_TEMP/bicam-version-replay"
+      - name: Verify source identity and cached-text publication guards
+        working-directory: bicam-collection
+        run: BICAM_RUN_VERSION_REPLAY=1 uv run pytest -q tests/test_bill_text_identity.py tests/test_bill_target_inventory.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bill-version-frozen-replay
+          path: ${{ runner.temp }}/bicam-version-replay
+          if-no-files-found: warn
   unit-and-dbt-build:
     runs-on: ubuntu-latest
     env:
