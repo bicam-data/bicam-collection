@@ -41,7 +41,7 @@ Enabled timers:
 | `bicam-govinfo-cursor-continuation` | every 6 h | GovInfo incremental date windows (`ops/run_govinfo_incremental_windows.sh`) |
 | `bicam-govinfo-cdir-descendant-refresh` | 4× daily | GovInfo Congressional Directory descendants |
 | `bicam-govinfo-supplemental-refresh` | daily 03:15 UTC | GovInfo CDIR and treaty-document refresh |
-| `bicam-html-text` | every 10 min | Bounded, resumable HTML text extraction |
+| `bicam-html-text` | every 10 min | Bounded, resumable HTML text extraction (`scripts/run_html_text_lane.py`) |
 | `bicam-fetch-lineage-backfill` | every 15 min | Repairs legacy fetch-lineage rows in batches |
 | `bicam-ingestion-report` | every 6 h | Writes `reports/ingestion-status-latest.md` |
 | `bicam-ingestion-audit` | every 6 h | Read-only ingestion/reconciliation audit |
@@ -65,8 +65,9 @@ To install or update the units from this repo, see
 **Cutover pending.** The installed units still run the pre-move copies in
 `~/bicam/scripts/` and `scripts/run_html_text_batches.sh`, which reach the
 database through `docker exec`. Once `psql` is installed, install the units
-from this repo; after one clean 6-hour cycle, delete `~/bicam/scripts/` and
-`scripts/run_html_text_batches.sh`.
+from this repo (that also moves html-text onto the Python lane and removes the
+retired backfill units); after one clean 6-hour cycle, delete `~/bicam/scripts/`
+and `scripts/run_html_text_batches.sh`.
 
 ## The reports directory
 
