@@ -2,6 +2,7 @@
 set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
+bicam_load_project_env
 
 # Recurring guard for a coordinated Congress.gov outage. It is intentionally
 # conservative: ordinary isolated failures must not pause a healthy crawl.
@@ -39,7 +40,7 @@ write_state() {
 # by the explicit source-500 retry stage, but must not be mistaken for a
 # coordinated outage that stops every healthy descendant lane.
 read -r total failures_503 failures_429 fetched last_429_epoch <<EOF
-$(docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F ' ' -c \
+$(bicam_psql -At -F ' ' -c \
   "select count(*) filter (where outcome = 'failed' and http_status is distinct from 500),
           count(*) filter (where outcome = 'failed' and http_status = 503),
           count(*) filter (where outcome = 'failed' and http_status = 429),

@@ -2,6 +2,7 @@
 set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
+bicam_load_project_env
 
 log_file="$reports_root/reconciliation-probe.log"
 
@@ -14,7 +15,7 @@ echo "reconciliation_probe_followup_started"
 # OnSuccess is ordered after the supervisor process exits, but keep this
 # guard because a crawler worker may still be finishing its database cleanup.
 while :; do
-  active_runs=$(docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+  active_runs=$(bicam_psql -At -c \
     "select count(*) from crawl_runs where status = 'running';" 2>/dev/null || echo 1)
   supervisor_state=$(systemctl --user is-active bicam-ingestion-supervisor.service 2>/dev/null || true)
   if [ "$active_runs" = "0" ] \
@@ -27,8 +28,6 @@ while :; do
 done
 
 cd "$project_root" || exit 1
-bicam_load_project_env
-bicam_prefer_container_db_password
 
 probe_attempt=0
 while [ "$probe_attempt" -lt 3 ]; do
@@ -39,7 +38,7 @@ while [ "$probe_attempt" -lt 3 ]; do
     --concurrency 1 \
     --request-interval 2.0 \
     --key-wait-timeout 3600 || true
-  open_count=$(docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+  open_count=$(bicam_psql -At -c \
     "select count(*) from fct_reconciliation_exceptions where entity='bill' and exception_status='open';" \
     2>/dev/null || echo 1)
   echo "open_bill_exceptions=$open_count"

@@ -28,7 +28,6 @@ fi
 
 cd "$project_root" || exit 1
 bicam_load_project_env
-bicam_prefer_container_db_password
 export DBT_PROFILES_DIR="$project_root/dbt_project"
 export BICAM_CONGRESS_GLOBAL_RATE_LIMIT="${BICAM_SUPPLEMENTAL_GLOBAL_RATE_LIMIT:-18000}"
 export BICAM_CONGRESS_PER_KEY_RATE_LIMIT="${BICAM_SUPPLEMENTAL_PER_KEY_RATE_LIMIT:-20000}"

@@ -2,6 +2,7 @@
 set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
+bicam_load_project_env
 
 lock_path="/run/user/$(id -u)/bicam-ingestion.lock"
 log_path="$reports_root/post-crawl-supervisor.log"
@@ -17,14 +18,14 @@ mkdir -p "$reports_root"
 # rows when no crawler process exists; active workers are never touched.  The
 # age bound protects a process that is between child launches.
 if ! pgrep -f '[b]ackfill_congress_root_details.py|[r]un_congress_history.py|[r]un_congress_descendant_refresh.py|[r]un_multi_crawl.py' >/dev/null 2>&1; then
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+  bicam_psql -At -c \
     "update crawl_runs set status='abandoned', finished_at=now() where status='running' and started_at < now() - interval '15 minutes';" \
     >/dev/null 2>&1 || true
 fi
 # A retry process can disappear before it records its first fetch while a
 # separate historical worker remains healthy.  Reclaim only zero-event rows in
 # that case; active runs with recorded telemetry are never touched.
-docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+bicam_psql -At -c \
   "update crawl_runs as runs set status='abandoned', finished_at=now()
    where runs.status='running'
      and runs.started_at < now() - interval '15 minutes'

@@ -5,7 +5,7 @@ After=bicam-ingestion-supervisor.service
 [Service]
 Type=simple
 WorkingDirectory=%h/bicam/bicam-collection
-ExecStart=%h/bicam/bicam-collection/scripts/run_bicam_amendment_lane.sh
+ExecStart=%h/bicam/bicam-collection/ops/run_bicam_amendment_lane.sh
 KillMode=control-group
 Restart=no
 Environment=PYTHONUNBUFFERED=1

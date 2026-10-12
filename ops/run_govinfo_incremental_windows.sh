@@ -53,7 +53,6 @@ cd "$project_root" || exit 1
 # post-window reconciliation step uses the same database credentials as the
 # crawler and the other ingestion services.
 bicam_load_project_env
-bicam_prefer_container_db_password
 export DBT_PROFILES_DIR="$project_root/dbt_project"
 
 dbt_app_name="bicam-govinfo-dbt-$(date -u '+%Y%m%dT%H%M%SZ')-$$"
@@ -61,10 +60,8 @@ cancel_dbt_backends() {
   local app_name="$1"
   local cancel_attempt
   for cancel_attempt in 1 2; do
-    docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At \
-      -v app_name="$app_name" \
-      -c "select pg_cancel_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" \
-      >/dev/null 2>&1 || true
+    bicam_psql -At -v app_name="$app_name" \
+      <<< "select pg_cancel_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
     if (( cancel_attempt == 1 )); then
       sleep 2
     fi
@@ -72,10 +69,8 @@ cancel_dbt_backends() {
   # A backend in uninterruptible I/O can ignore cancellation long enough to
   # outlive the client. It is safe to terminate only this run's exact,
   # already-abandoned application name; never use a broad PID or dbt match.
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At \
-    -v app_name="$app_name" \
-    -c "select pg_terminate_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" \
-    >/dev/null 2>&1 || true
+  bicam_psql -At -v app_name="$app_name" \
+    <<< "select pg_terminate_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
 }
 
 cleanup_dbt_backends() {
@@ -328,7 +323,7 @@ echo "Reconciliation targeted-test status: ${reconciliation_test_status}"
   echo
   echo '| Category | Completed through | Latest status | List pages | Fetch events | Failed events |'
   echo '|---|---|---|---:|---:|---:|'
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c \
+  bicam_psql -At -F '|' -c \
     "with latest as (
        select distinct on (category)
               category, window_end, status, list_pages, fetch_events, failed_events

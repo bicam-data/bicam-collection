@@ -54,7 +54,6 @@ fi
 
 cd "$project_root" || exit 1
 bicam_load_project_env
-bicam_prefer_container_db_password
 
 started_at=$(date -u '+%Y-%m-%d %H:%M:%S%z')
 started_epoch=$(date +%s)

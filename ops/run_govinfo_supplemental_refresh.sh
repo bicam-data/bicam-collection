@@ -21,7 +21,6 @@ fi
 
 cd "$project_root" || exit 1
 bicam_load_project_env
-bicam_prefer_container_db_password
 export DBT_PROFILES_DIR="$project_root/dbt_project"
 
 started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -119,7 +118,7 @@ checkpoint_path="$report_root/govinfo-supplemental-checkpoint-${checkpoint_times
   echo
   echo '| Public table | Rows |'
   echo '|---|---:|'
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c \
+  bicam_psql -At -F '|' -c \
      "select 'congresses_directories', count(*) from bicam.congresses_directories
      union all select 'members_metadata', count(*) from bicam.members_metadata
      union all select 'members_terms', count(*) from bicam.members_terms

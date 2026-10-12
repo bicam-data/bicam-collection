@@ -5,7 +5,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
 
 cd "$project_root" || exit 1
 bicam_load_project_env
-bicam_prefer_container_db_password
 # This lane has an independent client process. Keep its budget explicit and
 # bounded when it runs outside the main supervisor; the live API applies its
 # rolling window per credential.

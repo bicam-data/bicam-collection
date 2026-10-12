@@ -5,7 +5,7 @@ After=docker.service
 [Service]
 Type=oneshot
 WorkingDirectory=%h/bicam/bicam-collection
-ExecStart=%h/bicam/bicam-collection/scripts/run_html_text_batches.sh
+ExecStart=%h/bicam/bicam-collection/ops/run_html_text_batches.sh
 Environment=BICAM_HTML_BATCH_LIMIT=250
 # Two bounded rounds keep the fair queue moving after an exhausted table;
 # with source-specific pacing this keeps each shared-lock hold below roughly

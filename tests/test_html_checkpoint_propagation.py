@@ -8,7 +8,7 @@ import stat
 import subprocess
 import sys
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -100,13 +100,6 @@ status_file = calls_dir / f"dbt_{subcommand}_status"
 sys.exit(int(status_file.read_text()) if status_file.exists() else 0)
 """
 
-FAKE_DOCKER = """
-import json, os, sys
-from pathlib import Path
-Path(os.environ["FAKE_CALLS_DIR"], "docker_calls.jsonl").open("a").write(json.dumps(sys.argv[1:]) + "\\n")
-"""
-
-
 def _install_script(path: Path, body: str) -> None:
     path.write_text(f"#!{sys.executable}\n{textwrap.dedent(body)}", encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -118,6 +111,8 @@ class Harness:
     report_dir: Path
     calls_dir: Path
     lock_path: Path
+    # (statement, app_name) for every backend cancel/terminate sent to Postgres.
+    backend_statements: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def checkpoint_path(self) -> Path:
@@ -148,8 +143,8 @@ class Harness:
     def dbt_calls(self) -> list[dict]:
         return [call for call in self.uv_calls() if call["argv"][:2] == ["run", "dbt"]]
 
-    def docker_calls(self) -> list[list[str]]:
-        return self._calls("docker_calls.jsonl")
+    def backend_app_names(self) -> list[str]:
+        return [app_name for _, app_name in self.backend_statements]
 
     def run_log(self) -> list[str]:
         return (self.report_dir / "run.log").read_text(encoding="utf-8").splitlines()
@@ -167,8 +162,20 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
     _install_script(repo / "scripts" / "fetch_html_text.py", FAKE_FETCH)
     _install_script(repo / "scripts" / "report_html_text_progress.py", FAKE_REPORT)
     _install_script(shims / "uv", FAKE_UV)
-    _install_script(shims / "docker", FAKE_DOCKER)
     harness = Harness(repo=repo, report_dir=tmp_path / "reports", calls_dir=calls_dir, lock_path=lock_path)
+
+    class FakeConnection:
+        def __enter__(self) -> FakeConnection:
+            return self
+
+        def __exit__(self, *exc_info: object) -> None:
+            return None
+
+        def execute(self, statement: str, params: dict[str, str]) -> None:
+            harness.backend_statements.append((statement, params["app_name"]))
+
+    monkeypatch.setattr(lane.psycopg, "connect", lambda *args, **kwargs: FakeConnection())
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake@localhost/fake")
     harness.queue_results({})
 
     for name in LANE_VARIABLES:
@@ -308,10 +315,10 @@ def test_propagation_runs_at_the_batch_interval(harness: Harness, monkeypatch: p
     assert "html_dbt_run_status=0" in out
     assert "html_dbt_test_status=0" in out
     # The exit-time sweep cancels only this run's application name.
-    assert [call[-1].split("from")[0].strip() for call in harness.docker_calls()] == [
+    assert [statement.split("from")[0].strip() for statement, _ in harness.backend_statements] == [
         "select pg_cancel_backend(pid)", "select pg_cancel_backend(pid)", "select pg_terminate_backend(pid)",
     ]
-    assert {call[call.index("-v") + 1] for call in harness.docker_calls()} == {f"app_name={run_call['PGAPPNAME']}"}
+    assert set(harness.backend_app_names()) == {run_call["PGAPPNAME"]}
 
 
 def test_propagation_runs_at_the_cycle_boundary(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -369,7 +376,7 @@ def test_dbt_failure_keeps_pending_and_zeroes_the_counter(harness: Harness, monk
     assert checkpoint["dbt_batches_since_last"] == 0
     assert checkpoint["last_urls"]["amendments_texts"] == "https://a/2"
     # Explicit cancellation on failure plus the exit-time sweep.
-    assert len(harness.docker_calls()) == 6
+    assert len(harness.backend_statements) == 6
 
 
 def test_dbt_test_failure_cancels_the_test_backends(harness: Harness, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -385,9 +392,9 @@ def test_dbt_test_failure_cancels_the_test_backends(harness: Harness, monkeypatc
     assert "html_dbt_run_status=0" in out
     assert "html_dbt_test_status=1" in out
     assert "html_dbt_pending=1 reason=propagation_failed" in out
-    app_names = [call[call.index("-v") + 1] for call in harness.docker_calls()]
-    assert app_names[:3] == [f"app_name={test_call['PGAPPNAME']}"] * 3
-    assert app_names[3:] == [f"app_name={run_call['PGAPPNAME']}"] * 3
+    app_names = harness.backend_app_names()
+    assert app_names[:3] == [test_call["PGAPPNAME"]] * 3
+    assert app_names[3:] == [run_call["PGAPPNAME"]] * 3
     assert harness.read_checkpoint()["pending_dbt"] == 1
 
 
@@ -442,7 +449,7 @@ def test_lock_busy_defers_propagation_but_still_fetches(harness: Harness, monkey
     checkpoint = harness.read_checkpoint()
     assert checkpoint["pending_dbt"] == 1
     assert checkpoint["dbt_batches_since_last"] == 1
-    assert harness.docker_calls() == []
+    assert harness.backend_statements == []
 
 
 def test_lock_held_marker_skips_acquisition(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -506,11 +513,14 @@ def test_dbt_profile_accepts_run_specific_application_names() -> None:
 
 
 def test_existing_shell_wrapper_isolated_from_live_checkout(harness: Harness, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # Production still uses the legacy shell wrapper. Exercise that actual
-    # file in a copied repository with fake fetch/dbt/docker commands, not a
-    # hypothetical Python shim and never the operational repo/shared lock.
-    wrapper = harness.repo / 'scripts/run_html_text_batches.sh'
-    wrapper.write_bytes((REPO_ROOT / 'scripts/run_html_text_batches.sh').read_bytes())
+    # Production uses the ops/ shell wrapper. Exercise that actual file and
+    # its shared lib in a copied repository with fake fetch/dbt commands,
+    # never the operational repo/shared lock.
+    (harness.repo / 'ops' / 'lib').mkdir(parents=True)
+    for relative in ('ops/run_html_text_batches.sh', 'ops/lib/bicam_lane.sh'):
+        (harness.repo / relative).write_bytes((REPO_ROOT / relative).read_bytes())
+    (harness.repo / '.env').write_text('', encoding='utf-8')
+    wrapper = harness.repo / 'ops/run_html_text_batches.sh'
     monkeypatch.setenv('BICAM_INGESTION_LOCK_HELD', '1')
     monkeypatch.setenv('BICAM_HTML_SKIP_DBT', '1')
     monkeypatch.setenv('BICAM_HTML_BATCH_LIMIT', '2')

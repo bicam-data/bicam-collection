@@ -2,6 +2,7 @@
 set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
+bicam_load_project_env
 
 supervisor_pid=${1:?supervisor PID is required}
 log_file=${2:-/tmp/bicam-post-crawl-reconcile-v5.log}
@@ -78,14 +79,14 @@ while :; do
   # crawl_run status is finalized. Reclaim only stale rows when no executable
   # crawler path exists; fresh rows remain protected during child launch.
   if ! pgrep -f '/(backfill_congress_root_details|run_congress_history|run_congress_descendant_refresh|run_multi_crawl|run_root_gap_repair)[.]py' >/dev/null 2>&1; then
-    docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+    bicam_psql -At -c \
       "update crawl_runs set status='abandoned', finished_at=now()
          where status='running'
            and started_at < now() - interval '15 minutes'
            and not (category='amendments' and mode='backfill_refresh_descendants');" \
       >/dev/null 2>&1 || true
   fi
-  active_runs=$(docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+  active_runs=$(bicam_psql -At -c \
     "select count(*)
        from crawl_runs
       where status = 'running'
@@ -107,8 +108,6 @@ if cooldown_active; then
 fi
 
 cd "$project_root" || exit 1
-bicam_load_project_env
-bicam_prefer_container_db_password
 # The live API headers and controlled per-token probe show a 20,000-request
 # counter on each of the 17 configured credentials. That proves only the
 # observed token-level counters; it does not prove that the credentials have
@@ -509,7 +508,7 @@ recovery_request_interval=${BICAM_RECOVERY_REQUEST_INTERVAL:-1.5}
   # Once transient retries have populated the missing page, replay only the
   # affected Congress partitions in backfill mode so stored pagination and
   # child links are walked forward without replaying the whole history.
-  affected_congresses=$(docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c "
+  affected_congresses=$(bicam_psql -At -c "
     select distinct substring(fetches.endpoint_url from '/bill/([0-9]+)')::int
     from crawl_run_fetches as fetches
     join crawl_runs as runs on runs.id = fetches.crawl_run_id
@@ -542,7 +541,7 @@ recovery_request_interval=${BICAM_RECOVERY_REQUEST_INTERVAL:-1.5}
       --request-interval "$recovery_request_interval" \
       --active-key-budget "$recovery_active_key_budget" || true
   done
-  affected_amendment_congresses=$(docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c "
+  affected_amendment_congresses=$(bicam_psql -At -c "
     select distinct substring(fetches.endpoint_url from '/amendment/([0-9]+)')::int
     from crawl_run_fetches as fetches
     join crawl_runs as runs on runs.id = fetches.crawl_run_id
@@ -623,7 +622,7 @@ recovery_request_interval=${BICAM_RECOVERY_REQUEST_INTERVAL:-1.5}
   fi
   echo "post_retry_dbt_test_rc=$post_retry_test_rc"
   echo "unresolved_failures"
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F $'\t' -c "
+  bicam_psql -At -F $'\t' -c "
     with latest as (
       select distinct on (endpoint_url, node_type)
         endpoint_url, node_type, http_status, fetched_at
@@ -641,14 +640,14 @@ recovery_request_interval=${BICAM_RECOVERY_REQUEST_INTERVAL:-1.5}
     order by http_status;
   "
   echo "table_counts"
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F $'\t' -c "
+  bicam_psql -At -F $'\t' -c "
     select 'fct_bill_matches', count(*) from fct_bill_matches
     union all select 'fct_committee_report_matches', count(*) from fct_committee_report_matches
     union all select 'fct_reconciliation_metrics', count(*) from fct_reconciliation_metrics
     union all select 'fct_collection_coverage', count(*) from fct_collection_coverage;
   "
   echo "metrics"
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -c "
+  bicam_psql -c "
     select entity, authoritative_source, candidate_count, accepted_count,
       ambiguous_count, unmatched_count, quality_status
     from fct_reconciliation_metrics

@@ -10,26 +10,24 @@
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 reports_root="${BICAM_REPORTS_DIR:-$(dirname "$project_root")/reports}"
 
-# The crawler reads the project dotenv itself; dbt and psql do not.  Callers
-# cd into bicam-collection first.  The path is deliberately relative so a
-# wrapper that forgot to cd fails here instead of against the wrong database.
+# The crawler reads the project dotenv itself; dbt and psql do not.
 bicam_load_project_env() {
   set -a
-  . ./.env
+  . "$project_root/.env"
   set +a
 }
 
-# The database container can outlive the .env that created it.  Prefer its
-# live credential so a successful crawl is not followed by a dbt/psql
-# authentication failure.
-bicam_prefer_container_db_password() {
-  if [ -z "${BICAM_DB_PASSWORD_OVERRIDE:-}" ]; then
-    BICAM_DB_PASSWORD_OVERRIDE="$(docker inspect bicam-collection-postgres -f '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '$1=="POSTGRES_PASSWORD"{print substr($0,index($0,"=")+1)}')"
-    export BICAM_DB_PASSWORD_OVERRIDE
-  fi
-  if [ -n "${BICAM_DB_PASSWORD_OVERRIDE:-}" ]; then
-    export DB_PASSWORD="$BICAM_DB_PASSWORD_OVERRIDE"
-  fi
+# Host psql against the same database the crawler and dbt use.  The DB_*
+# defaults match config.py and profiles.yml (the compose port forward), so a
+# local Docker database and an external server are both configured purely
+# through .env.  Requires bicam_load_project_env first.
+bicam_psql() {
+  PGHOST="${DB_HOST:-localhost}" \
+  PGPORT="${DB_PORT:-5433}" \
+  PGUSER="${DB_USER:-admin}" \
+  PGPASSWORD="${DB_PASSWORD:-}" \
+  PGDATABASE="${DB_NAME:-bicam_collection}" \
+    psql "$@"
 }
 
 # Re-run the calling wrapper with the shared ingestion lock held on fd 9.
@@ -134,7 +132,5 @@ bicam_worker_alive() {
 
 bicam_db_count() {
   local sql="$1"
-  docker exec -e PGPASSWORD="${DB_PASSWORD:-}" bicam-collection-postgres \
-    psql -U "${DB_USER:-admin}" -d "${DB_NAME:-bicam_collection}" -At -c "$sql" 2>/dev/null \
-    | tr -d '[:space:]'
+  bicam_psql -At -c "$sql" 2>/dev/null | tr -d '[:space:]'
 }

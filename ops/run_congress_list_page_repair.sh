@@ -9,7 +9,6 @@ lock_file=/run/user/1000/bicam-ingestion.lock
 mkdir -p "$reports_root"
 cd "$project_root" || exit 1
 bicam_load_project_env
-bicam_prefer_container_db_password
 
 # Serialize with the main supervisor and its post-crawl/dbt phase.  The
 # blocking flock is intentional: this service may start at boot while a
@@ -31,7 +30,7 @@ fi
 # crawl runs finish and use its complementary 16k/h budget. Waiting for the
 # reserve as well would leave the source quota idle without improving safety.
 while :; do
-  active_runs=$(docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+  active_runs=$(bicam_psql -At -c \
     "select count(*)
        from crawl_runs
       where status = 'running'

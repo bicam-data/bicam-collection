@@ -18,7 +18,7 @@ if [[ "${BICAM_INGESTION_LOCK_HELD:-0}" != "1" ]]; then
   exit 0
 fi
 
-active_runs=$(docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+active_runs=$(bicam_psql -At -c \
   "select count(*) from crawl_runs where status = 'running';" 2>/dev/null || echo 1)
 if [ "$active_runs" != "0" ]; then
   echo "[retry-window] skipped: active crawl_runs=$active_runs"

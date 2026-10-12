@@ -37,7 +37,6 @@ fi
 
 cd "$project_root" || exit 1
 bicam_load_project_env
-bicam_prefer_container_db_password
 
 # Keep this discovery lane below the deployment's observed aggregate pressure
 # boundary. The shared file lock makes it mutually exclusive with historical

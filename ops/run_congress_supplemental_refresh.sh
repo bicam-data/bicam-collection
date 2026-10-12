@@ -26,7 +26,6 @@ fi
 
 cd "$project_root" || exit 1
 bicam_load_project_env
-bicam_prefer_container_db_password
 export DBT_PROFILES_DIR="$project_root/dbt_project"
 export BICAM_CONGRESS_GLOBAL_RATE_LIMIT="${BICAM_SUPPLEMENTAL_GLOBAL_RATE_LIMIT:-18000}"
 export BICAM_CONGRESS_PER_KEY_RATE_LIMIT="${BICAM_SUPPLEMENTAL_PER_KEY_RATE_LIMIT:-20000}"
@@ -36,10 +35,8 @@ export BICAM_CONGRESS_PER_KEY_RATE_LIMIT="${BICAM_SUPPLEMENTAL_PER_KEY_RATE_LIMI
 dbt_app_name="bicam-supplemental-dbt-${stamp}"
 cancel_dbt_backends() {
   local app_name="$1"
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At \
-    -v app_name="$app_name" \
-    -c "select pg_cancel_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" \
-    >/dev/null 2>&1 || true
+  bicam_psql -At -v app_name="$app_name" \
+    <<< "select pg_cancel_backend(pid) from pg_stat_activity where application_name = :'app_name' and pid <> pg_backend_pid();" >/dev/null 2>&1 || true
 }
 
 # Keep the scheduled lane conservative by default, while allowing an

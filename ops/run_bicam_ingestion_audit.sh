@@ -2,6 +2,7 @@
 set -u
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/bicam_lane.sh"
+bicam_load_project_env
 
 report_dir="$reports_root"
 history_dir="$report_dir/audits"
@@ -29,10 +30,10 @@ trap 'rm -f "$temporary"' EXIT
 {
   date -u
   echo "crawl_run_status"
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -c \
+  bicam_psql -At -c \
     "select status, count(*) from crawl_runs group by status order by status;"
   echo "govinfo_incremental_window_frontier"
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c \
+  bicam_psql -At -F '|' -c \
     "with completed as (
        select category, max(window_end) as completed_through
          from govinfo_collection_windows
@@ -56,7 +57,7 @@ trap 'rm -f "$temporary"' EXIT
        from latest left join completed using(category)
       order by latest.category;"
   echo "govinfo_incomplete_windows"
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c \
+  bicam_psql -At -F '|' -c \
     "select category, window_start, window_end, status,
             coalesce(failed_events,0), coalesce(error_message,'')
        from govinfo_collection_windows
@@ -70,7 +71,7 @@ trap 'rm -f "$temporary"' EXIT
   # current URLs are canonicalized lexically.  Compare an order-insensitive
   # URL key so a successful fetch is not reported as unresolved merely because
   # ``offset,limit,format`` and ``format,limit,offset`` were stored differently.
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c \
+  bicam_psql -At -F '|' -c \
     "with latest_failures as (
        select distinct on (f.category, f.endpoint_url, f.node_type)
               f.category, f.http_status, f.endpoint_url, f.node_type, f.failed_at,
@@ -137,7 +138,7 @@ trap 'rm -f "$temporary"' EXIT
       group by f.category, f.http_status
       order by f.category, f.http_status;"
   echo "known_source_500_failures"
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c \
+  bicam_psql -At -F '|' -c \
     "with latest_failures as (
        select distinct on (f.category, f.endpoint_url, f.node_type)
               f.category, f.http_status, f.endpoint_url, f.node_type, f.failed_at,
@@ -205,7 +206,7 @@ trap 'rm -f "$temporary"' EXIT
   # Keep uncrawled partitions distinct from source-empty partitions.  A left
   # join with only an item count treats both cases as zero and previously made
   # an active backfill look like a source-availability gap.
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c \
+  bicam_psql -At -F '|' -c \
     "with roots(category, node_type, item_key, path) as (
        values
          ('amendments','amendment_list','amendments','amendment'),
@@ -247,7 +248,7 @@ trap 'rm -f "$temporary"' EXIT
   # A root is source-empty only when at least one current response exists and
   # every observed response contains zero items.  This is evidence about the
   # upstream API, not permission to silently shrink the declared 1-119 scope.
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c \
+  bicam_psql -At -F '|' -c \
     "with roots(category, node_type, item_key, path) as (
        values
          ('amendments','amendment_list','amendments','amendment'),

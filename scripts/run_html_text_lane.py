@@ -9,6 +9,7 @@ propagation touches the shared intermediate tables and takes the lock.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import os
@@ -22,9 +23,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any
 
+import psycopg
+
+from bicam_collection import config
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = Path(f"/run/user/{os.getuid()}/bicam-ingestion.lock")
-POSTGRES_CONTAINER = "bicam-collection-postgres"
 
 # Rotate one public text table per batch.  A single lexical cursor could spend
 # days in the hearing URL range before reaching bills, amendments, or GovInfo
@@ -287,33 +291,27 @@ def cancel_dbt_backends(app_name: str) -> None:
     # A client-side timeout can leave a PostgreSQL backend alive until TCP
     # keepalive notices the disconnect.  Cancel only this checkpoint's unique
     # application name; never touch another ingestion lane.
-    def psql(statement: str) -> None:
-        subprocess.run(
-            [
-                "docker", "exec", POSTGRES_CONTAINER,
-                "psql", "-U", "admin", "-d", "bicam_collection", "-At",
-                "-v", f"app_name={app_name}",
-                "-c", statement,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    database_url = config.Settings.from_env(REPO_ROOT).database_url
+
+    def run_statement(statement: str) -> None:
+        with contextlib.suppress(psycopg.Error), psycopg.connect(database_url, autocommit=True) as connection:
+            connection.execute(statement, {"app_name": app_name})
 
     # The first cancellation can race the client-side timeout while its
     # connection is still unwinding.  A short second pass catches that backend
     # without broad termination or touching another run.
     for cancel_attempt in (1, 2):
-        psql(
+        run_statement(
             "select pg_cancel_backend(pid) from pg_stat_activity"
-            " where application_name = :'app_name' and pid <> pg_backend_pid();"
+            " where application_name = %(app_name)s and pid <> pg_backend_pid()"
         )
         if cancel_attempt == 1:
             time.sleep(2)
     # A backend in uninterruptible I/O can survive cancellation after the
     # client has exited.  Terminate only this exact abandoned application name.
-    psql(
+    run_statement(
         "select pg_terminate_backend(pid) from pg_stat_activity"
-        " where application_name = :'app_name' and pid <> pg_backend_pid();"
+        " where application_name = %(app_name)s and pid <> pg_backend_pid()"
     )
 
 

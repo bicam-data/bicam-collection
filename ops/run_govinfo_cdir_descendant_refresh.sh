@@ -33,7 +33,6 @@ fi
 
 cd "$project_root" || exit 1
 bicam_load_project_env
-bicam_prefer_container_db_password
 export DBT_PROFILES_DIR="$project_root/dbt_project"
 
 batch_size=${BICAM_GOVINFO_CDIR_BATCH_SIZE:-12}
@@ -101,7 +100,7 @@ checkpoint="$report_root/govinfo-cdir-descendant-refresh-${timestamp}.md"
   echo
   echo '| Coverage measure | Count |'
   echo '|---|---:|'
-  docker exec bicam-collection-postgres psql -U admin -d bicam_collection -At -F '|' -c "
+  bicam_psql -At -F '|' -c "
     select 'CDIR package details', count(*) from raw_responses
       where source='govinfo' and category='govinfo-congressional-directories'
         and node_type='govinfo_congressional_directory_package_detail'
