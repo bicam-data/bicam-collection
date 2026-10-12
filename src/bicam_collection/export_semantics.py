@@ -71,7 +71,7 @@ def normalize_value(table: str, column: str, value: str | None) -> tuple[str | N
 
 
 def parse_source_timestamp(value: str | None) -> datetime | None:
-    if value in (None, ""):
+    if value is None or value == "":
         return None
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
