@@ -19,7 +19,7 @@ def test_contract_core_relations_exclude_deferred_relation() -> None:
     relations = MODULE.contract_relations(contract)
     names = [relation["table"] for relation in relations]
 
-    assert len(names) == 89
+    assert len(names) == 90
     assert "bills_lobbied" not in names
     assert names[:3] == ["bills", "bills_actions", "bills_actions_committees"]
 
@@ -112,7 +112,7 @@ def test_include_supplemental_changes_expected_relation_set() -> None:
         {relation["table"]: [] for relation in MODULE.contract_relations(contract, include_supplemental=True)},
         include_supplemental=True,
     )
-    assert report["expected_relation_count"] == 91
+    assert report["expected_relation_count"] == 92
     assert report["expected_relations"][-2:] == ["bills_versions", "bills_version_links"]
 
 
@@ -154,6 +154,29 @@ def test_validate_product_data_executes_declared_key_and_required_checks() -> No
         "key_unique:bills.[bill_id]",
     }
     assert connection.calls == 3
+
+
+def test_validate_product_data_checks_public_chamber_casing() -> None:
+    contract = {
+        "contract_version": 1,
+        "contract_kind": "public_product_schema",
+        "families": [
+            {
+                "table": "bills",
+                "feature_status": "core-now",
+                "columns": {"bill_id": "text", "origin_chamber": "text"},
+                "primary_key": ["bill_id"],
+            }
+        ],
+    }
+    report = MODULE.validate_product_data(_EmptyConnection(), contract)
+
+    assert report["valid"] is True
+    assert {check["check_id"] for check in report["checks"]} == {
+        "lowercase:bills.origin_chamber",
+        "key_nonnull:bills.[bill_id]",
+        "key_unique:bills.[bill_id]",
+    }
 
 
 def test_validate_product_data_supports_declared_composite_foreign_keys() -> None:

@@ -115,3 +115,45 @@ def test_manifest_check_rejects_path_traversal(tmp_path: Path) -> None:
             max_age_hours=24,
             verify_files=True,
         )
+
+
+class _FakeResult:
+    def __init__(self, row: tuple[int, ...]) -> None:
+        self.row = row
+
+    def fetchone(self) -> tuple[int, ...]:
+        return self.row
+
+
+class _FakeConnection:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.rows = iter(
+            (
+                (0, 13),  # root detail coverage
+                (0,),  # child coverage
+                (0, 0, 0),  # cross-source reconciliation
+                (11, 0, 0, 0),  # reciprocity acceptance
+                (0,),  # GovInfo identity-quality issues
+                (0,),  # stale runs
+            )
+        )
+
+    def execute(self, query: str, params: object = None) -> _FakeResult:
+        del params
+        self.calls.append(query)
+        return _FakeResult(next(self.rows))
+
+
+def test_database_checks_include_reciprocity_and_govinfo_quality() -> None:
+    script = _load_module()
+    connection = _FakeConnection()
+
+    result = script._database_checks(connection, max_stale_run_hours=3)
+
+    assert result["reciprocity_metric_family_count"] == 11
+    assert result["reciprocity_release_rejected_count"] == 0
+    assert result["reciprocity_contradiction_count"] == 0
+    assert result["reciprocity_unclassified_count"] == 0
+    assert result["govinfo_identity_quality_issue_count"] == 0
+    assert len(connection.calls) == 6

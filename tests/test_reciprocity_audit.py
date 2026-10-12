@@ -32,3 +32,19 @@ def test_reciprocity_metrics_declare_every_audited_relationship_family() -> None
     for family in DECLARED_FAMILIES:
         assert f"('{family}')" in metrics
         assert f"('{family}')" in coverage_test
+
+
+def test_reciprocity_metrics_expose_explicit_release_acceptance_policy() -> None:
+    metrics = (
+        PROJECT_ROOT
+        / "dbt_project/models/marts/operations/fct_congress_internal_reciprocity_metrics.sql"
+    ).read_text()
+    acceptance_test = (
+        PROJECT_ROOT
+        / "dbt_project/tests/congress_internal_reciprocity_release_acceptance_is_fail_closed.sql"
+    ).read_text()
+
+    assert "release_acceptance_status" in metrics
+    assert "accepted_with_source_boundaries" in metrics
+    assert "reject_contradiction" in acceptance_test
+    assert "reject_unclassified" in acceptance_test

@@ -48,6 +48,21 @@ def test_sanitize_endpoint_redacts_credentials_and_keeps_identity() -> None:
     assert sanitized.endswith("format=json&offset=0") or sanitized.endswith("offset=0&format=json")
 
 
+def test_sanitize_endpoint_strips_userinfo_and_fragment() -> None:
+    script = _load_module()
+    sanitized = script.sanitize_endpoint("https://user:password@api.example.test:8443/bill/1?API_KEY=secret#token")
+    assert sanitized == "https://api.example.test:8443/bill/1?API_KEY=%5Bredacted%5D"
+
+
+def test_selection_endpoint_is_sanitized_without_mutating_input(tmp_path: Path) -> None:
+    script = _load_module()
+    selection = {"endpoint_prefix": "https://user:password@api.example.test/bill?token=secret", "limit": 1}
+    manifest = script.write_bundle([], tmp_path, selection=selection)
+    assert "secret" in selection["endpoint_prefix"]
+    assert "secret" not in json.dumps(manifest)
+    assert "password" not in json.dumps(manifest)
+
+
 def test_write_bundle_deduplicates_payloads_and_is_verifiable(tmp_path: Path) -> None:
     script = _load_module()
     manifest = script.write_bundle(

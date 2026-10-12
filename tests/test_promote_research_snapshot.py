@@ -186,13 +186,13 @@ def test_research_candidate_can_require_embedded_source_evidence(tmp_path: Path)
         )
 
 
-def test_embedded_source_evidence_is_verified_and_snapshot_bound(tmp_path: Path) -> None:
+def _candidate_with_source_evidence(tmp_path: Path, *, empty: bool = False) -> tuple[Path, Path, Path]:
     contract_path = tmp_path / "contract.yaml"
     _contract(contract_path)
     root = tmp_path / "exports"
     candidate = _candidate(root, contract_path)
     source_bundle = SOURCE_MODULE.write_bundle(
-        [
+        [] if empty else [
             (
                 "version-1",
                 "raw-1",
@@ -221,8 +221,8 @@ def test_embedded_source_evidence_is_verified_and_snapshot_bound(tmp_path: Path)
         "bundle_path": bundle_path,
         "manifest_sha256": source_bundle["manifest_sha256"],
         "database_snapshot_at": "2026-09-05T00:00:00+00:00",
-        "observation_count": 1,
-        "unique_payload_count": 1,
+        "observation_count": source_bundle["observation_count"],
+        "unique_payload_count": source_bundle["unique_payload_count"],
         "selection": {"limit": 1},
     }
     candidate.write_text(json.dumps(manifest), encoding="utf-8")
@@ -230,6 +230,11 @@ def test_embedded_source_evidence_is_verified_and_snapshot_bound(tmp_path: Path)
     sidecar["manifest_sha256"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
     sidecar["source_evidence"] = manifest["source_evidence"]
     (candidate.parent / "provenance.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    return candidate, contract_path, root
+
+
+def test_embedded_source_evidence_is_verified_and_snapshot_bound(tmp_path: Path) -> None:
+    candidate, contract_path, root = _candidate_with_source_evidence(tmp_path)
 
     report = MODULE.validate_candidate(
         candidate,
@@ -239,6 +244,69 @@ def test_embedded_source_evidence_is_verified_and_snapshot_bound(tmp_path: Path)
     )
 
     assert report["valid"] is True
+
+
+@pytest.mark.parametrize("field,value,error", [
+    ("unique_payload_count", 2, "unique_payload_count differs"),
+    ("observation_count", True, "observation_count differs"),
+    ("selection", {"limit": 100}, "selection differs"),
+    ("bundle_path", ".", "must be source-evidence"),
+    ("bundle_path", "source-evidence/./20260905T010000Z", "must be source-evidence"),
+])
+def test_embedded_source_metadata_must_match_bundle(tmp_path: Path, field, value, error) -> None:
+    candidate, contract_path, root = _candidate_with_source_evidence(tmp_path)
+    manifest = json.loads(candidate.read_text())
+    manifest["source_evidence"][field] = value
+    candidate.write_text(json.dumps(manifest))
+    sidecar_path = candidate.parent / "provenance.json"
+    sidecar = json.loads(sidecar_path.read_text())
+    sidecar["manifest_sha256"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    sidecar["source_evidence"] = manifest["source_evidence"]
+    sidecar_path.write_text(json.dumps(sidecar))
+    with pytest.raises(ValueError, match=error):
+        MODULE.validate_candidate(candidate, contract_path=contract_path, output_dir=root)
+
+
+def test_embedded_source_evidence_rejects_undeclared_sibling(tmp_path: Path) -> None:
+    candidate, contract_path, root = _candidate_with_source_evidence(tmp_path)
+    (candidate.parent / "source-evidence" / "unrelated-bundle").mkdir()
+    with pytest.raises(ValueError, match="contains undeclared entries"):
+        MODULE.validate_candidate(candidate, contract_path=contract_path, output_dir=root)
+
+
+def test_embedded_source_evidence_rejects_symlinked_parent(tmp_path: Path) -> None:
+    candidate, contract_path, root = _candidate_with_source_evidence(tmp_path)
+    directory = candidate.parent / "source-evidence"
+    target = tmp_path / "external-evidence"
+    directory.rename(target)
+    directory.symlink_to(target, target_is_directory=True)
+    with pytest.raises(ValueError, match="directory is missing or symlinked"):
+        MODULE.validate_candidate(candidate, contract_path=contract_path, output_dir=root)
+
+
+def test_required_source_evidence_cannot_be_empty(tmp_path: Path) -> None:
+    candidate, contract_path, root = _candidate_with_source_evidence(tmp_path, empty=True)
+    assert MODULE.validate_candidate(candidate, contract_path=contract_path, output_dir=root)["valid"] is True
+    with pytest.raises(ValueError, match="required source evidence is empty"):
+        MODULE.validate_candidate(candidate, contract_path=contract_path, output_dir=root, require_source_evidence=True)
+
+
+def test_missing_snapshots_cannot_satisfy_source_binding(tmp_path: Path) -> None:
+    candidate, contract_path, root = _candidate_with_source_evidence(tmp_path)
+    manifest = json.loads(candidate.read_text())
+    manifest["database_snapshot_at"] = None
+    manifest["source_evidence"]["database_snapshot_at"] = None
+    evidence_dir = candidate.parent / manifest["source_evidence"]["bundle_path"]
+    evidence_path = evidence_dir / "manifest.json"
+    evidence = json.loads(evidence_path.read_text())
+    evidence["database_snapshot_at"] = None
+    evidence_path.write_text(json.dumps(evidence))
+    digest = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    (evidence_dir / "manifest.sha256").write_text(f"{digest}  manifest.json\n")
+    manifest["source_evidence"]["manifest_sha256"] = digest
+    candidate.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="not bound to the database snapshot"):
+        MODULE.validate_candidate(candidate, contract_path=contract_path, output_dir=root)
 
 
 def test_vacuous_row_validation_cannot_promote(tmp_path: Path) -> None:

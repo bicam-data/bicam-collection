@@ -1,0 +1,113 @@
+<mods xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.3" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-3.xsd" ID="P0b002ee1da5179a3">
+    <name type="corporate">
+         <namePart>United States Government Publishing Office</namePart>
+         <role>
+              <roleTerm authority="marcrelator" type="text">publisher</roleTerm>
+              <roleTerm authority="marcrelator" type="code">pbl</roleTerm>
+        </role>
+         <role>
+              <roleTerm authority="marcrelator" type="text">distributor</roleTerm>
+              <roleTerm authority="marcrelator" type="code">dst</roleTerm>
+        </role>
+    </name>
+    <name type="corporate">
+         <namePart>United States</namePart>
+         <namePart>Congress</namePart>
+         <namePart>House of Representatives</namePart>
+         <role>
+              <roleTerm authority="marcrelator" type="text">author</roleTerm>
+              <roleTerm authority="marcrelator" type="code">aut</roleTerm>
+        </role>
+         <description>Government Organization</description>
+    </name>
+    <typeOfResource>text</typeOfResource>
+    <genre authority="marcgt">government publication</genre>
+    <language>
+         <languageTerm type="code" authority="iso639-2b">eng</languageTerm>
+    </language>
+    <extension>
+         <collectionCode>BILLS</collectionCode>
+         <searchTitle>An Act To amend title 40, United States Code, to limit the construction of new courthouses under certain circumstances, and for other purposes.;Courthouse Affordability and Space Efficiency Act of 2025;H.R. 3426 (EH)
+    </searchTitle>
+         <starprintNumber>1</starprintNumber>
+         <category>Bills and Statutes</category>
+         <waisDatabaseName>119_cong_bills</waisDatabaseName>
+         <branch>legislative</branch>
+         <dateIngested>2025-11-22</dateIngested>
+    </extension>
+    <titleInfo>
+         <title>An Act To amend title 40, United States Code, to limit the construction of new courthouses under certain circumstances, and for other purposes.</title>
+    </titleInfo>
+    <titleInfo type="alternative">
+         <title>Courthouse Affordability and Space Efficiency Act of 2025</title>
+    </titleInfo>
+    <titleInfo type="alternative">
+         <title>H.R. 3426 (EH)
+    </title>
+    </titleInfo>
+    <originInfo>
+         <publisher>U.S. Government Publishing Office</publisher>
+         <dateIssued encoding="w3cdtf">2025-09-15</dateIssued>
+         <issuance>monographic</issuance>
+    </originInfo>
+    <physicalDescription>
+         <note type="source content type">deposited</note>
+         <digitalOrigin>born digital</digitalOrigin>
+         <extent>6 p.</extent>
+    </physicalDescription>
+    <classification authority="sudocs">Y 1.6:</classification>
+    <classification authority="sudocs">Y 1.4/6:</classification>
+    <identifier type="local">P0b002ee1da5179a3</identifier>
+    <identifier type="uri">https://www.govinfo.gov/app/details/BILLS-119hr3426eh1s</identifier>
+    <identifier type="preferred citation">H.R. 3426</identifier>
+    <identifier type="stock number">021-610-00252-9</identifier>
+    <identifier type="Parent ILS system id">000501532</identifier>
+    <identifier type="Child ILS system id">000325573</identifier>
+    <identifier type="Parent ILS title">Congressional bills</identifier>
+    <identifier type="Child ILS title">House bills</identifier>
+    <identifier type="former package identifier">f:h3426_eh1s.txt</identifier>
+    <location>
+         <url displayLabel="Content Detail" access="object in context">https://www.govinfo.gov/app/details/BILLS-119hr3426eh1s</url>
+         <url displayLabel="HTML rendition" access="raw object">https://www.govinfo.gov/content/pkg/BILLS-119hr3426eh1s/html/BILLS-119hr3426eh1s.htm</url>
+         <url displayLabel="PDF rendition" access="raw object">https://www.govinfo.gov/content/pkg/BILLS-119hr3426eh1s/pdf/BILLS-119hr3426eh1s.pdf</url>
+         <url displayLabel="XML rendition" access="raw object">https://www.govinfo.gov/content/pkg/BILLS-119hr3426eh1s/xml/BILLS-119hr3426eh1s.xml</url>
+    </location>
+    <accessCondition type="GPO scope determination">fdlp</accessCondition>
+    <recordInfo>
+         <recordContentSource authority="marcorg">DGPO</recordContentSource>
+         <recordCreationDate encoding="w3cdtf">2025-11-22</recordCreationDate>
+         <recordChangeDate encoding="w3cdtf">2026-07-10</recordChangeDate>
+         <recordIdentifier source="DGPO">BILLS-119hr3426eh1s</recordIdentifier>
+         <recordOrigin>machine generated</recordOrigin>
+         <languageOfCataloging>
+              <languageTerm type="code" authority="iso639-2b">eng</languageTerm>
+        </languageOfCataloging>
+    </recordInfo>
+    <relatedItem type="isReferencedBy">
+         <titleInfo>
+              <title>United States Code</title>
+              <partNumber>Title 40 Chapter 33</partNumber>
+        </titleInfo>
+         <identifier type="USC citation">40 U.S.C. Chapter 33</identifier>
+    </relatedItem>
+    <extension>
+         <docClass>hr</docClass>
+         <accessId>BILLS-119hr3426eh1s</accessId>
+         <congress>119</congress>
+         <session>1</session>
+         <originChamber>HOUSE</originChamber>
+         <currentChamber>HOUSE</currentChamber>
+         <billNumber>3426</billNumber>
+         <billVersion reprint="false">eh</billVersion>
+         <fileSuffix>eh1s</fileSuffix>
+         <shortTitle type="measure">Courthouse Affordability and Space Efficiency Act of 2025</shortTitle>
+         <officialTitle>To amend title 40, United States Code, to limit the construction of new courthouses under certain circumstances, and for other purposes.</officialTitle>
+         <isPrivate>false</isPrivate>
+         <isAppropriation>false</isAppropriation>
+         <USCode title="40">
+                                
+              <chapter number="33"></chapter>
+                            
+        </USCode>
+    </extension>
+</mods>

@@ -52,6 +52,20 @@ def test_refresh_runner_can_target_govinfo_categories() -> None:
     assert args.categories == ["govinfo-congressional-directories"]
 
 
+def test_refresh_runner_accepts_bounded_start_after_cursor() -> None:
+    script = _load_module()
+    args = script.parse_args(
+        [
+            "--categories",
+            "bills",
+            "--start-after-endpoint-url",
+            "https://api.congress.gov/v3/bill/119/hr/10304?format=json",
+        ]
+    )
+
+    assert args.start_after_endpoint_url.endswith("hr/10304?format=json")
+
+
 def test_checkpoint_cursor_advances_atomically_and_resumes(tmp_path: Path) -> None:
     script = _load_module()
     checkpoint = tmp_path / "descendant-cursor.json"

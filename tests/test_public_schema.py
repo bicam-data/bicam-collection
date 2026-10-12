@@ -21,7 +21,7 @@ def test_public_schema_matches_published_2025_archives() -> None:
         Path("/tmp/bicam-published"),
     )
     assert families == 11
-    assert tables == 90
+    assert tables == 91
 
 
 def test_deferred_features_are_explicit() -> None:

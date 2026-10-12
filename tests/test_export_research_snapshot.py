@@ -43,7 +43,7 @@ def test_export_scope_is_contract_only() -> None:
     script = _load_module()
 
     assert script.RELATION_EXPORTS == {}
-    assert len(script.EXPORTS) == 89
+    assert len(script.EXPORTS) == 90
     assert "bills_lobbied" not in script.EXPORTS
 
 
@@ -98,7 +98,7 @@ def test_dry_run_is_database_free_and_preserves_order(tmp_path: Path) -> None:
         dry_run=True,
     )
     assert result["generated_at"] == "2026-08-28T06:10:00+00:00"
-    assert result["contract_version"] == 3
+    assert result["contract_version"] == 4
     assert result["schema"] == "bicam"
     assert result["scope"]["tables"] == [
         {"name": "bills", "relation": "bills"},

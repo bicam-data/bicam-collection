@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="billres.xsl"?>
+<!DOCTYPE bill PUBLIC "-//US Congress//DTDs/bill v2.8 20020720//EN" "res.dtd">
+<resolution dms-id="H5E5834896EE5419700C1DB9F9CC80832" public-private="public" resolution-stage="Introduced-in-House" resolution-type="house-resolution" star-print="no-star-print" key="H"> 
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dublinCore>
+<dc:title>109 HRES 15 IH: Supporting the goals and ideals of National Campus Safety Awareness Month.</dc:title>
+<dc:publisher>U.S. House of Representatives</dc:publisher>
+<dc:date>2005-01-04</dc:date>
+<dc:format>text/xml</dc:format>
+<dc:language>EN</dc:language>
+<dc:rights>Pursuant to Title 17 Section 105 of the United States Code, this file is not subject to copyright protection and is in the public domain.</dc:rights>
+</dublinCore>
+</metadata>
+<form> 
+<distribution-code display="yes">IV</distribution-code> 
+<congress display="yes">109th CONGRESS</congress>
+<session display="yes">1st Session</session>
+<legis-num>H. RES. 15</legis-num> 
+<current-chamber>IN THE HOUSE OF REPRESENTATIVES</current-chamber> 
+<action display="yes"> 
+<action-date date="20050104">January 4, 2005</action-date> 
+<action-desc><sponsor name-id="D000533">Mr. Duncan</sponsor> (for himself and <cosponsor name-id="G000545">Mr. Green of Wisconsin</cosponsor>) submitted the following resolution; which was referred to the <committee-name committee-id="HGO00">Committee on Government Reform</committee-name></action-desc>
+</action> 
+<legis-type>RESOLUTION</legis-type> 
+<official-title display="yes">Supporting the goals and ideals of National Campus Safety Awareness Month.</official-title> 
+</form><preamble> 
+<whereas><text>Whereas college and university campuses are subject to criminal threats both from within and outside their borders;</text></whereas> 
+<whereas><text>Whereas under the Jeanne Clery Disclosure of Campus Security Policy and Campus Crime Statistics Act a total of 86 homicides, 7,648 sex offenses, 9,649 aggravated assaults, and 3,590 arsons were reported on-campus from 2000 to 2002;</text></whereas> 
+<whereas><text>Whereas between one fifth and one quarter of female students become the victim of a completed or attempted rape, usually by someone they know, during their college careers;</text></whereas> 
+<whereas><text>Whereas each year more than 70,000 students between the ages of 18 and 24 are victims of alcohol-related sexual assault;</text></whereas> 
+<whereas><text>Whereas each year more than 600,000 students between the ages of 18 and 24 are assaulted by another student who has been drinking;</text></whereas> 
+<whereas><text>Whereas 1,400 college students between the ages of 18 and 24 die each year from alcohol-related unintentional injuries, including motor vehicle crashes;</text></whereas> 
+<whereas><text>Whereas each year there is approximately $2.8 million worth of property damage from fires on-campus;</text></whereas> 
+<whereas><text>Whereas Security On Campus, Inc., a national group dedicated to promoting safety and security on college and university campuses, has designated September 2005 as National Campus Safety Awareness Month; and</text></whereas> 
+<whereas><text>Whereas the designation of National Campus Safety Awareness Month provides an opportunity for colleges and universities to inform students about existing campus crime trends, campus security policies, crime prevention techniques, fire safety, and alcohol and other drug education, prevention, and treatment programs: Now, therefore, be it</text></whereas></preamble> 
+<resolution-body style="traditional" id="H2A319B7249764DC68604AEE8A8F32302"> 
+<section display-inline="yes-display-inline" section-type="undesignated-section" id="H2B5789A14890457800E0E6742CCEE3BA"><text>That the House of Representatives supports the goals and ideals of National Campus Safety Awareness Month.</text></section> 
+</resolution-body> 
+</resolution> 

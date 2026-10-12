@@ -132,6 +132,18 @@ def test_fetch_streams_bounded_content_and_closes_response(monkeypatch) -> None:
     assert response.closed
 
 
+def test_fetch_quarantines_real_identity_conflict(monkeypatch) -> None:
+    body = (Path(__file__).parent / 'fixtures/bill_source_identity/hres15-109.contradictory.html').read_bytes()
+    response = _FakeResponse(body)
+    monkeypatch.setattr("scripts.fetch_html_text.requests.get", lambda *args, **kwargs: response)
+    result = _fetch_sync("https://www.congress.gov/109/bills/hres15/BILLS-109hres15ih.htm", timeout=1, max_bytes=10000)
+    assert result.extraction_status == "identity_conflict"
+    assert result.text_content is None
+    assert 'body_congress' in result.error
+    assert result.http_status == 200
+    assert response.closed
+
+
 def test_fetch_rejects_content_length_before_reading(monkeypatch) -> None:
     response = _FakeResponse(b"0123456789", content_length="10")
     monkeypatch.setattr("scripts.fetch_html_text.requests.get", lambda *args, **kwargs: response)
