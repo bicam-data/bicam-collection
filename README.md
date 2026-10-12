@@ -3,11 +3,13 @@
 Spec-driven raw crawler, source staging, and bounded reconciliation foundation
 for Congress.gov and GovInfo data.
 
+New to the project? Start with [HANDOFF.md](HANDOFF.md).
+
 ## Current Truth
 
 - The crawler is generic over YAML specs in `specs/`; current implemented categories are `bills`, `members`, `congresses`, `committees`, `amendments`, `committee-reports`, `committee-prints`, `hearings`, `committee-meetings`, `nominations`, and `treaties`.
 - The 11 in-scope entity contracts cover those main categories: identity components, canonical formats, authoritative source, and ingestion/reconciliation quality rules are validated together by `scripts/validate_contracts.py`.
-- The public-product query and loading guide is maintained at [`docs/bicam-researcher-guide.md`](/home/rdelano/bicam/docs/bicam-researcher-guide.md); it documents the plural `bicam` relations, canonical source unions, bill-version supplements, HTML text fields, reciprocity interpretation, and source-gap semantics.
+- The public-product query and loading guide is maintained at [`docs/bicam-researcher-guide.md`](docs/bicam-researcher-guide.md); it documents the plural `bicam` relations, canonical source unions, bill-version supplements, HTML text fields, reciprocity interpretation, and source-gap semantics.
 - The crawler now has GovInfo collection categories, including `govinfo-committee-reports`, which traverses collection updates -> package summary -> granules -> granule summary for `CRPT`.
 - Supplemental GovInfo specs now cover `govinfo-hearings` (`CHRG`) and `govinfo-committee-prints` (`CPRT`) through package and granule traversal. They are optional evidence-ingestion paths; Congress.gov remains authoritative for the corresponding identity and coverage contract.
 - Raw crawl storage is centered on `raw_responses`, `crawl_runs`, and `crawl_run_fetches`.
@@ -38,7 +40,7 @@ for Congress.gov and GovInfo data.
 
 ## Docker Stack
 
-The repo now includes a production-oriented local stack in [docker-compose.yaml](/home/rdelano/bicam/bicam-collection/docker-compose.yaml):
+The repo now includes a production-oriented local stack in [docker-compose.yaml](docker-compose.yaml):
 
 - `postgres`: persistent Postgres 16 with safer defaults, `pg_stat_statements`, and healthchecks
 - `postgres-backup`: optional logical backup sidecar; each custom-format dump is
@@ -84,7 +86,7 @@ make dbt-run
 make dbt-test
 ```
 
-The app containers build against the local [`rotisserie`](/home/rdelano/bicam/rotisserie) checkout, so the Docker image uses the same dependency source as local `uv`.
+The app containers build against the local [`rotisserie`](../rotisserie) checkout, so the Docker image uses the same dependency source as local `uv`.
 
 `make crawl-bounded` runs the declared Congress working scope with a three-page
 ceiling, page size 250, one category at a time, and three in-flight requests per
@@ -138,7 +140,7 @@ production user manager. Their unit files remain available for an explicitly
 supervised backfill, but they cannot relaunch on a host restart or compete with
 these bounded lanes.
 
-Common shortcuts are defined in [Makefile](/home/rdelano/bicam/bicam-collection/Makefile). Run `make help` to see the available targets.
+Common shortcuts are defined in [Makefile](Makefile). Run `make help` to see the available targets.
 
 ## Run The Crawler
 
@@ -246,7 +248,7 @@ The crawler reads source-specific API keys plus `DATABASE_URL` from the environm
 - Congress.gov: `CONGRESS_API_KEYS`, `CONGRESSIONAL_API_KEY`, or `CONGRESS_API_KEY_*`
 - GovInfo: `GOVINFO_API_KEYS`, `GOVINFO_API_KEY`, or `GOVINFO_API_KEY_*`
 
-API key rotation is handled by the local [`rotisserie`](/home/rdelano/bicam/rotisserie) checkout through `uv`.
+API key rotation is handled by the local [`rotisserie`](../rotisserie) checkout through `uv`.
 
 To measure the async crawler's child-resource throughput without using API quota,
 run `make benchmark-crawl`. It uses the real queue, URL canonicalization, and
@@ -300,7 +302,7 @@ uv run pytest -q
 ## Run dbt
 
 ```bash
-export DBT_PROFILES_DIR=/home/rdelano/bicam/bicam-collection/dbt_project
+export DBT_PROFILES_DIR="$PWD/dbt_project"
 export DB_PASSWORD='<your-postgres-password>'
 uv run dbt run --project-dir dbt_project
 uv run dbt test --project-dir dbt_project
@@ -399,7 +401,7 @@ quality, and stale crawler runs.  Use `--no-file-verification` when only the
 database checks are needed during an operational health probe.
 
 The host also runs `bicam-research-snapshot.timer` once daily.  It invokes
-`/home/rdelano/bicam/scripts/run_research_snapshot.sh`, which takes a
+`ops/run_research_snapshot.sh`, which takes a
 non-overlapping lock, applies bounded timeouts, writes a timestamped
 `reports/research-snapshot-checkpoint-*.md`, and records the freshness result
 for later audit or continuation after an agent-usage reset.
@@ -484,7 +486,7 @@ used by incremental committee-report text expansion.
 ## Committee-report reconciliation
 
 The formal source-boundary rules for BILLS, CPRT, and CHRG/JHRG are documented
-in [the main-11 source-boundary policy](/home/rdelano/bicam/docs/main-11-source-boundary-policy.md).
+in [the main-11 source-boundary policy](docs/main-11-source-boundary-policy.md).
 
 The initial reconciliation slice compares Congress.gov and GovInfo committee
 reports by a shared canonical identity: report type, number, Congress, part,
