@@ -48,6 +48,24 @@ seeds:
           reviewed_at: date
           reason: text
           expires_at: date
+      govinfo_congressional_directory_committee_assignments:
+        +column_types:
+          source_package_id: text
+          source_granule_id: text
+          source_url: text
+          source_date: date
+          congress: integer
+          chamber: text
+          member_name: text
+          member_state: text
+          bioguide_id: text
+          member_match_status: text
+          committee_name: text
+          subcommittee_name: text
+          committee_code: text
+          committee_match_status: text
+          role: text
+          source_text_sha256: text
     bootstrap:
       bootstrap_congresses_directories_isbn:
         +column_types:

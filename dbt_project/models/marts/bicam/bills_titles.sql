@@ -18,7 +18,7 @@ with title_observations as (
                      t.updated_at desc nulls last,
                      nullif(trim(t.bill_text_version_code), '') desc nulls last,
                      nullif(trim(t.bill_text_version_name), '') desc nulls last,
-                     t.chamber desc nulls last,
+                     {{ normalize_chamber('t.chamber') }} desc nulls last,
                      t.title_type_code desc nulls last
         ) as _rn
     from {{ ref('stg_congress__bill_titles') }} as t
@@ -30,7 +30,7 @@ select
     title_type,
     bill_text_version_code,
     bill_text_version_name,
-    chamber,
+    {{ normalize_chamber('chamber') }} as chamber,
     title_type_code
 from title_observations
 where _rn = 1

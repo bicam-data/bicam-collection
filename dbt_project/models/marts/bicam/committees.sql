@@ -11,7 +11,7 @@
 select
     committee_id as committee_code,
     name,
-    chamber,
+    {{ normalize_chamber('chamber') }} as chamber,
     case
         when committee_type is null then null::boolean
         else committee_type ilike '%subcommittee%'

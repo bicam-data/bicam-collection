@@ -11,14 +11,14 @@ with keyed as (
     select
         action_id::text as action_id,
         amendment_id,
-        chamber,
+        {{ normalize_chamber('chamber') }} as chamber,
         congress,
         date::date as date,
         roll_number,
         session,
         url,
         row_number() over (
-            partition by action_id::text, chamber, congress, session, roll_number
+            partition by action_id::text, {{ normalize_chamber('chamber') }}, congress, session, roll_number
             order by date desc nulls last, url desc nulls last
         ) as key_rank,
         chamber is not null
@@ -28,6 +28,6 @@ with keyed as (
     from {{ ref('stg_congress__amendment_actions_recordedvotes') }}
 )
 
-select action_id, amendment_id, chamber, congress, date, roll_number, session, url
+select action_id, amendment_id, {{ normalize_chamber('chamber') }} as chamber, congress, date, roll_number, session, url
 from keyed
 where key_rank = 1 or not key_complete

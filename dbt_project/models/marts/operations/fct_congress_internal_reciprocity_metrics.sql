@@ -57,5 +57,20 @@ select
         when asymmetric_count > 0 then 'review'
         when unavailable_count > 0 then 'review'
         else 'pass'
-    end as quality_status
+    end as quality_status,
+    /*
+       Reciprocity is accepted for release when the source evidence is
+       classifiable and contains no contradiction.  One-sided edges and
+       unavailable counterpart endpoints are expected for several Congress
+       API families (for example member lists and meeting/hearing links), so
+       they remain visible in quality_status but do not block the canonical
+       union.  This explicit field prevents downstream exporters from having
+       to infer that policy from the diagnostic status.
+    */
+    case
+        when relationship_count = 0 then 'reject_no_evidence'
+        when contradiction_count > 0 then 'reject_contradiction'
+        when unclassified_count > 0 then 'reject_unclassified'
+        else 'accepted_with_source_boundaries'
+    end as release_acceptance_status
 from counts

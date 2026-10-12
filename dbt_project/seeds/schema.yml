@@ -132,6 +132,45 @@ seeds:
       - name: reason
         tests: [not_null]
 
+  - name: govinfo_congressional_directory_committee_assignments
+    description: >-
+      Official GovInfo Congressional Directory committee-assignment
+      observations. This seed is generated from CDIR assignment granules and
+      bounded full-directory text; unresolved member and committee identities
+      remain reviewable here and are excluded from the canonical edge table.
+    columns:
+      - name: source_package_id
+        tests: [not_null]
+      - name: source_granule_id
+        tests: [not_null]
+      - name: source_url
+        tests: [not_null]
+      - name: source_date
+        tests: [not_null]
+      - name: congress
+        tests: [not_null]
+      - name: chamber
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [house, senate]}
+      - name: member_name
+        tests: [not_null]
+      - name: member_match_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [matched, ambiguous, unmatched]}
+      - name: committee_name
+        tests: [not_null]
+      - name: committee_match_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [matched, ambiguous, unmatched]}
+      - name: source_text_sha256
+        tests: [not_null]
+
   - name: govinfo_committee_id_overrides
     description: Curated mappings for GovInfo authority IDs that cannot be safely normalized automatically.
     columns:

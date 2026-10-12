@@ -12,7 +12,7 @@ select distinct
     bioguide_id,
     role,
     congress,
-    chamber,
+    {{ normalize_chamber('chamber') }} as chamber,
     is_current
 from {{ ref('stg_congress__member_leadershiproles') }}
 where bioguide_id is not null

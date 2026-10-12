@@ -206,6 +206,23 @@ meeting_only_rows as (
     where _rank = 1
 )
 
-select * from known_rows
-union all
-select * from meeting_only_rows
+, all_rows as (
+    select * from known_rows
+    union all
+    select * from meeting_only_rows
+)
+select
+    hearing_id,
+    hearing_jacketnumber,
+    loc_id,
+    title,
+    congress,
+    session,
+    {{ normalize_chamber('chamber') }} as chamber,
+    is_appropriation,
+    hearing_number,
+    part_number,
+    citation,
+    pages,
+    updated_at
+from all_rows

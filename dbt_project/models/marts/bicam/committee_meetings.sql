@@ -23,7 +23,7 @@ select
     meeting_id,
     title,
     meeting_type,
-    chamber,
+    {{ normalize_chamber('chamber') }} as chamber,
     congress,
     date,
     room,

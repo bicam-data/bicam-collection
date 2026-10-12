@@ -70,10 +70,11 @@ with govinfo_versions as (
 ), text_sources as (
     select
         t.*,
-        regexp_replace(upper((regexp_match(
-            lower(coalesce(t.formatted_text, t.xml, t.pdf)),
-            '/bills-[0-9]+[a-z]+[0-9]+([a-z0-9]+)\.(?:html?|xml|pdf)'
-        ))[1]), '[0-9]+$', '') as url_version_code
+        coalesce(
+            {{ govinfo_bill_url_version_code('t.formatted_text') }},
+            {{ govinfo_bill_url_version_code('t.xml') }},
+            {{ govinfo_bill_url_version_code('t.pdf') }}
+        ) as url_version_code
     from {{ ref('bills_texts') }} as t
 ), text_links as (
     select

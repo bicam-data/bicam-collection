@@ -1,21 +1,16 @@
-select
-    links.link_id,
-    links.source_row_key,
-    links.source_version_code,
-    links.govinfo_version_code,
-    regexp_replace(upper((regexp_match(
-        lower(coalesce(texts.formatted_text, texts.xml, texts.pdf)),
-        '/bills-[0-9]+[a-z]+[0-9]+([a-z0-9]+)\.(?:html?|xml|pdf)'
-    ))[1]), '[0-9]+$', '') as url_version_code
-from {{ ref('bills_version_links') }} as links
-join {{ ref('bills_texts') }} as texts
-  on links.source_table = 'bills_texts'
- and links.source_row_key = texts.bill_id
-    || '|' || coalesce(texts.date::text, '')
-    || '|' || coalesce(texts.type, '')
+with source_codes as (
+    select bill_id || '|' || coalesce(date::text, '') || '|' || coalesce(type, '') as row_key,
+           coalesce({{ govinfo_bill_url_version_code('formatted_text') }},
+                    {{ govinfo_bill_url_version_code('xml') }},
+                    {{ govinfo_bill_url_version_code('pdf') }}) as version_code
+    from {{ ref('bills_texts') }}
+)
+select links.link_id, links.source_row_key, links.source_version_code
+from {{ ref('bills_version_links') }} links
 where links.source_table = 'bills_texts'
   and links.link_rule = 'direct_bill_text_url_version_code'
-  and links.source_version_code is distinct from regexp_replace(upper((regexp_match(
-     lower(coalesce(texts.formatted_text, texts.xml, texts.pdf)),
-     '/bills-[0-9]+[a-z]+[0-9]+([a-z0-9]+)\.(?:html?|xml|pdf)'
-  ))[1]), '[0-9]+$', '')
+  -- Renditions may share a grouping key; require one supporting occurrence.
+  and not exists (
+      select 1 from source_codes
+      where row_key = links.source_row_key and version_code = links.source_version_code
+  )

@@ -1,9 +1,15 @@
 {{ config(schema='bicam', materialized='table', tags=['bills', 'public'], indexes=[{'columns': ['bill_code_id', 'code_section'], 'unique': true}]) }}
-with contents as (
+with packages as (
+    -- Preserve every harvested package so section rows remain aligned with
+    -- the package-grain parent reference table.
+    select p.package_id, p.raw_id
+    from {{ ref('stg_govinfo__bills_packages') }} p
+    join {{ ref('bills') }} b
+      on b.bill_id = p.bill_type || p.bill_number::text || '-' || p.congress::text
+), contents as (
     select p.package_id, ref.ordinality as ref_n, content.ordinality as content_n,
         content.value as content_json
-    from {{ ref('stg_govinfo__bills_packages') }} p
-    join {{ ref('bills_metadata') }} m on m.govinfo_package_id = p.package_id
+    from packages p
     join {{ ref('int_raw_responses__current') }} raw on raw.raw_id = p.raw_id
     cross join lateral jsonb_array_elements(coalesce(raw.response->'references', '[]'::jsonb)) with ordinality ref(value, ordinality)
     cross join lateral jsonb_array_elements(coalesce(ref.value->'contents', '[]'::jsonb)) with ordinality content(value, ordinality)

@@ -13,7 +13,7 @@ with congress_terms as (
     select distinct
         bioguide_id,
         member_type,
-        chamber,
+        {{ normalize_chamber('chamber') }} as chamber,
         congress,
         start_year,
         end_year,
@@ -72,7 +72,7 @@ with congress_terms as (
 select
     congress_terms.bioguide_id,
     congress_terms.member_type,
-    congress_terms.chamber,
+    {{ normalize_chamber('congress_terms.chamber') }} as chamber,
     congress_terms.congress,
     congress_terms.start_year,
     congress_terms.end_year,

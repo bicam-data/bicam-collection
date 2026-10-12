@@ -30,7 +30,7 @@ selected as (
 ),
 details as (
     select distinct on (bill_id)
-        bill_id, title as congress_title, origin_chamber as congress_origin_chamber,
+        bill_id, title as congress_title, {{ normalize_chamber('origin_chamber') }} as congress_origin_chamber,
         introduced_at as congress_introduced_at, policy_area,
         constitutional_authority_statement, is_law,
         actions_count, amendments_count, committees_count, cosponsors_count,
@@ -60,8 +60,8 @@ select
     bill_number::numeric as bill_number,
     congress,
     coalesce(details.congress_title, selected.title) as title,
-    coalesce(details.congress_origin_chamber, selected.origin_chamber) as origin_chamber,
-    coalesce(packages.current_chamber, details.congress_origin_chamber, selected.origin_chamber) as current_chamber,
+    {{ normalize_chamber('coalesce(details.congress_origin_chamber, selected.origin_chamber)') }} as origin_chamber,
+    {{ normalize_chamber('coalesce(packages.current_chamber, details.congress_origin_chamber, selected.origin_chamber)') }} as current_chamber,
     packages.version_code,
     coalesce(details.congress_introduced_at, selected.introduced_at)::timestamptz as introduced_at,
     details.constitutional_authority_statement,

@@ -13,6 +13,11 @@ models:
         data_tests: [not_null, unique]
       - name: version_code
         data_tests: [not_null]
+        description: Semantic bill version, such as EH; excludes numeric variants and star-print suffixes.
+      - name: rendition_suffix
+        description: Exact normalized package suffix, such as eh1s, rh2, or v1rh; package ID remains the exact document key.
+      - name: starprint_number
+        description: Star-print number from a star-print suffix; eh1s has 1. Not the legacy version_variant.
       - name: formatted_text
         description: GovInfo authenticated HTML rendition URL for this package, when published.
       - name: raw_text
@@ -199,6 +204,33 @@ models:
           - not_null
           - relationships:
               arguments: {to: ref('bills'), field: bill_id}
+
+  - name: committees_members
+    description: >-
+      Canonical committee-membership edges sourced from official GovInfo
+      Congressional Directory assignment tables/text. The relation is keyed
+      by committee, member, and Congress; unresolved source names remain in
+      staging evidence and are not guessed into the public edge table.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [committee_code, bioguide_id, congress]
+    columns:
+      - name: committee_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('committees'), field: committee_code}
+      - name: bioguide_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('members'), field: bioguide_id}
+      - name: congress
+        data_tests: [not_null]
+      - name: chamber
+        data_tests:
+          - not_null
 
   - name: committees_committeereports
     description: Committee-to-report associations from canonical Congress.gov committee records.
@@ -401,31 +433,35 @@ models:
       - name: title
         tests: [not_null]
   - name: bills_reference_codes
-    description: US Code references parsed from available GovInfo BILLS package metadata; may be empty until package references are harvested.
+    description: US Code references parsed from every harvested GovInfo BILLS package. Values follow the published BICAM convention (for example, USC-5); package-level rows preserve references from historical bill versions.
     columns:
       - name: bill_code_id
         tests: [not_null, unique]
       - name: bill_id
         tests: [not_null]
   - name: bills_reference_codes_sections
+    description: Section expressions attached to package-level US Code references.
     columns:
       - name: bill_code_id
         tests: [not_null]
       - name: code_section
         tests: [not_null]
   - name: bills_reference_laws
+    description: Public/private law references parsed from every harvested GovInfo BILLS package, using the published PL<congress>-<number> and title-case law-type conventions.
     columns:
       - name: bill_id
         tests: [not_null]
       - name: law_id
         tests: [not_null]
   - name: bills_reference_statutes
+    description: Statutes-at-Large references parsed from every harvested GovInfo BILLS package, using the published stat.<volume> convention.
     columns:
       - name: bill_statute_id
         tests: [not_null, unique]
       - name: bill_id
         tests: [not_null]
   - name: bills_reference_statutes_pages
+    description: Page expressions attached to package-level Statutes-at-Large references.
     columns:
       - name: bill_statute_id
         tests: [not_null]

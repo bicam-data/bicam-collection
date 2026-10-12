@@ -76,7 +76,7 @@ select
         amendments.congress,
         split_part(amendment_ids.amendment_id, '-', 2)::integer
     ) as congress,
-    amendments.chamber,
+    {{ normalize_chamber('amendments.chamber') }} as chamber,
     amendments.purpose,
     amendments.description,
     amendments.proposed_at,

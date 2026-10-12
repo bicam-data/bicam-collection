@@ -3,7 +3,8 @@ select distinct
     t.bill_id,
     t.date::date as date,
     t.type,
-    coalesce(nullif(t.raw_text, ''), html.text_content) as raw_text,
+    case when not {{ bill_text_has_congress_conflict("coalesce(nullif(t.raw_text, ''), html.text_content)", 't.bill_id') }}
+         then coalesce(nullif(t.raw_text, ''), html.text_content) end as raw_text,
     t.formatted_text,
     t.pdf,
     t.xml

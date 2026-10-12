@@ -4,14 +4,14 @@ with keyed as (
     select
         v.action_id::text as action_id,
         v.bill_id,
-        v.chamber,
+        {{ normalize_chamber('v.chamber') }} as chamber,
         v.congress,
         v.date::date as date,
         v.roll_number,
         v.session,
         v.url,
         row_number() over (
-            partition by v.action_id::text, v.chamber, v.congress,
+            partition by v.action_id::text, {{ normalize_chamber('v.chamber') }}, v.congress,
                          v.session, v.roll_number
             order by v.date desc nulls last, v.url desc nulls last
         ) as key_rank,
@@ -25,6 +25,6 @@ with keyed as (
      and a.bill_id = v.bill_id
 )
 
-select action_id, bill_id, chamber, congress, date, roll_number, session, url
+select action_id, bill_id, {{ normalize_chamber('chamber') }} as chamber, congress, date, roll_number, session, url
 from keyed
 where key_rank = 1 or not key_complete

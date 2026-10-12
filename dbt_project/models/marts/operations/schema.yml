@@ -314,6 +314,21 @@ models:
           - accepted_values:
               arguments:
                 values: [pass, review]
+      - name: release_acceptance_status
+        description: >-
+          Explicit release policy for Congress.gov reciprocity. Source-side
+          asymmetry and unavailable counterpart endpoints are accepted and
+          retained as evidence; empty families, contradictions, and
+          unclassified edges are rejected.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - accepted_with_source_boundaries
+                  - reject_no_evidence
+                  - reject_contradiction
+                  - reject_unclassified
 
   - name: fct_govinfo_member_identity_exceptions
     description: >-
