@@ -32,9 +32,7 @@ TARGET_ROOT_ITEM_SPECS = (
     ("congresses", "congress_list", "congresses"),
 )
 
-# Partition presence must be proved by a root-list response itself.  Checking
-# for any response in the partition is insufficient: a detail response could
-# make a partition look observed even when its list crawl never ran.
+# A partition counts as present only with a root-list response, not just any response.
 TARGET_ROOT_PARTITION_SPECS = (
     ("bills", "bill_list", "bill"),
     ("amendments", "amendment_list", "amendment"),
@@ -73,9 +71,6 @@ def run_checks(
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_stale_hours)
     issues: list[str] = []
     with psycopg.connect(database_url) as conn:
-        # Quality checks are operational diagnostics, not unbounded analytical
-        # jobs.  A cancelled audit must not leave a PostgreSQL backend chewing
-        # on a full raw-archive scan for hours after its shell timeout.
         conn.execute("set statement_timeout='240s'")
         conn.execute("set lock_timeout='15s'")
         stale_runs = conn.execute(
@@ -126,11 +121,6 @@ def run_checks(
         if unsatisfied_fetches > max_unsatisfied_fetches:
             issues.append(f"unsatisfied_fetches={unsatisfied_fetches}")
 
-        # Require a current root-list response for every declared partition,
-        # rather than accepting a detail-only response as evidence that the
-        # partition was crawled.  Empty HTTP-200 root results are observed and
-        # therefore satisfy presence; the exact response remains in the raw
-        # archive for source-availability review.
         root_partition_values = ",\n                ".join(
             "(%s, %s, %s)" for _ in TARGET_ROOT_PARTITION_SPECS
         )
@@ -182,17 +172,10 @@ def run_checks(
         if missing_full_scope > max_missing_full_scope_partitions:
             issues.append(f"missing_full_scope_partitions={missing_full_scope}")
 
-        # A partition can have observed data while still missing a large
-        # fraction of its root items' detail responses.  Compare the URLs
-        # enumerated by each Congress.gov list response with the immutable
-        # response archive so this gate catches partial child crawls (the
-        # prior partition-presence check did not).
+        # Compare the detail URLs each list response enumerates with the archive, to
+        # catch partially crawled partitions.
         root_item_specs = TARGET_ROOT_ITEM_SPECS
-        # Build the two large URL sets once.  The previous per-category query
-        # repeatedly scanned and de-duplicated the entire raw archive; with
-        # millions of stored responses, overlapping audit runs could leave
-        # several PostgreSQL workers consuming CPU long after the audit shell
-        # had timed out.
+        # Build the two large URL sets once instead of rescanning per category.
         conn.execute("set max_parallel_workers_per_gather=0")
         conn.execute(
             """
@@ -248,13 +231,8 @@ def run_checks(
         )
         conn.execute("analyze quality_gate_root_items")
         conn.commit()
-        # A detail endpoint can remain absent because Congress.gov itself
-        # returns a durable source-side 404/500 (for example historical
-        # ``MemberTerm DoesNotExist`` payloads).  Those URLs must remain in
-        # the failure ledger, but they are not actionable crawler omissions
-        # and should not cause every scheduled quality audit to reclassify the
-        # same source defect as an ingestion regression.  Match on the stable
-        # path because older failure rows may differ only in query ordering.
+        # Durable source-side 404/500s stay in the failure ledger but aren't crawler
+        # omissions. Matched on path, since older rows may differ in query order.
         conn.execute(
             """
             create temporary table quality_gate_root_source_errors as

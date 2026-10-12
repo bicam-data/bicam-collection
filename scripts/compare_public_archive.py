@@ -1,11 +1,8 @@
-"""Compare current public BICAM table counts with the published CSV archives.
+"""Compare public table row counts with the published CSV archives (read-only).
 
-This is a bounded, read-only feature/structure parity check.  It counts rows
-with Python's CSV parser (so quoted embedded newlines are one row), checks the
-contract's eleven families and every declared archive relation, and counts
-only the contract's durable ``core-now`` relations in the PostgreSQL
-``bicam`` schema.  It deliberately does not attempt a row-by-row identifier
-or legacy crosswalk comparison.
+Counts CSV rows with the csv module (embedded newlines stay one row), checks the
+eleven families and declared archive relations, and counts the core-now
+relations in ``bicam``. No row-level comparison.
 """
 
 from __future__ import annotations
@@ -13,7 +10,6 @@ from __future__ import annotations
 import argparse
 import csv
 import io
-import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -26,23 +22,12 @@ import yaml
 
 from bicam_collection.config import Settings
 
-try:  # Support ``python scripts/...`` and package/module imports.
-    from scripts.validate_public_schema import (
-        EXPECTED_MAIN_TABLES,
-        _tables,
-        _validate_table_shape,
-    )
-except ModuleNotFoundError:  # pragma: no cover - direct script path variant
-    _validator_spec = importlib.util.spec_from_file_location(
-        "_bicam_public_schema_validator", Path(__file__).with_name("validate_public_schema.py")
-    )
-    if _validator_spec is None or _validator_spec.loader is None:
-        raise ImportError("unable to load validate_public_schema.py")
-    _validator = importlib.util.module_from_spec(_validator_spec)
-    _validator_spec.loader.exec_module(_validator)
-    EXPECTED_MAIN_TABLES = _validator.EXPECTED_MAIN_TABLES
-    _tables = _validator._tables
-    _validate_table_shape = _validator._validate_table_shape
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.validate_public_schema import (  # noqa: E402
+    EXPECTED_MAIN_TABLES,
+    _tables,
+    _validate_table_shape,
+)
 
 
 DEFAULT_CONTRACT = Path(__file__).resolve().parents[1] / "contracts" / "bicam_public_schema.yaml"
@@ -66,9 +51,6 @@ def load_contract(path: Path = DEFAULT_CONTRACT) -> dict[str, Any]:
     families = document.get("families")
     if not isinstance(families, list) or len(families) != 11:
         raise ValueError("contract must declare exactly 11 families")
-    # _tables performs the validator's family names, child naming, shape, and
-    # uniqueness checks.  Keep the explicit main-table check here as a guard
-    # if the validator's constants ever change independently.
     names = {family.get("name") for family in families if isinstance(family, dict)}
     if names != EXPECTED_MAIN_TABLES:
         raise ValueError(f"main family names differ: {sorted(names)}")
@@ -136,8 +118,6 @@ def count_published_rows(
                 if source_file not in archive.namelist():
                     raise ValueError(f"{relation['table']}: {source_file} is not in {archive_name}")
                 with archive.open(source_file) as raw:
-                    # newline="" is required by csv.reader for universal
-                    # newline handling and quoted multiline fields.
                     text = io.TextIOWrapper(raw, encoding="utf-8", newline="")
                     try:
                         declared_columns = relation.get("columns")

@@ -1,12 +1,7 @@
-"""Fetch only Congress child endpoints that the coverage audit proves missing.
+"""Fetch the bill child endpoints the coverage audit proves missing (bounded).
 
-The normal descendant refresh walks every stored bill detail root.  Once its
-checkpoint is complete, newly discovered child URLs can otherwise wait for a
-full replay cycle.  This bounded repair reads the same declared bill edges as
-``check_child_coverage.py``, excludes confirmed source-side 404/500 gaps, and
-feeds the remaining URLs through the normal crawler persistence/telemetry
-path.  It is intentionally limited to bill descendants and a finite item
-budget so it is safe to run alongside the scheduled refresh lane.
+Uses the audit's edge rules, skips confirmed source-side 404/500 gaps, and runs
+the rest through the normal crawler.
 """
 
 from __future__ import annotations
@@ -69,12 +64,7 @@ def _edges(project_root: Path) -> list[tuple[str, str, str, str, str | None, str
 
 
 def _missing_bill_children(database_url: str, project_root: Path, limit: int) -> list[dict[str, str]]:
-    """Return one queue row per missing bill child endpoint.
-
-    Endpoint paths are compared without query strings, matching the coverage
-    audit.  The original advertised URL is retained so the crawler can apply
-    its normal canonicalization and pagination parameters.
-    """
+    """One row per missing bill child endpoint (paths compared without query strings)."""
 
     edges = [edge for edge in _edges(project_root) if edge[0] == "bills"]
     rows: list[dict[str, str]] = []
@@ -106,8 +96,6 @@ def _missing_bill_children(database_url: str, project_root: Path, limit: int) ->
         connection.execute("analyze source_errors")
 
         for category, parent_node, target_node, url_path, fallback_suffix, normalizer, follow_mode in edges:
-            # Bill detail child edges are advertised as absolute URLs.  Keep
-            # the fallback branch for completeness and to mirror the audit.
             query = """
                 with parents as (
                     select id, endpoint_url, response

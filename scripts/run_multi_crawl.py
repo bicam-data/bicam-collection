@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import importlib.util
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import sys
 import time
 
 from bicam_collection.config import Settings
@@ -15,17 +15,8 @@ from bicam_collection.storage import AsyncPostgresStore
 from bicam_collection.target_scope import TARGET_CONGRESS_CATEGORIES
 
 
-def _load_progress_reporter():
-    run_crawl_path = Path(__file__).resolve().with_name("run_crawl.py")
-    spec = importlib.util.spec_from_file_location("run_crawl", run_crawl_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load {run_crawl_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.TqdmProgressReporter
-
-
-TqdmProgressReporter = _load_progress_reporter()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.run_crawl import TqdmProgressReporter  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None, *, project_root: Path | None = None) -> argparse.Namespace:

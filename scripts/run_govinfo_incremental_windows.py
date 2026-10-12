@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Harvest every GovInfo collection in durable, gap-free date windows.
+"""Harvest GovInfo collections in gap-free date windows.
 
-The historical cursor crawls are finite and eventually become terminal.  This
-runner owns the ongoing boundary after that backfill: it advances a shared time
-frontier only when BILLS, CRPT, CPRT, and CHRG have each completed pagination
-and all discovered child fetches without a failed event.  A partial window is
-therefore safe to retry after a process, host, or session interruption.
+The shared frontier advances only after BILLS, CRPT, CPRT and CHRG each finished
+pagination and child fetches without a failure, so a partial window just reruns.
 """
 
 from __future__ import annotations
@@ -93,8 +90,7 @@ def build_crawl_command(
     request_interval: float,
     key_wait_timeout: float,
 ) -> list[str]:
-    # Deliberately omit --max-pages. A completed ledger row means the list's
-    # terminal nextPage was reached, never merely that a page budget expired.
+    # No --max-pages: a completed window means pagination actually ended.
     return [
         sys.executable,
         str(project_root / "scripts" / "run_crawl.py"),
@@ -460,7 +456,6 @@ def _run_window(
             )
             print(f"{collection.category}: failed: {redact_output(str(exc))}", file=sys.stderr, flush=True)
         finally:
-            # Avoid carrying one category's locals into the next exception.
             run_id = None
             evidence = None
     if args.dry_run:

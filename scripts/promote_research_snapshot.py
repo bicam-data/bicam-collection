@@ -1,10 +1,7 @@
-"""Validate one immutable snapshot candidate and atomically select it as latest.
+"""Validate an export candidate and atomically point ``latest`` at it.
 
-Export and promotion are intentionally separate operations. A candidate must
-match the bundled contract, contain the complete declared relation inventory,
-carry a matching portable provenance sidecar, and pass byte/header/row-count
-checks before the mutable ``latest`` symlink is changed. Any failure leaves
-the previously accepted target untouched.
+Checks contract match, full relation inventory, provenance sidecar, bytes,
+headers and row counts; any failure leaves ``latest`` unchanged.
 """
 
 from __future__ import annotations
@@ -15,38 +12,15 @@ import csv
 import fcntl
 import gzip
 import hashlib
-import importlib.util
 import json
 from pathlib import Path
 import os
 import sys
 from typing import Any
 
-try:  # Works both as ``python -m scripts...`` and as a direct script.
-    from scripts.validate_bicam_product import DEFAULT_CONTRACT, contract_relations, load_contract
-except ModuleNotFoundError:  # pragma: no cover - depends on invocation path
-    _validator_spec = importlib.util.spec_from_file_location(
-        "_bicam_product_validator", Path(__file__).with_name("validate_bicam_product.py")
-    )
-    if _validator_spec is None or _validator_spec.loader is None:
-        raise ImportError("unable to load validate_bicam_product.py")
-    _validator = importlib.util.module_from_spec(_validator_spec)
-    _validator_spec.loader.exec_module(_validator)
-    DEFAULT_CONTRACT = _validator.DEFAULT_CONTRACT
-    contract_relations = _validator.contract_relations
-    load_contract = _validator.load_contract
-
-try:
-    from scripts.verify_source_evidence import verify_bundle as _verify_source_evidence_bundle
-except ModuleNotFoundError:  # pragma: no cover - direct-script fallback
-    _source_evidence_spec = importlib.util.spec_from_file_location(
-        "_bicam_verify_source_evidence", Path(__file__).with_name("verify_source_evidence.py")
-    )
-    if _source_evidence_spec is None or _source_evidence_spec.loader is None:
-        raise ImportError("unable to load verify_source_evidence.py")
-    _source_evidence = importlib.util.module_from_spec(_source_evidence_spec)
-    _source_evidence_spec.loader.exec_module(_source_evidence)
-    _verify_source_evidence_bundle = _source_evidence.verify_bundle
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.validate_bicam_product import DEFAULT_CONTRACT, contract_relations, load_contract  # noqa: E402
+from scripts.verify_source_evidence import verify_bundle as _verify_source_evidence_bundle  # noqa: E402
 
 
 def _hash_file(path: Path) -> tuple[int, str]:

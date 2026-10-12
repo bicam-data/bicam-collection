@@ -1,7 +1,5 @@
-"""Write a per-unit status report for the systemd BICAM lanes.
-
-Combines the lane_runs history recorded by scripts/record_lane_run.py with
-the live timer schedule from systemctl.  Read-only against the database.
+"""Per-unit status report for the bicam-* lanes from lane_runs and the systemctl
+timer schedule (read-only).
 """
 
 from __future__ import annotations
@@ -19,8 +17,7 @@ import psycopg
 
 from bicam_collection.config import Settings
 
-# Enough history per unit to count a long failure streak without loading the
-# whole table; anything longer is reported as 100+.
+# Enough rows to count a 100-run failure streak.
 HISTORY_PER_UNIT = 100
 
 LANE_RUNS_SQL = """
@@ -99,11 +96,7 @@ def read_timer_schedule() -> dict[str, datetime | None]:
 def summarize_units(
     rows: list[LaneRunRow], schedule: dict[str, datetime | None]
 ) -> list[UnitStatus]:
-    """Fold newest-first rows into one status per unit.
-
-    Units that only appear in the timer schedule are included with no run
-    history, so a lane that has never recorded a run is still visible.
-    """
+    """Fold newest-first rows into one status per unit, including timers with no runs yet."""
     rows_by_unit: dict[str, list[LaneRunRow]] = {}
     for row in rows:
         rows_by_unit.setdefault(row.unit, []).append(row)

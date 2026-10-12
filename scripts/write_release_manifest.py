@@ -1,9 +1,5 @@
-"""Write a machine-readable release manifest for the production main-11 archive.
-
-The manifest is deliberately read-only.  It snapshots materialized dbt
-coverage, reconciliation, reciprocity, and GovInfo identity facts in one
-durable artifact so a later process (or a later usage window) can verify what
-was known at release time without rerunning a multi-million-row query.
+"""Write a release manifest snapshotting the materialized coverage, reconciliation,
+reciprocity and GovInfo identity facts (read-only).
 """
 
 from __future__ import annotations

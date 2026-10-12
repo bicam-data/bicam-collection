@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark deterministic bill-title selection on an isolated PostgreSQL DB.
-
-The workload is deliberately transaction-local: it creates temporary tables,
-loads a representative number of repeated title observations, runs the same
-window-ordering shape used by ``bicam.bills_titles``, and leaves no persistent
-database objects behind.  This makes the Package-B performance gate repeatable
-without requiring production-scale source data or a production connection.
-"""
+"""Benchmark the bills_titles window ordering on temporary tables in a scratch database."""
 
 from __future__ import annotations
 

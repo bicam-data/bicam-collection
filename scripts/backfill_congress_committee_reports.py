@@ -1,10 +1,5 @@
-"""Probe Congress.gov committee-report details missing from reconciliation.
-
-GovInfo contains a small number of report records for which the normal
-Congress.gov report list did not yield a detail URL.  This bounded helper
-turns those rows into auditable, rate-limited detail requests.  It is safe to
-rerun: existing responses and known 404s are excluded unless ``--refresh`` is
-requested.
+"""Fetch Congress.gov details for GovInfo committee reports with no Congress.gov
+counterpart. Stored responses and known 404s are skipped unless --refresh.
 """
 
 from __future__ import annotations
@@ -50,8 +45,6 @@ class MissingCommitteeReport:
 
     @property
     def endpoint_url(self) -> str:
-        # Congress.gov's detail URL identifies the report set.  The payload's
-        # report_part distinguishes multipart records when one is returned.
         return (
             f"https://api.congress.gov/v3/committee-report/{self.congress}/"
             f"{self.report_type.upper()}/{self.report_number}?format=json"

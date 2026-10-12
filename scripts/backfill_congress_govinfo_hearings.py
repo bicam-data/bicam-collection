@@ -1,13 +1,7 @@
-"""Fetch Congress.gov hearing details for unmatched modern GovInfo packages.
+"""Fetch Congress.gov hearing details for modern GovInfo-only hearing packages.
 
-GovInfo hearing packages use identifiers such as ``CHRG-119hhrg63835`` while
-Congress.gov exposes the same record as ``/hearing/119/house/63835``.  Joint
-hearings use Congress.gov's legacy ``/nochamber/`` route; the staging layer
-canonicalizes those payloads to chamber ``joint`` while preserving the source
-route/chamber.  The normal Congress hearing crawl is list-driven and can miss
-a package when a pagination chain or source list is incomplete.  This helper
-probes only the bounded modern GovInfo-only set and preserves all request
-provenance.
+``CHRG-119hhrg63835`` maps to ``/hearing/119/house/63835``; joint hearings use the
+legacy ``/nochamber/`` route.
 """
 
 from __future__ import annotations

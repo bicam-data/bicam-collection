@@ -1,11 +1,6 @@
-"""Fetch hearing details referenced by Congress committee-meeting records.
+"""Fetch hearings that committee-meeting records point to (``hearingTranscript``).
 
-Congress exposes committee meetings and hearings as separate categories.  A
-meeting may contain a ``hearingTranscript`` URL, while many hearings have no
-meeting association at all.  The normal category crawls therefore cannot
-assume that either root walk will fetch the other side.  This bounded repair
-follows the meeting-to-hearing edge and stores the result in the canonical
-``hearings`` category, preserving the meeting as the parent provenance.
+Stored under hearings with the meeting as parent; many hearings have no meeting.
 """
 
 from __future__ import annotations
@@ -66,8 +61,7 @@ def load_missing(
     if not math.isfinite(retry_404_after_hours) or retry_404_after_hours <= 0:
         raise ValueError("retry_404_after_hours must be positive and finite")
 
-    # Compare URL paths rather than query-string spellings.  Congress links
-    # normally include ``format=json``, but older payloads omit it.
+    # Compare paths; older payloads omit format=json.
     existing_clause = "" if refresh else """
         and not exists (
             select 1

@@ -1,15 +1,11 @@
-"""Build/export the complete public product twice from frozen synthetic raw JSON.
-
-Only accepts two explicitly named, empty disposable databases. Does not load
-production settings or promote either export. Independent research review is
-not replaced by synthetic reproducibility evidence.
+"""Build and export the whole product twice from frozen synthetic raw JSON, in two
+empty disposable databases, to check reproducibility. Never promotes.
 """
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -24,21 +20,10 @@ import yaml
 
 from bicam_collection.migrations import apply_migrations
 
-try:
-    from scripts import load_ci_fixtures, export_research_snapshot, validate_bicam_product
-    from scripts.replay_bill_version_slice import validate_test_url, canonical_bytes, digest
-except ModuleNotFoundError:
-    def _sibling(name):
-        spec = importlib.util.spec_from_file_location(f"_raw_replay_{name}", Path(__file__).with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        return module
-    load_ci_fixtures = _sibling("load_ci_fixtures")
-    export_research_snapshot = _sibling("export_research_snapshot")
-    validate_bicam_product = _sibling("validate_bicam_product")
-    _replay = _sibling("replay_bill_version_slice")
-    validate_test_url, canonical_bytes, digest = _replay.validate_test_url, _replay.canonical_bytes, _replay.digest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts import export_research_snapshot, load_ci_fixtures, validate_bicam_product  # noqa: E402
+from scripts.replay_bill_version_slice import canonical_bytes, digest, validate_test_url  # noqa: E402
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXED_TIME = datetime(2026, 9, 1, tzinfo=timezone.utc)

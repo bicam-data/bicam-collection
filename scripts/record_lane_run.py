@@ -1,10 +1,7 @@
-"""Record one finished systemd lane invocation in the lane_runs table.
+"""Record one finished bicam-* service run in lane_runs (ExecStopPost= hook from
+deploy/systemd/bicam-.service.d/10-lane-status.conf).
 
-This runs from the ExecStopPost= hook that
-deploy/systemd/bicam-.service.d/10-lane-status.conf adds to every bicam-*
-service.  A failure here must not change the outcome of the lane it is
-observing, so main() turns any exception into a single stderr line and
-exits 0.
+Never affects the lane: any error becomes one stderr line and exit 0.
 """
 
 from __future__ import annotations
@@ -22,10 +19,8 @@ from psycopg.types.json import Jsonb
 
 from bicam_collection.config import Settings
 
-# ExecStopPost= runs after the main process has exited but before the unit
-# enters the inactive state, so ExecMainExitTimestamp already describes this
-# run while InactiveEnterTimestamp still describes the previous one.  The
-# latter is read only so it lands in details for diagnosis.
+# In ExecStopPost=, ExecMainExitTimestamp is this run; InactiveEnterTimestamp is
+# still the previous one (kept in details only).
 TIMESTAMP_PROPERTIES = (
     "ExecMainStartTimestamp",
     "ExecMainExitTimestamp",
@@ -101,9 +96,7 @@ def build_lane_run(
     recorded_at: datetime,
 ) -> LaneRun:
     started_at = parse_systemd_timestamp(properties["ExecMainStartTimestamp"])
-    # An exec failure before the main process starts leaves the exit
-    # timestamp empty; the hook runs immediately afterwards, so "now" is
-    # within a second of the truth.
+    # Exec failed before start: no exit timestamp, and now is within a second of it.
     finished_at = parse_systemd_timestamp(properties["ExecMainExitTimestamp"])
     if finished_at is None:
         finished_at = recorded_at

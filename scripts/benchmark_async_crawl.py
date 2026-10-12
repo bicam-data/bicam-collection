@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""Measure the crawler's bounded child-resource concurrency without network I/O.
-
-The benchmark deliberately uses the real :class:`AsyncSpecCrawler`, URL
-canonicalization, and Rotisserie-backed client with a deterministic in-memory
-transport/store. That makes the result useful for comparing crawler/Rotisserie
-revisions without spending API quota or depending on source availability.
+"""Benchmark crawler concurrency with no network: the real AsyncSpecCrawler and
+rotisserie client over an in-memory transport and store (run in CI).
 """
 
 from __future__ import annotations
@@ -114,9 +110,7 @@ class BenchmarkSession:
 
 class RotisserieBenchmarkClient:
     def __init__(self, children: int, concurrency: int, delay_seconds: float) -> None:
-        # This is process-local and never sends a request.  Two extra keys
-        # offset the client's normal reserve, keeping the transport benchmark
-        # focused on crawler concurrency rather than API-key starvation.
+        # Two spare keys offset the client's reserve so keys never limit the benchmark.
         os.environ["CONGRESS_API_KEYS"] = ",".join(
             f"benchmark-token-{index}" for index in range(max(3, concurrency + 2))
         )

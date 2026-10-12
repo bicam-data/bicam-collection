@@ -1,8 +1,5 @@
-"""Replay real bill-version publication SQL on synthetic, frozen boundary inputs.
-
-Requires an explicit empty, loopback-only database named bicam_replay_*.
-Never loads .env or DATABASE_URL. Does not rebuild upstream reconciliation or
-evaluate empirical linkage accuracy. Outputs are diagnostic, not release-ready.
+"""Replay the bill-version SQL on synthetic inputs in an empty, loopback-only
+``bicam_replay_*`` database. Never reads .env or DATABASE_URL; diagnostic only.
 """
 from __future__ import annotations
 
@@ -201,8 +198,7 @@ def run_replay(test_url: str, output: Path) -> dict:
     if not __debug__:
         raise ValueError("replay checks require Python assertions; do not run with -O")
     config = validate_test_url(test_url)
-    # Check before any filesystem or database mutation. Never reuse an existing
-    # database containing relations, even if its name happens to match.
+    # Before touching anything: the database must be empty.
     with psycopg.connect(test_url, row_factory=dict_row) as connection:
         existing = connection.execute("""select count(*) as count from pg_class c
             join pg_namespace n on n.oid=c.relnamespace
@@ -216,7 +212,6 @@ def run_replay(test_url: str, output: Path) -> dict:
         frozen = _inputs(connection)
     frozen_bytes = canonical_bytes(frozen)
     (output / "frozen-inputs.json").write_bytes(frozen_bytes)
-    # Profiles contain environment references only, and are not distributed.
     profile = {"bicam_version_replay": {"target": "replay", "outputs": {"replay": {
         "type": "postgres", "host": config["host"], "port": int(config["port"]),
         "user": config["user"], "dbname": config["dbname"], "schema": "public", "threads": 1,

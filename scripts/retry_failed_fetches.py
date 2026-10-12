@@ -1,9 +1,6 @@
-"""Retry a bounded set of failed raw fetches without replaying partitions.
+"""Retry a bounded set of failed fetches without replaying whole partitions.
 
-The normal historical runner is intentionally partition-oriented.  This helper
-is for the smaller residual set of failed child/detail URLs left by rate limits
-or transient source errors.  It preserves the original node type so a direct
-detail retry is not accidentally stored as a list payload.
+Each URL keeps its original node type, so a detail retry is never stored as a list.
 """
 
 from __future__ import annotations
@@ -87,13 +84,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _without_descendants(spec):
-    """Return an isolated spec that cannot fan out from a retry seed.
-
-    A failed list page is often a useful retry target by itself, but a normal
-    ``backfill_descendants`` crawl follows every child edge in its payload.
-    Copying the spec keeps the normal crawl behavior unchanged while allowing
-    bounded retries to suppress that fan-out safely.
-    """
+    """Copy of the spec with child edges removed, so a retry cannot fan out."""
 
     retry_spec = copy.deepcopy(spec)
     for node in retry_spec.nodes.values():
@@ -127,9 +118,7 @@ def load_failed_fetches(
         failed_status_filter = "(failed.http_status = any(%s) or failed.http_status is null)"
         source_500_filter = ""
     else:
-        # A URL that has already produced a source-side 500 is retained in the
-        # ledger, but a later 429 from a retry must not make it look transient.
-        # Operators can explicitly opt back in with --include-source-500.
+        # A URL that once returned a source 500 stays excluded even if a later retry got a 429.
         source_500_filter = """
               and not exists (
                   select 1
@@ -140,10 +129,7 @@ def load_failed_fetches(
               )
         """
         failed_status_filter = "(failed.http_status = any(%s) or failed.http_status is null)"
-    # ``--include-source-500`` is an explicit operator request to revisit
-    # deterministic source failures (normally excluded to avoid replaying the
-    # same malformed URL forever).  Keep the known-error guard for ordinary
-    # retry passes, but do not let it silently override the opt-in flag.
+    # --include-source-500 overrides the known-source-error guard.
     known_source_error_filter = "" if include_source_500 else """
               and not exists (
                   select 1
@@ -158,9 +144,7 @@ def load_failed_fetches(
         query_params.append(retryable_statuses)
     query_params.append(min_age_minutes)
     if categories:
-        # Retry candidates come from failed_requests, which is the compact
-        # append-only failure ledger.  Keep the filter on that relation so a
-        # retry pass does not scan the multi-gigabyte crawl_run_fetches table.
+        # Select from the compact failed_requests ledger, not crawl_run_fetches.
         category_filter = "and failed.category = any(%s)"
         query_params.append(categories)
     if endpoint_url:
@@ -170,10 +154,7 @@ def load_failed_fetches(
         node_type_filter = "and failed.node_type = any(%s)"
         query_params.append(node_types)
     query_params.append(max(1, limit))
-    # An explicit endpoint request is an operator-directed repair, so it must
-    # be allowed through even when a broader successful page partition would
-    # normally suppress retries for a deterministic source error.  Automatic
-    # retry sweeps keep the coverage suppression below to avoid quota churn.
+    # An explicitly requested endpoint bypasses the coverage-based suppression below.
     covered_partition_filter = "" if endpoint_url else """
               and not (
                   right(failed.node_type, 5) = '_list'
@@ -288,13 +269,7 @@ def load_failed_fetches(
         limit %s
     """
     with psycopg.connect(database_url) as connection:
-        # Failure selection scans a durable telemetry ledger that grows with
-        # the crawl.  Keep a cancelled or degraded retry pass from leaving a
-        # long-running PostgreSQL backend behind the supervisor timeout.
         connection.execute("set statement_timeout='120s'", ())
-        # Candidate selection intentionally uses only the compact failure
-        # ledger; the large fetch ledger is consulted later for this retry
-        # run's outcome summary.
         rows = connection.execute(query, query_params).fetchall()
     return [
         FailedFetch(
@@ -310,12 +285,7 @@ def load_failed_fetches(
 
 
 def summarize_retry_run(*, database_url: str, crawl_run_id: str) -> tuple[int, int]:
-    """Return ``(failed, rate_limited)`` for one bounded retry run.
-
-    A retry batch must stop after the first HTTP 429.  Continuing to spend the
-    remaining candidates while the source-wide window is exhausted only
-    creates more durable failures and can cool every configured key.
-    """
+    """Return ``(failed, rate_limited)`` for one retry run; callers stop at the first 429."""
 
     with psycopg.connect(database_url) as connection:
         row = connection.execute(
@@ -340,9 +310,7 @@ def _seed_path(endpoint_url: str, source: str, *, page_size: int | None = None) 
         path = path[len(prefix) :]
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     if page_size is not None:
-        # Failed list pages can be source-side 500s at a large limit while the
-        # same offset succeeds at a smaller page size.  Replace the existing
-        # value; ``with_query_params`` intentionally preserves existing keys.
+        # Replace the page size (with_query_params keeps existing keys).
         if "limit" in query:
             query["limit"] = str(page_size)
         if "pageSize" in query:
@@ -351,14 +319,8 @@ def _seed_path(endpoint_url: str, source: str, *, page_size: int | None = None) 
 
 
 def _retry_page_size(candidate: FailedFetch, requested: int) -> int:
-    """Choose a conservative page size for source-side HTTP 500 retries.
-
-    Congress.gov and GovInfo occasionally return a 500 for a large list page
-    even though a smaller page at the same offset is available.  Source-500
-    recovery is deliberately bounded to ten rows.  If the failed URL already
-    used an even smaller page (as the malformed cosponsor pages do), preserve
-    that size so a retry cannot broaden the malformed response and create a
-    new failure.
+    """Page size for retrying a source 500: at most ten rows, or the failed URL's own
+    size if smaller, since big list pages can 500 where small ones succeed.
     """
 
     if candidate.http_status != 500:
@@ -443,10 +405,8 @@ async def run_retries(args: argparse.Namespace, *, project_root: Path) -> tuple[
                         mode="retry_no_descendants" if args.no_descendants else "backfill_descendants",
                         seed_path=_seed_path(candidate.endpoint_url, spec.source, page_size=retry_page_size),
                         seed_node_type=candidate.node_type,
-                    # ``--no-descendants`` removes child edges but should not
-                    # suppress pagination: a source-side 500 on a 250-row
-                    # list page is repaired by retrying the same offset with a
-                    # smaller page size across the bounded page sequence.
+                    # --no-descendants drops child edges but keeps pagination, so a failed 250-row
+                    # page can be retried at a smaller size across its page sequence.
                     max_pages=args.max_pages,
                         page_size=retry_page_size,
                     )

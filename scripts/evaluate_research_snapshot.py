@@ -1,10 +1,7 @@
-"""Produce bounded, offline quality metrics for an immutable BICAM candidate.
+"""Offline quality metrics for an export candidate (no database).
 
-The evaluator never connects to PostgreSQL.  It streams the candidate's
-compressed CSVs and reports row counts, NULL/blank missingness, Congress and
-chamber coverage, extracted-text availability, and bill-version link outcomes.
-It deliberately reports descriptive metrics rather than inventing linkage
-labels or treating source eligibility as population completeness.
+Streams the CSVs: row counts, missingness, Congress/chamber coverage, text
+availability and bill-version link outcomes. Descriptive only.
 """
 
 from __future__ import annotations
@@ -27,12 +24,7 @@ DIMENSION_COLUMNS = ("congress", "chamber", "origin_chamber", "source")
 
 
 def _csv_rows(stream: Iterable[str], null_marker: str) -> Iterator[list[str | None]]:
-    """Read PostgreSQL CSV while retaining its quoted-versus-unquoted NULL semantics.
-
-    csv.reader handles multiline/escaped fields; the physical record lets us
-    recover quoting without mistaking a quoted literal marker for SQL NULL.
-    Memory is bounded by one record, including large extracted documents.
-    """
+    """Read PostgreSQL CSV keeping quoted vs unquoted NULL distinct, one record in memory at a time."""
     physical_lines: list[str] = []
 
     def lines() -> Iterator[str]:

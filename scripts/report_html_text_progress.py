@@ -182,8 +182,6 @@ def build_report(database_url: str) -> dict[str, object]:
         'success_eta_hours',
     ]
     return {
-        # Increment when the progress artifact gains a field so downstream
-        # checkpoint readers can distinguish the richer report shape.
         'schema_version': 5,
         'generated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         'tables': [dict(zip(columns, row, strict=True)) for row in rows],

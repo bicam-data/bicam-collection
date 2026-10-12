@@ -1,9 +1,5 @@
-"""Verify that the latest portable snapshot and database quality gates are fresh.
-
-This is a read-only release check.  It is safe to run from a timer after an
-export or reconciliation refresh and returns non-zero when a snapshot is too
-old, its files have drifted, or the materialized main-11 quality tables or
-Congress.gov reciprocity acceptance metrics have regressed.
+"""Fail when the latest snapshot is stale, its files drifted, or the materialized
+quality and reciprocity metrics regressed (read-only).
 """
 
 from __future__ import annotations
@@ -68,11 +64,7 @@ def _verify_file(path: Path, expected_hash: str, expected_rows: int) -> tuple[in
     actual_hash = digest.hexdigest()
     if actual_hash != expected_hash:
         raise ValueError(f"SHA-256 mismatch for {path.name}")
-    # Public text fields (for example bill/committee-report text) can exceed
-    # csv's conservative 128 KiB default field limit. The export manifest has
-    # already authenticated the compressed bytes; use an unbounded parser
-    # limit here so verification checks row counts rather than rejecting valid
-    # long-form source text.
+    # Text fields exceed csv's 128 KiB default; the manifest already verified the bytes.
     csv.field_size_limit(sys.maxsize)
     with gzip.open(path, "rt", newline="") as stream:
         actual_rows = sum(1 for _ in csv.reader(stream)) - 1

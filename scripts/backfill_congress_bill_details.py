@@ -1,11 +1,6 @@
-"""Fetch Congress.gov bill details for bills present only in GovInfo.
+"""Fetch Congress.gov details for bills that exist only in GovInfo.
 
-The reconciliation layer can identify a GovInfo bill whose canonical identity
-is absent from the Congress.gov detail table.  This helper turns those
-identities into bounded, auditable Congress detail fetches.  It deliberately
-does not refetch an existing response and skips endpoints already known to be
-404s; later runs can therefore resume safely as the historical crawler moves
-through its partitions.
+Skips stored responses and known 404s, so it resumes safely.
 """
 
 from __future__ import annotations
@@ -177,11 +172,8 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
     store = AsyncPostgresStore(settings.database_url)
 
     async def traverse_children(candidate: TargetedCandidate) -> None:
-        # Reconciliation can discover a GovInfo-first bill before the
-        # partition verifier reaches that newly inserted Congress root.
-        # Traverse this exact stored detail in backfill mode immediately:
-        # the root is not fetched twice, existing children are skipped,
-        # and every advertised missing child URL is collected now.
+        # Walk this stored detail now so its missing children are fetched without
+        # waiting for the partition crawler.
         descendant_crawler = AsyncSpecCrawler(
             base_url=base_url,
             spec=spec,

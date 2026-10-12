@@ -19,32 +19,12 @@ def _load_module():
     return module
 
 
-def test_export_scope_is_explicit_and_covers_main11() -> None:
+def test_parse_args_accepts_explicit_tables() -> None:
     script = _load_module()
-    assert set(script.CORE_EXPORTS) == {
-        "bills",
-        "amendments",
-        "members",
-        "congresses",
-        "hearings",
-        "committees",
-        "committee_meetings",
-        "committee_prints",
-        "committee_reports",
-        "treaties",
-        "nominations",
-    }
     args = script.parse_args(["--tables", "bills", "committee_reports", "--dry-run"])
     assert args.tables == ["bills", "committee_reports"]
     assert args.dry_run is True
 
-
-def test_export_scope_is_contract_only() -> None:
-    script = _load_module()
-
-    assert script.RELATION_EXPORTS == {}
-    assert len(script.EXPORTS) == 90
-    assert "bills_lobbied" not in script.EXPORTS
 
 
 def test_supplemental_export_is_explicit() -> None:

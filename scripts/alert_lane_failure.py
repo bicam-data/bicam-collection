@@ -1,9 +1,7 @@
-"""Write a local alert for a failed systemd lane unit.
+"""Log a failed bicam-* service run (OnFailure= hook via alert-bicam-lane@.service).
 
-Started by alert-bicam-lane@.service through the OnFailure= hook in
-deploy/systemd/bicam-.service.d/10-lane-status.conf.  Appends one JSON line
-to the alert log and stamps the matching lane_runs row.  Nothing here uses
-the network; the alert log is the notification channel.
+Appends one JSON line to the alert log, which is the notification channel, and
+stamps the matching lane_runs row.
 """
 
 from __future__ import annotations
@@ -66,8 +64,7 @@ def build_alert_line(unit: str, alerted_at: datetime, journal_lines: list[str]) 
 def mark_lane_run_alerted(
     connection: psycopg.Connection, unit: str, alerted_at: datetime
 ) -> int:
-    # OnFailure= fires after ExecStopPost= has finished, so the newest row for
-    # the unit is the failed invocation that triggered this alert.
+    # OnFailure= runs after ExecStopPost=, so the newest row is this failure.
     cursor = connection.execute(
         """
         UPDATE lane_runs
@@ -89,8 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     alerted_at = datetime.now(timezone.utc)
     line = build_alert_line(args.unit, alerted_at, read_recent_journal(args.unit))
-    # The log line is written before touching the database because a database
-    # outage is one of the likelier reasons a lane failed in the first place.
+    # Log first: a database outage may be why the lane failed.
     args.log_path.parent.mkdir(parents=True, exist_ok=True)
     with args.log_path.open("a", encoding="utf-8") as log:
         log.write(line)

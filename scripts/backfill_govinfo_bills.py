@@ -32,13 +32,7 @@ class BillPackage:
 
 
 def introduced_package_id(*, bill_type: str, bill_number: int, congress: int) -> str:
-    """Return the conventional GovInfo package ID for an introduced bill.
-
-    GovInfo uses ``ih`` for House-originated introduced packages and ``is``
-    for Senate-originated introduced packages.  This gives reconciliation a
-    deterministic targeted probe even when a Congress.gov text link does not
-    expose a GovInfo package URL.
-    """
+    """GovInfo package ID of the introduced version (``ih`` House, ``is`` Senate)."""
 
     normalized_type = bill_type.lower()
     senate_types = {"s", "sconres", "sjres", "sres"}

@@ -1,16 +1,9 @@
-"""Capture and normalize GovInfo Congressional Directory assignments.
+"""Parse GovInfo Congressional Directory committee rosters into a reviewable dbt seed.
 
-GovInfo publishes committee rosters as CDIR ``COMMITTEEASSIGNMENTS``
-granules.  The API summary for a granule contains metadata but not the body;
-the official HTML rendition is the bounded source used here.  This command
-keeps the downloaded evidence out of the public schema while producing a
-reviewable CSV seed for the durable ``bicam.committees_members`` relation.
-
-The parser deliberately preserves unresolved people and committee names in
-the seed.  The dbt public model only publishes edges for which both the
-member and committee have an evidence-backed canonical identifier.  That
-prevents a last-name-only roster from silently creating a wrong historical
-link when two legislators share a surname.
+Reads the HTML rendition of CDIR COMMITTEEASSIGNMENTS granules (the API summary
+has no body) and writes the seed behind ``bicam.committees_members``. Unresolved
+names stay in the seed; dbt only publishes edges whose member and committee both
+resolve, so a shared surname never creates a wrong link.
 """
 
 from __future__ import annotations
@@ -56,13 +49,7 @@ def normalize(value: str | None) -> str:
 
 
 def assignment_member_key(value: str | None) -> str:
-    """Return the surname column used by the CDIR assignment tables.
-
-    Newer House editions sometimes wrap ``Last, First, of`` across a second
-    line; older editions generally contain only a surname.  The first comma
-    component is the stable portion in both layouts, while preserving
-    multi-word surnames such as ``Van Drew`` when no comma is present.
-    """
+    """The surname key: the first comma component, or the whole name (``Van Drew``)."""
 
     value = re.sub(r"\s*\([A-Za-z]{2}(?:-[A-Za-z0-9]+)?\)\s*$", "", (value or "").strip())
     if "," in value:

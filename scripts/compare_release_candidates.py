@@ -1,16 +1,8 @@
-"""Compare two immutable BICAM export candidates with bounded, disk-backed diffs.
+"""Diff two timestamped export candidates (never ``latest``).
 
-The September 4 release plan requires a before/after comparison against the
-exact timestamped candidate directories.  This command deliberately does not
-follow ``latest`` and does not assume that the two manifests use the same
-contract version.  It verifies the declared files, streams each CSV through a
-temporary SQLite index, and reports row/key additions, removals, changes,
-duplicate keys, and per-Congress count deltas.
-
-The SQLite index keeps the comparison from holding large text relations in
-memory.  Full row values are not retained; examples contain stable keys,
-hashes, and a small bounded preview so that a multi-gigabyte text artifact
-does not become an accidental report payload.
+Verifies the declared files, streams each CSV through a temporary SQLite index,
+and reports added, removed and changed rows, duplicate keys, and per-Congress
+count deltas. Examples show keys, hashes and short previews only.
 """
 
 from __future__ import annotations
@@ -165,9 +157,7 @@ def _insert_candidate(
     path = candidate_dir / str(table["file"])
     size, digest = _hash_file(path)
     header, rows = _read_csv_rows(path)
-    # ``columns`` is the ordered, artifact-facing column metadata captured in
-    # the manifest. ``contract_columns`` is a type mapping whose YAML order is
-    # not necessarily the public CSV order.
+    # ``columns`` is in CSV order; ``contract_columns`` is a type map in YAML order.
     manifest_columns = table.get("columns")
     declared_header = (
         [str(column["name"]) for column in manifest_columns if isinstance(column, dict) and "name" in column]
@@ -186,10 +176,7 @@ def _insert_candidate(
     for row in rows:
         row_json = _json(row)
         row_hash = hashlib.sha256(row_json.encode("utf-8")).hexdigest()
-        # For relations without a trustworthy public key (or while comparing
-        # two incompatible key contracts), use the row digest as the SQLite
-        # lookup key. Storing the complete text row as a key would duplicate
-        # multi-gigabyte HTML artifacts inside the temporary index.
+        # Without a trustworthy key, index by row digest rather than storing whole rows.
         key = row_hash if not key_columns else _key_payload(row, key_columns)
         congress = row.get(congress_column) if congress_column else None
         connection.execute(
@@ -392,9 +379,7 @@ def compare_candidates(
                     key_columns_override=comparison_keys,
                 )
                 connection.commit()
-                # A key-contract migration must not be hidden by forcing a
-                # positional join.  The comparison falls back to complete-row
-                # identity and reports the changed declaration explicitly.
+                # Key contract changed: compare whole rows and report the change.
                 diff = _merge_groups(
                     _grouped(connection, "before", name),
                     _grouped(connection, "after", name),

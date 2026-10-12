@@ -136,8 +136,6 @@ async def run_backfill(args: argparse.Namespace, *, project_root: Path) -> tuple
         )
         for bill_text in bill_texts
     ]
-    # This script does not validate its arguments, so clamp here rather than
-    # letting a zero concurrency deadlock the semaphore.
     outcome = await run_targeted_backfill(
         FAMILY,
         candidates,

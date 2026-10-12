@@ -1,11 +1,7 @@
-"""Validate a built PostgreSQL ``bicam`` schema against the public contract.
+"""Validate a built ``bicam`` schema against contracts/bicam_public_schema.yaml.
 
-The contract is the source of truth for the public product.  This check does
-not inspect dbt model names or the ingestion schema: it compares the durable
-relations that a consumer will see, including relation names, column order,
-PostgreSQL-compatible types, and any nullability declarations present in the
-contract.  Deferred relations (currently ``bills_lobbied``) are intentionally
-reported as extra relations if they are materialized.
+Checks relation names, column order, types and declared nullability, i.e. what
+consumers see. Deferred relations (``bills_lobbied``) show as extras if built.
 """
 
 from __future__ import annotations
@@ -38,10 +34,7 @@ where table_schema = %s
 order by table_name, ordinal_position
 """
 
-# The contract vocabulary is deliberately small.  These aliases cover the
-# normal information_schema representations and safe PostgreSQL widening for
-# integer values.  ``numeric`` is needed for historical bill numbers such as
-# 12.5, which cannot be represented by an integer column.
+# Accepted database types per contract type; numeric covers half-numbered bills like 12.5.
 TYPE_ALIASES: dict[str, frozenset[str]] = {
     "text": frozenset({"text", "character varying", "character", "varchar", "bpchar"}),
     "integer": frozenset({"smallint", "integer", "bigint", "int2", "int4", "int8"}),
@@ -78,11 +71,7 @@ def contract_relations(
     feature_status: str = "core-now",
     include_supplemental: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return declared relations in contract order, including core children.
-
-    Supplemental relations are opt-in so the historical eleven-family/archive
-    contract remains stable for downstream consumers.
-    """
+    """Declared relations in contract order; supplemental ones only when requested."""
 
     result: list[dict[str, Any]] = []
     for family in document.get("families", []):
@@ -167,12 +156,9 @@ def compare_schema(
     relation_kinds: Mapping[str, str] | None = None,
     include_supplemental: bool = False,
 ) -> dict[str, Any]:
-    """Compare contract relations with supplied database metadata.
+    """Compare contract relations with database metadata.
 
-    This pure function makes the validator straightforward to unit test
-    without a live database.  ``actual_relations`` may be a mapping of name to
-    column metadata or an iterable of names (useful when testing missing and
-    extra relation reporting).
+    ``actual_relations`` maps names to column metadata, or is just an iterable of names.
     """
 
     core_declared = contract_relations(document)
@@ -195,8 +181,6 @@ def compare_schema(
         columns_by_name = {name: [] for name in actual_names}
     expected_names = list(expected_by_name)
     missing_relations = [name for name in expected_names if name not in actual_names]
-    # Supplemental relations may exist in the live schema without changing
-    # the exact core archive surface.
     extra_relations = sorted(actual_names - set(expected_names) - supplemental_names)
     relation_reports: list[dict[str, Any]] = []
     for name in expected_names:
@@ -361,28 +345,14 @@ def _qualified_relation(schema: str, relation: str) -> sql.Composed:
 
 
 def _required_value_expression(column: str) -> sql.Composed:
-    """Return a NULL/blank-safe required-value predicate.
-
-    Public required fields are not satisfied by a SQL NULL or an empty text
-    value.  Casting to text is deliberate here: it preserves zero/false while
-    treating only NULL and blank strings as absent, regardless of the source
-    column's PostgreSQL scalar type.
-    """
+    """Predicate treating NULL and blank text as missing, but keeping zero and false."""
 
     identifier = sql.Identifier(column)
     return sql.SQL("({} IS NULL OR btrim(({})::text) = '')").format(identifier, identifier)
 
 
 def _composite_foreign_keys(relation: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Return additive composite-FK declarations in normalized form.
-
-    Scalar references continue to use ``foreign_keys``.  Relations that need
-    a multi-column reference may additionally declare
-    ``foreign_key_constraints`` as a list of mappings with
-    ``local_columns``, ``target_relation`` and ``target_columns``.  Keeping
-    this separate preserves the existing contract format while making
-    composite references explicit and auditable.
-    """
+    """Normalized multi-column references from ``foreign_key_constraints``."""
 
     declarations = relation.get("foreign_key_constraints", [])
     if declarations is None:
@@ -460,14 +430,7 @@ def validate_product_data(
     include_supplemental: bool = False,
     max_examples: int = 10,
 ) -> dict[str, Any]:
-    """Validate declared keys, required values, and foreign keys on real rows.
-
-    This is intentionally separate from :func:`compare_schema`: metadata
-    validation can prove that a column exists, but only this check can prove
-    that a candidate's rows satisfy the declared public grain.  It is opt-in
-    for the compatibility CLI so schema-only checks remain inexpensive; the
-    candidate-release validator should always enable it.
-    """
+    """Check declared keys, required values and foreign keys against the actual rows."""
 
     if max_examples < 1:
         raise ValueError("max_examples must be positive")
@@ -479,9 +442,7 @@ def validate_product_data(
         columns = relation.get("columns", {})
         if not isinstance(columns, Mapping):
             continue
-        # Case is part of the public semantic contract.  Keep this check in
-        # the release validator as well as the dbt assertion so an export or
-        # manually materialized table cannot bypass model-level tests.
+        # Also checked here so a manually built table can't skip the dbt test.
         for chamber_column in sorted(CHAMBER_COLUMNS.intersection(columns)):
             identifier = sql.Identifier(chamber_column)
             checks.append(
@@ -532,7 +493,6 @@ def validate_product_data(
             null_predicate = sql.SQL(" OR ").join(
                 sql.SQL("{} IS NULL").format(identifier) for identifier in key_identifiers
             )
-            # A key violation is either a NULL component or a repeated tuple.
             null_query = sql.SQL("select {}, count(*) over () as __violation_count from {} where {} limit %s").format(
                 sql.SQL(", ").join(key_identifiers),
                 _qualified_relation(schema, name),

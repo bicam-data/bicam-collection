@@ -1,11 +1,7 @@
-"""Export the contract-defined BICAM product as one coherent candidate.
+"""Export every contract relation from the ``bicam`` schema as one release candidate.
 
-Every core-now relation in ``contracts/bicam_public_schema.yaml`` is exported
-from the lowercase ``bicam`` PostgreSQL schema. Files use the contract's
-column order and declared deterministic order, and are written inside one
-repeatable-read transaction so the manifest and portable provenance sidecar
-describe a single database snapshot. Export never changes the mutable
-``latest`` pointer; promotion is a separate validated operation.
+All files come from one repeatable-read transaction, in contract column order
+and declared row order. ``latest`` is never changed here; promotion is separate.
 """
 
 from __future__ import annotations
@@ -15,7 +11,7 @@ from datetime import datetime, timezone
 import gzip
 import hashlib
 import importlib.metadata
-import importlib.util
+import sys
 import json
 import platform
 from pathlib import Path
@@ -29,48 +25,18 @@ import psycopg
 from bicam_collection.config import Settings
 from bicam_collection.target_scope import TARGET_CONGRESS_CATEGORIES
 
-try:  # Works both as ``python -m scripts...`` and as a direct script.
-    from scripts.validate_bicam_product import (
-        DEFAULT_CONTRACT,
-        _type_matches,
-        contract_relations,
-        load_contract,
-        validate_product_data,
-    )
-except ModuleNotFoundError:  # pragma: no cover - depends on invocation path
-    _validator_spec = importlib.util.spec_from_file_location(
-        "_bicam_product_validator", Path(__file__).with_name("validate_bicam_product.py")
-    )
-    if _validator_spec is None or _validator_spec.loader is None:
-        raise ImportError("unable to load validate_bicam_product.py")
-    _validator = importlib.util.module_from_spec(_validator_spec)
-    _validator_spec.loader.exec_module(_validator)
-    DEFAULT_CONTRACT = _validator.DEFAULT_CONTRACT
-    _type_matches = _validator._type_matches
-    contract_relations = _validator.contract_relations
-    load_contract = _validator.load_contract
-    validate_product_data = _validator.validate_product_data
-
-try:
-    from scripts.export_source_evidence import _query_rows as _query_source_evidence_rows
-    from scripts.export_source_evidence import write_bundle as _write_source_evidence_bundle
-except ModuleNotFoundError:  # pragma: no cover - direct-script fallback
-    _source_evidence_spec = importlib.util.spec_from_file_location(
-        "_bicam_source_evidence", Path(__file__).with_name("export_source_evidence.py")
-    )
-    if _source_evidence_spec is None or _source_evidence_spec.loader is None:
-        raise ImportError("unable to load export_source_evidence.py")
-    _source_evidence = importlib.util.module_from_spec(_source_evidence_spec)
-    _source_evidence_spec.loader.exec_module(_source_evidence)
-    _query_source_evidence_rows = _source_evidence._query_rows
-    _write_source_evidence_bundle = _source_evidence.write_bundle
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.export_source_evidence import _query_rows as _query_source_evidence_rows  # noqa: E402
+from scripts.export_source_evidence import write_bundle as _write_source_evidence_bundle  # noqa: E402
+from scripts.validate_bicam_product import (  # noqa: E402
+    DEFAULT_CONTRACT,
+    _type_matches,
+    contract_relations,
+    load_contract,
+    validate_product_data,
+)
 
 
-# Compatibility alias for callers that imported the old main-table constant.
-# Product exports use the full contract plan below.
-CORE_EXPORTS: dict[str, str] = {}
-RELATION_EXPORTS: dict[str, str] = {}
-EXPORTS: dict[str, str] = {}
 LINEAGE_COLUMNS = frozenset(
     {
         "source_raw_id",
@@ -83,22 +49,8 @@ LINEAGE_COLUMNS = frozenset(
         "congress_raw_response_version_id",
     }
 )
-# COPY's explicit NULL marker keeps SQL NULL distinct from a quoted empty
-# string in the portable CSV artifacts. Keep this value in the manifest so
-# offline consumers do not have to infer encoding semantics.
+# Distinguishes SQL NULL from an empty string in the CSVs; recorded in the manifest.
 CSV_NULL_MARKER = r"\N"
-try:
-    CORE_EXPORTS = {
-        relation["table"]: relation["table"]
-        for relation in contract_relations(load_contract())
-        if relation["table"] in {
-            "bills", "amendments", "members", "congresses", "hearings", "committees",
-            "committee_meetings", "committee_prints", "committee_reports", "treaties", "nominations",
-        }
-    }
-    EXPORTS = {relation["table"]: relation["table"] for relation in contract_relations(load_contract())}
-except (OSError, ValueError, KeyError):  # pragma: no cover - malformed contract is checked at runtime
-    pass
 
 
 def quote_identifier(identifier: str) -> str:
@@ -283,12 +235,8 @@ def _installed_version(distribution: str) -> str | None:
 
 
 def _source_bundle_evidence(project_root: Path) -> dict[str, Any]:
-    """Capture the explicit code/configuration identity for a candidate.
-
-    The bundle is metadata, not a claim that raw source payloads are
-    distributable.  It makes the advertised reproduction boundary explicit and
-    prevents credentials, local environments, caches, and unrelated files from
-    being silently included in a release identity.
+    """Record the code and configuration identity of the candidate (an allow-list,
+    so no credentials or local files leak in).
     """
 
     allowlist_paths = (
@@ -356,19 +304,13 @@ def _capture_build_evidence(
     table_records: list[dict[str, Any]],
     database_snapshot_at: datetime,
 ) -> dict[str, Any]:
-    """Capture candidate-bound build, frontier, and quality evidence.
+    """Record build, frontier and quality evidence on the export's own snapshot.
 
-    All queries run on the exporter's repeatable-read connection, binding
-    these checks to the same database snapshot as the CSV files. This alone
-    does NOT establish that all materialized models share a completed build
-    generation; independent input/run/row binding is required for that claim.
-    Missing quality relations are recorded as incomplete evidence and cannot
-    be promoted.
+    That does not prove every model came from one build generation. Missing quality
+    relations are recorded as incomplete evidence, which blocks promotion.
     """
 
-    # Public product relations live in ``bicam``; operational dbt facts use
-    # the target schema (normally ``public``) and are deliberately kept out
-    # of the consumer-facing archive.
+    # Operational dbt facts (target schema) stay out of the consumer archive.
     quality_schema = "public"
     quality_relation_names = (
         "fct_reconciliation_metrics",
@@ -548,21 +490,14 @@ def _copy_relation(
     quoted_schema = quote_identifier(schema)
     quoted_relation = quote_identifier(name)
     select_columns = ", ".join(quote_identifier(column) for column in columns)
-    # A relation may intentionally have a grouping key rather than a unique
-    # public key (for example nominations_nominees, where one position can
-    # name multiple people).  Export order is deterministic in either case;
-    # it must not be advertised as a uniqueness claim.
+    # Some relations have a grouping key, not a unique one (e.g. nominations_nominees).
     ordering = relation.get("export_order") or relation.get("primary_key") or relation.get("grouping_key") or list(columns)
     order_columns = ", ".join(quote_identifier(column) for column in ordering)
     order_sql = f" order by {order_columns}" if order_columns else ""
     row = connection.execute(f"select count(*) from {quoted_schema}.{quoted_relation}").fetchone()
     row_count = int(row[0] if row else 0)
     with destination.open("wb") as raw_stream:
-        # mtime=0 makes checksums reproducible when relation contents are
-        # unchanged; generated_at remains in the manifest.
-        # Level 6 keeps deterministic bytes (mtime=0) while avoiding the
-        # disproportionate CPU cost of gzip's default level 9 on the large
-        # extracted HTML/text relations.
+        # mtime=0 keeps checksums reproducible; level 6 avoids level 9's cost on the large text relations.
         with gzip.GzipFile(fileobj=raw_stream, mode="wb", mtime=0, compresslevel=6) as compressed:
             with connection.cursor() as cursor:
                 with cursor.copy(
@@ -592,11 +527,9 @@ def export_snapshot(
     contract_path: Path = DEFAULT_CONTRACT,
     schema: str = "bicam",
 ) -> dict[str, Any]:
-    """Export selected core contract relations or the complete product.
+    """Export the selected relations, or the whole product.
 
-    The returned dictionary includes a private ``_candidate_manifest_path``
-    convenience field for schedulers. It is not written into the manifest,
-    keeping the artifact independent of its local absolute path.
+    The returned ``_candidate_manifest_path`` is for callers only and is not in the manifest.
     """
 
     if schema != "bicam":
@@ -776,9 +709,7 @@ def export_snapshot(
             provenance["source_evidence"] = manifest["source_evidence"]
         (temporary_dir / "provenance.json").write_text(_render_json(provenance), encoding="utf-8")
         temporary_dir.rename(final_dir)
-        # Do not update ``latest`` here. A separate promotion command first
-        # validates this exact candidate's manifest, bytes, headers, and
-        # complete relation inventory, then swaps the pointer atomically.
+        # Never touch latest here; promote_research_snapshot validates and swaps it.
         manifest["_candidate_manifest_path"] = str(final_dir / "manifest.json")
         return manifest
     except Exception:

@@ -1,13 +1,9 @@
-"""Backfill missing child URLs from every stored detail record.
+"""Fetch missing descendants of every stored detail record, in keyset batches.
 
-Some historical Congress.gov list partitions (especially amendments) return
-empty responses even though their detail records were discovered through the
-global list.  A partition crawl therefore cannot reach those details' child
-URLs.  This runner walks stored refresh roots in stable endpoint-URL keyset batches and
-uses ``backfill_refresh_descendants`` so existing child payloads are skipped
-while missing descendants are fetched.  The ``--source`` switch also supports
-GovInfo collections whose stored package/detail roots need a historical
-descendant pass (for example Congressional Directories).
+Some list partitions (notably historical amendments) come back empty although
+their details were found through the global list, so a partition crawl never
+reaches those children. Uses backfill_refresh_descendants, which skips stored
+children. --source also covers GovInfo (e.g. Congressional Directories).
 """
 
 from __future__ import annotations
@@ -80,9 +76,7 @@ def _load_checkpoint(path: Path | None) -> dict[str, object]:
     if not isinstance(categories, dict):
         raise ValueError(f"descendant checkpoint categories must be an object: {path}")
     if payload.get("version") == 1:
-        # OFFSET over mutable fetched_at could already have skipped roots.  A
-        # v1 cursor cannot be converted safely, so reset each category and let
-        # idempotent backfill traversal re-check it from the beginning.
+        # v1 cursors (OFFSET over fetched_at) can't be converted; restart those categories.
         migrated_categories: dict[str, object] = {}
         for category, raw in categories.items():
             previous_root_count = 0
@@ -133,16 +127,12 @@ def _category_cursor(
     completed = bool(raw.get("completed", False))
     stored_fingerprint = raw.get("spec_fingerprint")
     if spec_fingerprint is not None and stored_fingerprint != spec_fingerprint:
-        # A newly declared child or pagination rule must replay stored roots
-        # even when their population did not change. Existing responses are
-        # still skipped by backfill_refresh_descendants, so this is bounded to
-        # the newly reachable URLs/pages.
+        # A changed child/pagination rule replays stored roots; stored children are still skipped.
         after_endpoint_url = None
         cycle_start_root_count = root_count
         completed = False
     elif completed and root_count != cycle_start_root_count:
-        # New roots can sort before an endpoint cursor.  Start a new complete
-        # cycle whenever the population changes so no insertion is stranded.
+        # New roots can sort before the cursor, so a changed population restarts the cycle.
         after_endpoint_url = None
         cycle_start_root_count = root_count
         completed = False
@@ -219,10 +209,7 @@ async def run(args: argparse.Namespace, *, project_root: Path) -> int:
     completed_batches = 0
     checkpoint = _load_checkpoint(args.checkpoint_path)
     try:
-        # Initialize every category before doing network work, then process one
-        # batch per category per round. A large category (nominations) must not
-        # consume an entire bounded invocation while smaller item-level
-        # backlogs (amendment actions/texts, bill actions) wait indefinitely.
+        # One batch per category per round so a large category can't starve the rest.
         states: dict[str, tuple[object, dict[str, object], int]] = {}
         for category, spec in specs.items():
             node_type = spec.refresh_root_node_type
@@ -313,9 +300,7 @@ async def run(args: argparse.Namespace, *, project_root: Path) -> int:
                         flush=True,
                     )
                     return 1 if failures else 0
-                # A failed category gets another chance in a later round if a
-                # different category made progress; avoid a tight retry loop
-                # when every active source path is unavailable.
+                # Retry a failed category in a later round, but stop when nothing makes progress.
                 if batch_failed:
                     continue
             if not pending_categories or not round_progress:

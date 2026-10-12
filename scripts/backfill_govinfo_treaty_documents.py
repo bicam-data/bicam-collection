@@ -1,11 +1,7 @@
-"""Targeted GovInfo CDOC treaty-package backfill.
+"""Fetch GovInfo CDOC packages and granules for the treaties known to Congress.gov.
 
-The complete CDOC collection contains many document types.  Treaty documents
-have a deterministic package identifier, however, so this backfill starts
-from the treaty identities already present in Congress.gov and follows only
-the corresponding package and its granules.  Existing responses are reused
-to discover descendants and are recorded as skipped fetches in the durable
-crawl-run ledger.
+Treaty package IDs are deterministic, so only those packages are fetched;
+stored ones are walked for descendants and recorded as skipped.
 """
 
 from __future__ import annotations

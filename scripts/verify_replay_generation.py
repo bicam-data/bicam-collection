@@ -1,7 +1,4 @@
-"""Verify frozen-input/build/candidate binding and bill-row traces offline.
-
-This validates a synthetic replay artifact, not production research readiness.
-"""
+"""Offline check of a synthetic replay artifact's input/build/candidate binding."""
 from __future__ import annotations
 
 import argparse
@@ -10,26 +7,14 @@ import csv
 from datetime import datetime
 import gzip
 import hashlib
-import importlib.util
 import json
 from pathlib import Path
 import sys
 
-try:
-    from scripts.evaluate_research_snapshot import _csv_rows
-    from scripts.promote_research_snapshot import validate_candidate
-    from scripts.validate_bicam_product import load_contract, contract_relations
-except ModuleNotFoundError:
-    def _sibling(name):
-        spec = importlib.util.spec_from_file_location(f"_generation_{name}", Path(__file__).with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        return module
-    _csv_rows = _sibling("evaluate_research_snapshot")._csv_rows
-    validate_candidate = _sibling("promote_research_snapshot").validate_candidate
-    _contract = _sibling("validate_bicam_product")
-    load_contract, contract_relations = _contract.load_contract, _contract.contract_relations
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.evaluate_research_snapshot import _csv_rows  # noqa: E402
+from scripts.promote_research_snapshot import validate_candidate  # noqa: E402
+from scripts.validate_bicam_product import contract_relations, load_contract  # noqa: E402
 
 
 def canonical(value):

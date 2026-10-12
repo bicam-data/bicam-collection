@@ -1,8 +1,7 @@
-"""Write a lightweight six-hour ingestion and reconciliation status report.
+"""Read-only six-hour ingestion and reconciliation status report.
 
-The report is intentionally read-only.  It uses the crawler's durable run and
-fetch tables for live progress, and the materialized dbt coverage/reconciliation
-facts for the last verified quality snapshot.
+Live progress comes from the crawl run/fetch tables; quality figures from the
+materialized dbt coverage and reconciliation facts.
 """
 
 from __future__ import annotations
@@ -37,9 +36,8 @@ class RunStatus:
     expected: int
     latest_congress: int | None
     recent_skips: int = 0
-    # A paginated list response can reveal a larger queue than has been
-    # materialized in crawl_run_expected_fetches while the crawler is still
-    # discovering descendants. Keep that observed seed total for ETAs.
+    # A list page's reported total can exceed the expected-fetch ledger while
+    # descendants are still being discovered; kept for ETAs.
     observed_total: int | None = None
 
 
@@ -132,16 +130,9 @@ _CHILD_PAGINATION_MISSING_RE = re.compile(
     re.MULTILINE,
 )
 
-# Congress API windows are rolling. A short burst can be much faster than the
-# sustainable deployment estimate and would otherwise make the ETA report
-# claim completion hours too early. The per-credential window and any local
-# aggregate setting are reported independently; the latter is not interpreted
-# as an account quota.
+# Sustainable rate for ETAs; a short burst would overstate it.
 _DEFAULT_CONGRESS_EFFECTIVE_RATE_CAP = 19_000.0
 
-# The production Congress.gov dataset is intentionally limited to these
-# endpoint families.  Other historical crawler rows remain queryable, but
-# must not appear as active scope in the six-hour status artifact.
 TARGET_CONGRESS_CATEGORIES = (
     "bills",
     "amendments",
@@ -160,10 +151,7 @@ TARGET_CONGRESS_CATEGORIES = (
 def _configured_congress_rate_cap() -> float:
     """Return the sustainable Congress attempts/hour cap used for ETAs."""
 
-    # The report-specific override is already an effective deployment cap
-    # (the systemd service sets it to the 0.20s pacer's 18,000 attempts/hour),
-    # so do not apply the credential safety factor a second time.  The legacy
-    # global setting remains a configured quota and is safety-adjusted below.
+    # The report override is already a deployment cap, so no safety factor.
     raw_report_cap = os.environ.get("BICAM_REPORT_CONGRESS_RATE_CAP")
     if raw_report_cap is not None:
         try:
@@ -243,9 +231,7 @@ def _root_log_summary(category: str, started_at: datetime) -> tuple[int, float |
             candidates += int(matches[-1])
         waits = [float(value) for value in _WAIT_RE.findall(text)]
         if waits:
-            # Logs retain earlier quota windows.  The final observed wait is
-            # the live estimate; using the historical maximum can turn a
-            # completed cooldown into a stale multi-hour ETA.
+            # Use the latest wait, not the historical maximum.
             wait_seconds = max(wait_seconds or 0.0, waits[-1])
     return candidates, wait_seconds
 
@@ -282,12 +268,8 @@ def _load_govinfo_windows(connection: psycopg.Connection) -> list[GovInfoWindowS
 
 
 def _govinfo_health(settings: Settings, checked_at: datetime) -> str:
-    """Return a redacted, read-only health status for the GovInfo API.
-
-    Materialized GovInfo rows can remain valid after a credential expires.  A
-    small live probe keeps the six-hour report from presenting that old
-    snapshot as evidence that future GovInfo refreshes are still possible.
-    Never include the key or response body in the artifact.
+    """Probe GovInfo with a tiny live request, so an expired key isn't hidden behind
+    still-valid materialized rows. The key and body are never written out.
     """
 
     values = {**parse_dotenv(settings.env_path), **os.environ}
@@ -350,13 +332,9 @@ def _congress_rate_scope(
     *,
     active_crawl: bool = False,
 ) -> str:
-    """Return a redacted, read-only summary of Congress rate-limit headers.
+    """Probe each Congress token separately and summarize its rate-limit headers.
 
-    The API exposes counters on responses, but those counters do not identify
-    the account or organization that owns a credential. Probe each configured
-    token separately so the durable report can distinguish token-scoped header
-    behavior from a documented account-level quota. Never persist tokens,
-    response bodies, or full request URLs containing credentials.
+    Tokens, bodies and credentialed URLs are never written out.
     """
 
     values = {**parse_dotenv(settings.env_path), **os.environ}
@@ -452,14 +430,8 @@ def _congress_rate_scope(
 
 
 def _load_child_backlog(audit_path: Path) -> tuple[int | None, int | None, str | None]:
-    """Read the most recent durable child-coverage audit, if available.
-
-    The active partition runner only knows about the four Congress jobs it has
-    started so far; later partitions are queued in the runner and therefore do
-    not appear in ``crawl_run_expected_fetches`` yet.  The six-hour audit
-    expands all stored child edges and is the authoritative estimate for that
-    downstream backlog.  Keep the report read-only and tolerate a missing or
-    partially-written audit artifact.
+    """Read the newest child-coverage audit, the authoritative estimate of the
+    child backlog (partitions not yet started have no expected-fetch rows).
     """
 
     try:
@@ -467,8 +439,7 @@ def _load_child_backlog(audit_path: Path) -> tuple[int | None, int | None, str |
     except OSError:
         return None, None, None
     matches = [int(value) for _category, value in _CHILD_MISSING_RE.findall(text)]
-    # New audits report the expected edge count separately.  Fall back to the
-    # legacy field for older artifacts, where it was the only total present.
+    # Older audits have only the legacy total field.
     total_match = _CHILD_EXPECTED_RE.search(text) or _CHILD_TOTAL_RE.search(text)
     if not matches and total_match is None:
         return None, None, None
@@ -477,9 +448,7 @@ def _load_child_backlog(audit_path: Path) -> tuple[int | None, int | None, str |
     generated = text.splitlines()[0].strip() if text.splitlines() else None
     if generated and generated.startswith("Child-coverage audit checkpoint:"):
         generated = generated.split(":", 1)[1].strip()
-    # Standalone checkpoints created by older audit wrappers may begin
-    # directly with the first category row rather than a timestamp.  Do not
-    # expose that row as the report's audit label; use the artifact mtime.
+    # Older audits may start with a category row instead of a timestamp.
     if generated and not re.match(
         r"^(?:[A-Z][a-z]{2} |Child-coverage audit checkpoint:|\d{4}-\d{2}-\d{2} )",
         generated,
@@ -522,26 +491,15 @@ def _load_child_pagination_gaps(audit_path: Path) -> tuple[int | None, int | Non
 
 
 def _newest_child_audit_path(report_dir: Path) -> Path:
-    """Choose the newest durable child audit artifact.
-
-    The full ingestion audit and the standalone child-coverage audit are
-    written by different scheduled/continuation paths.  During a long crawl
-    the standalone artifact can be newer than the last full audit, so always
-    prefer the most recently modified valid file.
-    """
+    """Newest valid child audit, whether from the full audit or a standalone one."""
 
     candidates = [
         report_dir / "ingestion-audit-latest.txt",
         report_dir / "child-coverage-audit-latest.txt",
-        # The supplemental refresh writes its authoritative audit as a
-        # checkpoint markdown file, while the older audit timer uses .txt.
-        # Include both formats so a newer zero-gap checkpoint cannot be hidden
-        # behind a stale legacy symlink.
+        # The supplemental lane writes .md checkpoints, the audit timer .txt.
         report_dir / "child-coverage-checkpoint-latest.md",
     ]
-    # Continuation/audit jobs also retain immutable timestamped child audits.
-    # Include them so a newer standalone audit is not hidden behind a stale
-    # latest symlink (or a status report generated before the symlink update).
+    # Timestamped audits too, in case a newer one isn't behind the latest symlink.
     candidates.extend(report_dir.glob("child-coverage-audit-*.txt"))
     candidates.extend(report_dir.glob("child-coverage-checkpoint-*.md"))
     candidates.extend((report_dir / "child-coverage-history").glob("*.txt"))
@@ -1007,11 +965,7 @@ def _rate_and_eta(
 ) -> tuple[str, str]:
     if run.status != "running":
         return "—", "—"
-    # ``recent_successes`` is category-wide (it can include a preceding
-    # partition or run), so divide by the same fixed 15-minute window for all
-    # modes. Using the new run's short elapsed time would turn a normal
-    # partition transition into an impossible burst rate and an optimistic
-    # ETA—especially after a service restart.
+    # recent_successes is category-wide, so always divide by the fixed 15-minute window.
     window_hours = 0.25
     rate_per_hour = run.recent_successes / window_hours
     traversal_rate_per_hour = run.recent_skips / window_hours
@@ -1020,16 +974,10 @@ def _rate_and_eta(
         and run.category in {"bills", "amendments"}
         and run.mode in {"aggregate", "backfill_descendants", "backfill_refresh_descendants"}
     ):
-        # Do not extrapolate a short burst across the rolling API window. The
-        # observed rate can exceed the sustainable aggregate before Rotisserie
-        # reaches each key's local reserve and begins waiting.
+        # Never extrapolate a burst past the sustainable rate.
         rate_per_hour = min(rate_per_hour, congress_rate_cap_per_hour)
-    # Full/backfill/aggregate runs fan out every source-list item and discover
-    # those descendants lazily, so use the source-reported list total when it
-    # is larger than the durable expected-fetch ledger. Incremental runs
-    # deliberately suppress unchanged parent child trees; their expected-fetch
-    # ledger is the correct changed-work denominator and a full seed total
-    # would turn a small refresh into a multi-hour false ETA.
+    # Full/backfill runs discover descendants lazily, so prefer the larger source list
+    # total; incremental runs skip unchanged subtrees, so their ledger is the right denominator.
     observed_total_modes = {
         "aggregate",
         "full",
@@ -1043,10 +991,7 @@ def _rate_and_eta(
         else run.expected
     )
     if run.category in {"bills", "amendments"}:
-        # A category can have root-detail and descendant runs at the same
-        # time.  Use the root lane's start time when locating its candidate
-        # logs; the aggregate category start may be much later because a
-        # descendant pre-pass started afterward.
+        # Use the root lane's own start time to find its logs.
         log_start = run.root_started_at or run.started_at
         candidate_total, wait_seconds = _root_log_summary(run.category, log_start)
         if candidate_total:
@@ -1061,11 +1006,7 @@ def _rate_and_eta(
                 f"0/h network; {traversal_rate_per_hour:.0f}/h traversal",
                 "pending network edges",
             )
-        # A unified descendant run discovers later Congress partitions only
-        # after the current four workers finish.  Its durable expected-fetch
-        # count therefore under-reports the real queue.  Prefer the latest
-        # child-coverage audit for that phase so the report does not claim
-        # completion in minutes while millions of child URLs remain.
+        # A unified descendant run under-reports its queue; prefer the child-coverage audit.
         category_backlog = (child_backlog_by_category or {}).get(run.category, child_backlog)
         if run.mode in {"aggregate", "backfill_descendants", "backfill_refresh_descendants"} and category_backlog:
             if rate_per_hour <= 0:
@@ -1159,11 +1100,7 @@ def render_report(
     for run in statuses:
         if guard_paused and run.status == "running":
             rate, eta = "paused", "retry scheduled"
-        # The guard is source-wide, but separate processes may still have a
-        # bounded reserve and be making progress (for example the amendment
-        # refresh lane while the larger bill lane waits).  Only label a lane
-        # as waiting when its own rolling window is idle; otherwise report its
-        # observed rate and ETA instead of hiding useful progress.
+        # Only report a lane as waiting when its own window is idle.
         elif (
             guard_quota_cooldown
             and run.status == "running"
@@ -1180,12 +1117,8 @@ def render_report(
             )
         current_congress = run.latest_congress
         if run.category in coverage:
-            # A completed supplemental/probe run can contain only one older
-            # partition (for example a GovInfo-first bill probe), even though
-            # the materialized archive is complete through a later Congress.
-            # Report the furthest authoritative partition observed by either
-            # source so the progress table cannot regress from 119 to the
-            # partition touched by a one-row repair.
+            # Report the furthest partition seen by either source so a one-row repair run
+            # can't make progress appear to regress.
             coverage_congress = coverage[run.category][5]
             if coverage_congress is not None:
                 current_congress = max(

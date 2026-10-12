@@ -1,10 +1,7 @@
-"""Fetch and extract visible text from Congress.gov and GovInfo HTML renditions.
+"""Fetch HTML renditions from Congress.gov and GovInfo and extract their visible text.
 
-This is a resumable, bounded lane.  It only reads HTML-looking links from the
-public rendition tables (including GovInfo bill-version packages) and never
-requests PDF or XML URLs.  Results are
-stored as append-only versions by URL and response hash; the public dbt text
-models join the latest successful extraction back to their source link.
+Only HTML links are fetched (never PDF or XML). Results are stored as append-only
+versions by URL and response hash.
 """
 
 from __future__ import annotations
@@ -89,22 +86,14 @@ def is_supported_html_url(value: str) -> bool:
     parsed = urlparse(value)
     if parsed.scheme != "https" or parsed.hostname not in ALLOWED_HOSTS:
         return False
-    # Amendment ``html`` fields currently point to Congressional Record pages,
-    # not amendment-text renditions. Congressional Record is intentionally
-    # paused in the main-11 scope, so retain those links as source data but do
-    # not enqueue them for extraction.
+    # Amendment html links point to Congressional Record pages (out of scope), not amendment text.
     if parsed.hostname in CONGRESS_HOSTS and "/crec/" in parsed.path.lower():
         return False
     return bool(HTML_URL_RE.search(parsed.path + ("?" + parsed.query if parsed.query else "")))
 
 
 def request_url_for(value: str) -> str:
-    """Add a rotated GovInfo API key only to the outbound request URL.
-
-    Stored/source URLs remain unchanged.  GovInfo HTML renditions are exposed
-    as authenticated ``/htm`` API paths, while Congress.gov renditions are
-    public and must not receive an unrelated query parameter.
-    """
+    """Add a GovInfo API key to the outbound URL only; stored URLs never carry it."""
 
     parsed = urlparse(value)
     if parsed.hostname != GOVINFO_HOST:
@@ -169,10 +158,7 @@ def extract_visible_text(content: bytes, content_type: str | None = None) -> str
         decoded = content.decode(charset or "utf-8", errors="replace")
     except LookupError:
         decoded = content.decode("utf-8", errors="replace")
-    # Some GovInfo HTML renditions contain embedded NUL control bytes. They
-    # are legal in the HTTP payload but PostgreSQL text fields reject them;
-    # remove only this non-document control character while retaining the raw
-    # response hash and all visible content around it.
+    # PostgreSQL text rejects NUL bytes, which some GovInfo pages contain.
     decoded = decoded.replace("\x00", "")
     parser = VisibleTextParser()
     parser.feed(decoded)
@@ -213,19 +199,11 @@ def _fetch_sync(
     *,
     retry: bool = True,
 ) -> FetchResult:
-    """Fetch one URL synchronously.
-
-    Direct callers retain the original three-attempt behavior.  The async
-    batch path passes ``retry=False`` and performs retries through its shared
-    host limiter instead; otherwise a retry would bypass pacing and amplify
-    source-side 429 responses.
+    """Fetch one URL. The batch path passes ``retry=False`` and retries through its
+    host limiter, so retries stay paced.
     """
     fetched_at = datetime.now(timezone.utc)
-    # ``requests`` applies its timeout to socket operations, not to the whole
-    # streamed response.  A source that keeps a connection alive while
-    # sending bytes can therefore hold one bounded-batch worker forever.  Keep
-    # a generous total budget for large HTML pages, but make every extraction
-    # demonstrably finite so the scheduler can advance its cursor.
+    # requests' timeout is per socket operation, so cap the whole streamed response too.
     operation_timeout = max(float(timeout), 0.1)
     overall_deadline = time.monotonic() + max(operation_timeout * 3.0, operation_timeout + 10.0)
     try:
@@ -281,8 +259,7 @@ def _fetch_sync(
             return FetchResult(url, response_hash, content_type, response.status_code, "empty", "", "no visible text", fetched_at)
         identity = inspect_bill_text_identity(url, text)
         if identity["status"] == "contradiction":
-            # Preserve the response hash and evidence, but do not publish this
-            # response as successful prose or infer a different bill target.
+            # Kept as evidence but not published as this bill's text.
             return FetchResult(url, response_hash, content_type, response.status_code,
                                "identity_conflict", None, json.dumps(identity, sort_keys=True), fetched_at)
         return FetchResult(url, response_hash, content_type, response.status_code, "success", text, None, fetched_at)
@@ -327,9 +304,7 @@ async def fetch_urls(
             pacing_lock = pacing_locks.setdefault(host, asyncio.Lock())
 
             async def paced_fetch() -> FetchResult:
-                # Every attempt, including a retry, must reserve a slot from
-                # the same host limiter.  This prevents concurrent workers
-                # from turning a 429 response into an unpaced retry burst.
+                # Every attempt, retries included, takes a slot from the host limiter.
                 async with pacing_lock:
                     now = time.monotonic()
                     delay = max(0.0, next_requests.get(host, 0.0) - now)
@@ -342,9 +317,7 @@ async def fetch_urls(
             for attempt in range(2):
                 if result.http_status not in RETRYABLE_HTTP_STATUSES:
                     break
-                # Keep the backoff outside the limiter, then reserve another
-                # paced slot for the retry.  This is intentionally bounded so
-                # one problematic URL cannot monopolize a worker.
+                # Back off outside the limiter, then take another slot.
                 await asyncio.sleep(2.0**attempt)
                 result = await paced_fetch()
             return result
@@ -406,8 +379,7 @@ def target_urls(
         if source_table is None:
             query = URL_SQL
         else:
-            # The table name and target column are selected from the constant
-            # allow-list above; they are never caller-provided SQL fragments.
+            # Table and column come from the allow-list above, never from the caller.
             column = TABLE_TARGET_COLUMNS[source_table]
             query = f"""
             select distinct source.{column} as url

@@ -1,14 +1,8 @@
-"""Recover exact raw-version lineage for legacy skipped fetch events.
+"""Backfill raw_response_version_id on legacy skipped-fetch rows, in bounded batches.
 
-Older backfill crawls recorded the current ``raw_response_id`` when they
-skipped an already stored URL, but predated the exact version reference.  A
-raw response with one retained version is unambiguous.  This command repairs
-those rows in bounded batches.  An opt-in temporal pass can also resolve
-multi-version rows when their event timestamp identifies exactly one retained
-payload; otherwise those rows remain null.
-
-New crawler writes already include ``raw_response_version_id``; this command
-is for the historical ledger only.  It is safe to stop and rerun.
+Older crawls recorded only raw_response_id for skipped URLs. A response with one
+retained version is unambiguous; the opt-in temporal pass picks the version
+current at the event time, rejecting ties. Safe to stop and rerun.
 """
 
 from __future__ import annotations
@@ -125,14 +119,8 @@ def repairable_count(connection: psycopg.Connection) -> int:
 
 
 def null_version_summary(connection: psycopg.Connection) -> list[tuple[str, int, int]]:
-    """Classify fetch rows that intentionally have no payload version.
-
-    Only ``skipped_existing_backfill`` rows with a stored raw response are
-    candidates for this repair.  Failed requests and same-run duplicate
-    discoveries have no payload to point at, so counting every NULL version as
-    a backlog is misleading.  Keep the diagnostic in the checkpoint so an
-    operator can distinguish a real lineage repair queue from expected
-    telemetry rows without scanning the archive manually.
+    """Split NULL-version fetch rows into the repairable backlog and rows that never
+    have a payload (failures, same-run duplicates).
     """
 
     rows = connection.execute(
@@ -150,14 +138,8 @@ def null_version_summary(connection: psycopg.Connection) -> list[tuple[str, int,
 
 
 def create_endpoint_candidates(connection: psycopg.Connection) -> None:
-    """Find conservative endpoint/time matches for legacy skipped rows.
-
-    A few early crawls recorded ``skipped_existing`` without retaining the
-    current raw-response ID.  The endpoint is still a unique key in
-    ``raw_responses``; when its event timestamp falls after exactly one
-    candidate version (the latest version first observed at or before the
-    event), the link is recoverable.  Same-timestamp version ties are rejected
-    rather than resolved arbitrarily.
+    """Match legacy rows lacking even a raw_response_id by endpoint and event time,
+    rejecting same-timestamp ties.
     """
 
     connection.execute("DROP TABLE IF EXISTS _fetch_lineage_endpoint_candidates")
@@ -320,14 +302,7 @@ def repair(
 
 
 def create_temporal_candidates(connection: psycopg.Connection) -> None:
-    """Materialize conservative choices for multi-version legacy fetch rows.
-
-    A skipped-existing event has no exact version pointer, but its event time
-    tells us which immutable payload could have been current.  We choose the
-    latest version first observed at or before that event and reject ties at
-    the timestamp, so this path never assigns an arbitrary version when the
-    archive evidence is insufficient.
-    """
+    """Pick the version first observed at or before each multi-version row's event, rejecting ties."""
 
     connection.execute("DROP TABLE IF EXISTS _fetch_lineage_multi_ids")
     connection.execute(

@@ -205,10 +205,8 @@ def _fixture_rows() -> list[tuple[str, str, str, str, dict, str | None]]:
             },
             None,
         ),
-        # A complete child generation followed by an explicit empty complete
-        # response. Both transport URLs normalize to one logical collection;
-        # the later empty generation must retire the earlier subject rather
-        # than leaving a stale public row behind.
+        # A full child generation then an empty one for the same collection: the empty
+        # one must retire the earlier row.
         (
             "https://api.congress.gov/v3/bill/118/hr/2/subjects?format=json&offset=0",
             "congress",
@@ -704,9 +702,6 @@ def _fixture_rows() -> list[tuple[str, str, str, str, dict, str | None]]:
                                 "url": "https://www.congress.gov/118/ams/samdt1/BILLS-118samdt1.pdf",
                             },
                             {
-                                # This is a source link carried by the
-                                # amendment endpoint, but Congressional Record
-                                # extraction is paused for the main-11 release.
                                 "type": "HTML",
                                 "url": "https://www.congress.gov/118/crec/2023/01/05/169/1/modified/CREC-2023-01-05-pt1-PgS1.htm",
                             },
@@ -1229,9 +1224,8 @@ def main() -> int:
                     fixture_index,
                 ),
             )
-        # Seed one successful out-of-scope extraction so the public amendment
-        # mart test proves the Congressional Record link is retained as source
-        # metadata but its prose is never exposed as amendment text.
+        # An out-of-scope extraction: the Congressional Record link must stay as metadata
+        # without its text appearing as amendment text.
         record_url = (
             "https://www.congress.gov/118/crec/2023/01/05/169/1/modified/"
             "CREC-2023-01-05-pt1-PgS1.htm"

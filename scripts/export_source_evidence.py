@@ -1,11 +1,7 @@
-"""Write a bounded, content-addressed bundle of immutable source payloads.
+"""Write a content-addressed bundle of selected raw_response_versions payloads.
 
-The research release contains public derived tables, but a manifest that only
-points at private raw IDs is not independently reproducible.  This small,
-explicitly bounded exporter packages selected ``raw_response_versions`` rows
-with sanitized endpoint identity and observation metadata.  It is read-only,
-does not alter the crawler archive. Endpoint metadata is sanitized, but payloads
-are preserved: inspect them for echoed credentials before distribution.
+Endpoint metadata is sanitized but payloads are not: check them for echoed
+credentials before distributing.
 """
 
 from __future__ import annotations

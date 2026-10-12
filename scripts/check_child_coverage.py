@@ -1,9 +1,7 @@
-"""Report missing stored responses for declared Congress child edges.
+"""Report declared Congress child edges with no stored response.
 
-The root-detail coverage check cannot detect a detail payload whose paginated
-children were never harvested.  This read-only audit expands each declared
-Congress child URL from the current raw payloads, normalizes it to an endpoint
-path, and compares it with the immutable current-response archive.
+Expands every child URL the current raw payloads declare and checks it
+against the current-response archive (read-only).
 """
 
 from __future__ import annotations
@@ -21,13 +19,7 @@ from bicam_collection.target_scope import TARGET_CONGRESS_CATEGORIES
 
 
 def _configure_audit_connection(connection: psycopg.Connection) -> None:
-    """Bound audit work and avoid orphaned parallel workers on cancellation.
-
-    The supervisor may terminate an audit shell while a JSON-expansion query is
-    still running.  PostgreSQL parallel workers can outlive that client long
-    enough to consume CPU, so this diagnostic deliberately uses one backend;
-    the indexed temporary response-path table still keeps the joins bounded.
-    """
+    """Statement timeout and no parallel workers, which can outlive a cancelled client."""
 
     connection.execute("set statement_timeout='120s'")
     connection.execute("set lock_timeout='15s'")
@@ -83,20 +75,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _paginated_item_coverage(connection: psycopg.Connection) -> dict[str, int] | None:
-    """Measure item-level coverage for paginated child collections.
+    """Item-level coverage for paginated bill cosponsors.
 
-    Endpoint-path coverage is sufficient for non-paginated children, but it
-    can hide one poisoned row in an otherwise recoverable page.  Congress.gov
-    currently exposes this failure mode on bill cosponsors: a 250-row page
-    returns HTTP 500 when one historical member term is malformed, while
-    smaller pages return every other row.  Count distinct returned items
-    against the source-reported pagination count and classify only the
-    shortfall on a repeated source-error path as an upstream gap.
-
-    Keep this query deliberately scoped to the known paginated child shape;
-    additional shapes can be added as their APIs demonstrate the same
-    behavior.  The endpoint-level audit remains the authoritative check for
-    whether a child response exists at all.
+    One malformed member term makes a 250-row page return 500 while smaller pages
+    work, so endpoint coverage can hide missing rows. The shortfall on a repeated
+    source-error path is classified as an upstream gap.
     """
 
     row = connection.execute(
@@ -189,12 +172,7 @@ def _paginated_item_coverage(connection: psycopg.Connection) -> dict[str, int] |
 def _nomination_nominee_item_coverage(
     connection: psycopg.Connection,
 ) -> dict[str, int] | None:
-    """Measure complete pagination for each nomination nominee group.
-
-    A nomination detail advertises one URL per nominee group/position, while
-    that URL is itself paginated. Merely observing the first response therefore
-    does not prove that every named nominee was harvested.
-    """
+    """Check every nominee-group URL was paginated to the end, not just fetched once."""
 
     row = connection.execute(
         """
@@ -286,11 +264,8 @@ def _collection_item_coverage(
     node_type: str,
     array_key: str,
 ) -> dict[str, int] | None:
-    """Compare source pagination counts with observed child rows.
-
-    Public marts may intentionally deduplicate repeated source objects. The
-    completeness check therefore uses observed rows, not distinct JSON hashes,
-    so duplicate-heavy pages do not become a false API backlog.
+    """Compare source pagination counts with observed rows (not distinct hashes,
+    which undercount duplicate-heavy pages).
     """
 
     row = connection.execute(
@@ -392,12 +367,8 @@ def run(*, database_url: str, project_root: Path) -> list[dict[str, object]]:
             on child_coverage_detail_paths(endpoint_path)
             """
         )
-        # A child URL can be declared by a parent while Congress.gov itself
-        # returns a durable 404 (for example a committee meeting's stale
-        # hearingTranscript link).  Keep those failures in the ledger, but do
-        # not report them as actionable crawler omissions.  A 500 needs three
-        # observations before it is treated as source-side, matching the root
-        # detail quality gate; a 404 is definitive on its first attempt.
+        # Source-side failures (a 404 at once, a 500 after three attempts) stay in the
+        # ledger but are not crawler omissions.
         connection.execute(
             """
             create temporary table child_coverage_source_errors as
@@ -420,16 +391,11 @@ def run(*, database_url: str, project_root: Path) -> list[dict[str, object]]:
             """
         )
         connection.execute("analyze child_coverage_source_errors")
-        # The temporary table has no inherited statistics.  Without ANALYZE,
-        # PostgreSQL often chooses repeated nested-loop scans for the edge
-        # joins once the raw archive grows into the millions of rows.
+        # Temp tables have no statistics; without ANALYZE the edge joins go nested-loop.
         connection.execute("analyze child_coverage_detail_paths")
         connection.commit()
         for category, parent_node, target_node, url_path, fallback_suffix, url_normalizer in edges:
-            # Mirror crawler semantics exactly: prefer URLs advertised in the
-            # payload; construct a suffix fallback only for parents that omit
-            # the advertised URL; finally apply any declarative edge URL
-            # normalization before testing coverage.
+            # Same URL resolution as the crawler: advertised URL, else suffix fallback, then normalization.
             query = """
                 with parents as (
                     select id, endpoint_url, response
@@ -566,10 +532,8 @@ def run(*, database_url: str, project_root: Path) -> list[dict[str, object]]:
                         **collection_items,
                     }
                 )
-        # Committee meetings and hearings are separate Congress.gov specs, so
-        # their transcript edge cannot be declared as an in-spec child edge.
-        # Keep it in the same audit: a meeting may reference a hearing, while
-        # many standalone hearings have no meeting at all.
+        # Meetings and hearings are separate specs, so the meeting -> hearing transcript
+        # edge is audited here explicitly.
         expected, fetched, source_gaps = connection.execute(
             """
             with expected as (
@@ -608,10 +572,7 @@ def run(*, database_url: str, project_root: Path) -> list[dict[str, object]]:
                 "missing": expected - fetched - source_gaps,
             }
         )
-        # The reverse edge is independently advertised by hearing details.
-        # A hearing can identify an associated committee meeting even when the
-        # meeting-side payload has no transcript link, so both directions must
-        # be harvested and audited without assuming one-to-one equivalence.
+        # And hearing -> meeting, which is advertised independently.
         expected, fetched, source_gaps = connection.execute(
             """
             with expected as (
@@ -724,11 +685,7 @@ def main(argv: list[str] | None = None) -> int:
             temporary.write(report)
             temporary_path = Path(temporary.name)
         temporary_path.replace(history_path)
-        # The long-lived latest path is normally a symlink to the newest
-        # timestamped artifact.  Never write through an old symlink: doing so
-        # would mutate historical evidence while leaving latest pointed at a
-        # stale filename. Replace the link atomically after the new artifact
-        # is durable.
+        # Write the new artifact, then swap the latest symlink; never write through it.
         if args.output.is_symlink() or args.output.name.endswith("-latest.txt"):
             with tempfile.NamedTemporaryFile(
                 "w", encoding="utf-8", dir=args.output.parent, delete=False

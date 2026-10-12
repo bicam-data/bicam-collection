@@ -1,9 +1,6 @@
-"""Write a durable report for the reconciliation source-gap queue.
+"""Report on the reconciliation source-gap queue.
 
-The report is safe to run from a scheduler.  Pushover support is intentionally
-opt-in and inert until ``--notify-pushover`` is supplied together with
-``PUSHOVER_TOKEN`` and ``PUSHOVER_USER``; no credentials are checked in or
-configured by the project.
+Pushover alerts are sent only with --notify-pushover plus PUSHOVER_TOKEN and PUSHOVER_USER.
 """
 
 from __future__ import annotations
@@ -100,12 +97,7 @@ def _write_atomic(path: Path, content: str) -> None:
 
 
 def _send_pushover(message: str) -> None:
-    """Send an explicitly requested Pushover notification.
-
-    This function is not called by normal scheduled reports.  Keeping the
-    integration behind both a CLI switch and environment credentials makes it
-    possible to enable later without wiring secrets into the crawler.
-    """
+    """Send a Pushover notification (only when explicitly requested)."""
 
     token = os.environ.get("PUSHOVER_TOKEN")
     user = os.environ.get("PUSHOVER_USER")

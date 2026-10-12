@@ -1,10 +1,7 @@
-"""Fetch missing historical Congress list pages without fanning out children.
+"""Fetch missing Congress list pages without fanning out to children.
 
-The main historical workers deliberately walk stored descendants.  This small
-repair pass closes known root-list page gaps in parallel with that work, while
-leaving the stored payloads available for the normal descendant backfill later.
-It is intentionally bounded by the current pagination-coverage snapshot and
-uses ``backfill_descendants`` so a page fetched by another worker is skipped.
+Bounded by the current pagination-coverage snapshot; uses backfill_descendants
+so pages another worker stored are skipped.
 """
 
 from __future__ import annotations
@@ -60,8 +57,6 @@ def load_gaps(database_url: str, categories: list[str]) -> list[tuple[str, str, 
 
 
 def root_only_spec(spec):
-    # Work on the loaded in-memory spec only.  The normal crawler specs retain
-    # all child edges, so subsequent descendant backfills are unaffected.
     for node in spec.nodes.values():
         node.child_edges = []
         node.linked_item_edges = []
@@ -102,8 +97,7 @@ async def run(args: argparse.Namespace) -> int:
     try:
         for category, partition_value, gap_start, gap_end in gaps:
             spec = specs[category]
-            # ``*`` is an unpartitioned root such as the congressional-record
-            # index; partitioned families append their Congress number.
+            # ``*`` marks an unpartitioned root.
             root_path = spec.seed.path.rstrip("/")
             if partition_value != "*":
                 root_path += f"/{partition_value}"

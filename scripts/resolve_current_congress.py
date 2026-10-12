@@ -1,12 +1,4 @@
-"""Resolve the newest Congress observed in the durable Congress.gov archive.
-
-The unfiltered ``/congress`` list is refreshed by the scheduled ingestion
-lanes. Reading the maximum detail URL from ``raw_responses`` after that
-refresh lets current-Congress probes follow a newly opened Congress without a
-hard-coded upper bound. ``BICAM_CURRENT_CONGRESS`` is an explicit emergency
-override for recovery or controlled tests; it is never inferred from a
-partially fetched hearing table.
-"""
+"""Print the newest Congress in the archive (BICAM_CURRENT_CONGRESS overrides it)."""
 
 from __future__ import annotations
 

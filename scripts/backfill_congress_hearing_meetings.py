@@ -1,10 +1,6 @@
-"""Fetch committee meetings referenced by Congress hearing records.
+"""Fetch committee meetings that hearing records point to (``associatedMeeting``).
 
-The source relationship is asymmetric: a hearing can advertise an
-``associatedMeeting`` even when the committee-meeting list crawl has not
-stored that event, while many meetings are not hearings. This bounded repair
-follows only the explicit hearing-side URL and stores the payload in the
-canonical ``committee-meetings`` category with hearing provenance.
+Stored under committee-meetings with the hearing as parent.
 """
 
 from __future__ import annotations

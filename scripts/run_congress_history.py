@@ -1,10 +1,7 @@
-"""Run resumable Congress.gov crawls partitioned by Congress number.
+"""Crawl Congress.gov per Congress via the ``/<resource>/<congress>`` routes (1-current).
 
-The top-level Congress.gov list endpoints are not historical partitions: a
-date-window crawl can still return records from many Congresses.  This runner
-uses the documented ``/<resource>/<congress>`` roots so coverage can advance
-from Congress 1 (1789) through the current Congress without relying on an
-unbounded global list.
+The global list endpoints aren't partitioned by Congress, so they can't track
+historical coverage.
 """
 
 from __future__ import annotations
@@ -33,11 +30,8 @@ UNPARTITIONED_CATEGORIES = {
     "members",
 }
 
-# Keep partition workers moving past source-side defects while making
-# operational failures visible to the supervisor.  ``get_json`` attaches
-# status metadata both to HTTP errors and to transport/key-wait exceptions;
-# inspect both shapes here so the durable worker log can distinguish a URL
-# that should be retried from a partition that needs operator attention.
+# Count fetch failures and keep going; the error log separates retryable URLs
+# from partitions that need attention.
 _RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429, 502, 503, 504, 520, 522, 523, 524})
 
 
@@ -58,8 +52,7 @@ def _classify_partition_exception(exc: BaseException) -> str:
     text = str(exc).lower()
     if any(marker in text for marker in ("timed out", "temporarily unavailable", "connection reset")):
         return "retryable"
-    # Configuration, specification, and database errors should stop the
-    # runner instead of being silently counted as a missing partition.
+    # Configuration, spec and database errors stop the runner.
     return "fatal"
 
 
@@ -76,10 +69,7 @@ def parse_args(argv: list[str] | None = None, *, project_root: Path | None = Non
     parser.add_argument("--categories", nargs="*", choices=choices, default=list(DEFAULT_CATEGORIES))
     parser.add_argument("--congress-start", type=int, default=1)
     parser.add_argument("--congress-end", type=int, default=119)
-    # ``resume`` applies the category high-water mark and would incorrectly
-    # exclude old Congresses.  ``full`` is idempotent at the URL level and is
-    # the safe historical default; callers may still choose resume only when
-    # they supply an explicit date window in a future extension.
+    # Not resume: its high-water mark would skip old Congresses.
     parser.add_argument(
         "--mode",
         choices=["full", "refresh", "resume", "backfill_descendants"],
@@ -180,11 +170,7 @@ async def run_history(args: argparse.Namespace, *, project_root: Path) -> int:
     }
     store = AsyncPostgresStore(settings.database_url)
     jobs = asyncio.Queue[Job]()
-    # Interleave partitioned categories by Congress.  Queueing every bill
-    # partition before the first amendment (or hearing, etc.) partition lets a
-    # small worker pool starve later entity types for days.  The shared client
-    # still enforces the same aggregate API budget; this only keeps progress
-    # observable and resumable across all requested categories.
+    # Interleave categories by Congress so one category can't starve the others.
     for job in _ordered_jobs(categories, args.congress_start, args.congress_end):
         jobs.put_nowait(job)
 
