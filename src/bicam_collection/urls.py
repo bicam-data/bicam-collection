@@ -6,16 +6,8 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 
 def _sorted_query(query: str) -> str:
-    """Return a deterministic encoding for an URL query string.
-
-    Congress.gov pagination links have been observed with the same parameters
-    in different orders (for example ``offset,limit,format`` versus
-    ``offset,format,limit``).  Query order is not meaningful for these APIs,
-    but it is part of the stored URL key, so normalize it before deduplication.
-    Keep repeated parameters rather than collapsing them while sorting by key
-    and value.
-    """
-
+    # Pagination links arrive with the same parameters in different orders,
+    # and the URL is the storage key, so sort them (keeping repeats).
     return urlencode(sorted(parse_qsl(query, keep_blank_values=True)), doseq=True)
 
 
@@ -64,7 +56,6 @@ def replace_query_params(url: str, params: Mapping[str, str | int | None]) -> st
 
 
 def _remove_query_parameters(url: str, names: set[str]) -> str:
-    """Remove query parameters by name without treating case as significant."""
     parsed = urlparse(url)
     excluded = {name.lower() for name in names}
     query = [
@@ -88,15 +79,8 @@ def append_url_path(url: str, suffix: str) -> str:
 
 
 def normalize_congress_treaty_committees_url(url: str) -> str:
-    """Canonicalize a treaty-committee child without losing its treaty part.
-
-    Most treaty routes are ``/treaty/{congress}/{number}/committees``, but
-    multipart treaties use ``/treaty/{congress}/{number}/{part}/committees``.
-    The latter is not equivalent to the unsuffixed route: Congress.gov returns
-    404 for some multipart treaties when the part (for example ``A`` or ``B``)
-    is omitted.  Preserve whichever route the detail payload or fallback
-    parent supplied while removing only a redundant trailing slash.
-    """
+    """Strip a trailing slash but keep the optional treaty part (``/treaty/118/1/A/committees``);
+    Congress.gov 404s some multipart treaties without it."""
     parsed = urlparse(url)
     path = re.sub(r"/committees/+$", "/committees", parsed.path)
     if not re.search(
@@ -107,10 +91,8 @@ def normalize_congress_treaty_committees_url(url: str) -> str:
 
 
 def canonicalize_congress_api_url(url: str) -> str:
-    # Congress authentication is normally sent in the ``X-Api-Key`` header,
-    # but the public API also accepts a query parameter.  Canonical URLs are
-    # persisted as durable raw-archive keys, so never allow a credential to
-    # become part of that identity if a caller supplies one.
+    # Canonical URLs are permanent storage keys, so a key passed as a query
+    # parameter must never end up in one.
     without_credentials = _remove_query_parameters(
         normalize_url(url), {"api_key", "apikey"}
     )
@@ -130,16 +112,11 @@ def canonicalize_url(url: str, source: str) -> str:
 
 
 def congress_source_fallback_url(url: str, *, node_type: str) -> str | None:
-    """Return a source-compatible retry spelling for a known Congress defect.
+    """Reorder a hearing-list query to ``offset,limit,format``.
 
-    The hearing list endpoint has, at specific offsets, returned a Django
-    ``NoReverseMatch`` 500 when its query parameters are sent in the normal
-    canonical order (``format,limit,offset``).  The same page is served when
-    the parameters use the order emitted by older Congress links
-    (``offset,limit,format``).  Keep canonical URLs stable for storage and
-    deduplication, but allow the crawler one bounded request fallback when the
-    source explicitly identifies this error.  Other endpoints and query
-    shapes intentionally return no fallback.
+    Some hearing-list offsets return a NoReverseMatch 500 in canonical order
+    but succeed in the order older Congress links used. Returns None for any
+    other endpoint.
     """
     if node_type != "hearing_list":
         return None

@@ -21,12 +21,8 @@ TYPE_FIELDS = {
     ("committee_reports", "report_type"): {"hrpt", "srpt", "erpt", "ccrpt"},
 }
 SEMANTIC_ENUMS = {
-    "chamber": set(CHAMBERS.values()),
-    "origin_chamber": set(CHAMBERS.values()),
-    "current_chamber": set(CHAMBERS.values()),
-    "bill_type": {"hr", "s", "hres", "sres", "hjres", "sjres", "hconres", "sconres"},
-    "amendment_type": {"hamdt", "samdt", "suamdt"},
-    "report_type": {"hrpt", "srpt", "erpt", "ccrpt"},
+    **{column: set(CHAMBERS.values()) for column in CHAMBER_COLUMNS},
+    **{column: values for (_, column), values in TYPE_FIELDS.items()},
 }
 SEMANTIC_REGEXES = {
     "source_system_code": re.compile(r"^[0-9]+(?:\.0+)?$"),
@@ -57,9 +53,7 @@ def normalize_value(table: str, column: str, value: str | None) -> tuple[str | N
     if value is None or value == "":
         return value, None
     if column in CHAMBER_COLUMNS:
-        # Casing is never a semantic inference.  Normalize it even when the
-        # vocabulary is unknown, while retaining an exception so a reviewer
-        # can decide whether the value belongs in the declared domain.
+        # Lowercasing is safe even for unknown values; those still get flagged for review.
         lowered = value.strip().lower()
         result = CHAMBERS.get(lowered)
         return (result, None) if result else (lowered, "unreviewed_chamber_value")

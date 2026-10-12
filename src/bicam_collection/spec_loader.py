@@ -101,7 +101,7 @@ def load_spec(path: Path) -> CrawlSpec:
             node_type=payload["seed"]["node_type"],
             requires_partition=bool(payload["seed"].get("requires_partition", False)),
         ),
-            refresh_root_node_type=refresh_root_node_type,
+        refresh_root_node_type=refresh_root_node_type,
         nodes=nodes,
     )
 
