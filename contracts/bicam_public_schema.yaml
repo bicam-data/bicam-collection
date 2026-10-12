@@ -1,4 +1,4 @@
-contract_version: 3
+contract_version: 4
 contract_kind: public_product_schema
 product:
   name: bicam
@@ -18,6 +18,10 @@ product:
     Legacy identifier crosswalks are not part of the core product. They remain
     explicitly named relations so a future external-crosswalk release can add
     them without changing the core table names or grains.
+  text_normalization_policy: >-
+    Every public chamber, origin_chamber, and current_chamber value is trimmed
+    and lowercase. Null and empty source values remain null; no chamber is
+    inferred solely from casing.
 naming:
   main_table_count: 11
   main_tables:
@@ -167,6 +171,7 @@ families:
     columns: {committee_code: text, name: text, chamber: text, is_subcommittee: boolean, is_current: boolean, bills_count: integer, reports_count: integer, nominations_count: integer, updated_at: timestamptz}
     children:
       - {table: committees_bills, source_file: committees_bills.csv, purpose: Committee bill listing, grain: one committee-to-bill edge, primary_key: [committee_code, bill_id], required_columns: [committee_code, bill_id], foreign_keys: {committee_code: committees.committee_code, bill_id: bills.bill_id}, feature_status: core-now, columns: {committee_code: text, bill_id: text, relationship_type: text, committee_action_date: date, updated_at: timestamptz}}
+      - {table: committees_members, source_file: committees_members.csv, purpose: Committee membership from official Congressional Directory assignment observations, grain: one committee-to-member edge per Congress, primary_key: [committee_code, bioguide_id, congress], required_columns: [committee_code, bioguide_id, congress], foreign_keys: {committee_code: committees.committee_code, bioguide_id: members.bioguide_id}, feature_status: core-now, columns: {committee_code: text, bioguide_id: text, congress: integer, chamber: text, role: text}}
       - {table: committees_committeereports, source_file: committees_committeereports.csv, purpose: Committee report listing, grain: one committee-to-report edge, primary_key: [committee_code, report_id], required_columns: [committee_code, report_id], foreign_keys: {committee_code: committees.committee_code, report_id: committee_reports.report_id}, feature_status: core-now, columns: {committee_code: text, report_id: text}}
       - {table: committees_history, source_file: committees_history.csv, purpose: Committee name and authority history, grain: one committee historical interval, primary_key: [committee_code, started_at], required_columns: [committee_code, started_at], foreign_keys: {committee_code: committees.committee_code}, feature_status: core-now, columns: {committee_code: text, name: text, loc_name: text, started_at: date, ended_at: date, committee_type: text, establishing_authority: text, su_doc_class_number: text, nara_id: text, loc_linked_data_id: text, updated_at: timestamptz}}
       - {table: committees_subcommittees, source_file: committees_subcommittees.csv, purpose: Committee hierarchy edge, grain: one parent-to-subcommittee edge, primary_key: [committee_code, subcommittee_code], required_columns: [committee_code, subcommittee_code], foreign_keys: {committee_code: committees.committee_code, subcommittee_code: committees.committee_code}, feature_status: core-now, columns: {committee_code: text, subcommittee_code: text}}
@@ -343,6 +348,8 @@ supplemental_relations:
       govinfo_package_id: text
       version_code: text
       version_variant: integer
+      rendition_suffix: text
+      starprint_number: integer
       formatted_text: text
       raw_text: text
       title: text
@@ -374,4 +381,4 @@ supplemental_relations:
       govinfo_version_code: text
       link_status: text
       link_rule: text
-      link_confidence: numeric
+      link_confidence: numeric_2

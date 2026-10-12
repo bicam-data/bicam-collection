@@ -1,0 +1,65 @@
+contract_version: 1
+status: active_preparation_not_release_accepted
+supersedes: contracts/bicam_updated_export.yaml
+scope_change_authority: user_request_2026_09_10
+objective: >-
+  Export 119th Congressional data across all eleven BICAM families and their
+  children in Parquet, matching original BICAM structure and semantic patterns,
+  excluding extracted full-text bodies.
+congress: 119
+source_snapshot: 20260910T050147Z
+selection_implementation: src/bicam_collection/export_scope.py
+root_rules:
+  bills: congress = 119
+  amendments: congress = 119
+  committee_meetings: congress = 119
+  committee_prints: congress = 119
+  committee_reports: congress = 119
+  hearings: congress = 119
+  nominations: congress = 119
+  congresses: congress_number = 119
+  treaties: congress_received = 119 OR congress_considered = 119
+  members: >-
+    Members with a members_terms record for Congress 119, including members who
+    served earlier in that Congress but are no longer current. Additional member
+    references required by selected records are dependency-only inclusions.
+  committees: >-
+    Committees and subcommittees with verified Congress-119 activity or service
+    evidence, plus necessary parent committees. Do not infer Congress scope from
+    an unqualified current flag alone.
+children:
+  ownership: Include all owned child and indirect descendant records of primary selected roots.
+  explicit_congress: >-
+    Restrict Congress-bearing histories (particularly member terms and leadership
+    roles) to 119; preserve root descriptive metadata and undated owned records.
+  dependencies: >-
+    Preserve cross-Congress reference edges. Retain only required older reference
+    roots as separately labelled dependency inclusions; do not expand their
+    unrelated family histories or claim they are primary Congress-119 records.
+  inclusion_evidence: sidecar_only_no_extra_public_columns
+dates:
+  creation_update_cutoff: none
+  missing_updated_at: not_a_Congress_scope_exclusion
+  source_timestamp_repairs: optional_metadata_improvement_not_selection_prerequisite
+semantics:
+  implementation: src/bicam_collection/export_semantics.py
+  canonical_chambers: [house, senate, joint, nochamber]
+  joint_hearings: remain_joint_never_duplicate_into_house_and_senate
+  unknown_values: preserve_and_review_do_not_guess_or_silently_drop
+  identifiers: preserve_unless_evidence_backed_repair_updates_all_references
+  names_and_prose: preserve_case_and_content
+format:
+  type: parquet
+  original_schema_contract: contracts/bicam_public_schema.yaml
+  postgres_schema: bicam
+  extracted_full_text: NULL_raw_text_columns_preserve_URLs_actions_and_summaries
+  supplemental_bill_versions: outside_original_schema_package
+  unavailable_original_crosswalk: bills_lobbied
+acceptance:
+  - Verify one frozen source inventory and the original column/type/grain contract.
+  - Apply Congress-119 family and child rules with transparent reference closure.
+  - Do not omit Congress-119 records because their timestamps or metadata are missing.
+  - Resolve missing hearing parents and assess incomplete amendment/detail records.
+  - Verify non-full-text feature completeness or document agreed source limitations.
+  - Validate semantic domains and all primary/foreign keys after normalization and selection.
+  - Roundtrip every Parquet table through disposable Postgres before release acceptance.

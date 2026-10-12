@@ -1,0 +1,63 @@
+contract_version: 1
+status: superseded_by_user_scope_change
+superseded_by: contracts/bicam_119_export.yaml
+supersession_reason: User replaced creation/update cutoff with Congress-119 family scope.
+objective: >-
+  Export all eleven BICAM families and children for source records created or
+  updated on or after January 1, 2025, matching original BICAM semantic patterns.
+source_snapshot: 20260910T050147Z
+cutoff: '2025-01-01T00:00:00+00:00'
+date_policy:
+  qualifying_fields: [created_at, updated_at]
+  operator: any_nonnull_timestamp_greater_than_or_equal_to_cutoff
+  timezone: UTC
+  forbidden_substitutions: [introduced_at, received_at, meeting_date, fetched_at, first_seen_at, export_time]
+  unknown_timestamp_policy: unresolved_not_before_cutoff
+  public_created_at_columns_present: false
+  child_policy: >-
+    Include all children of date-qualified roots, including indirect descendants.
+    A separately date-qualified child must also retain its owning root even if
+    the root timestamp is old; report this inclusion reason separately.
+  reference_policy: >-
+    Compute required parent/reference rows separately from date-qualified roots.
+    Keep inclusion reasons in a sidecar, not extra public columns. Do not silently
+    claim dependency-only historical records passed the date filter. Do not expand
+    an old dependency root into its entire unrelated child history.
+  congress_timestamp_evidence: >-
+    Use verified $.congress.updateDate evidence from the unique retained raw
+    version observed before the snapshot, matching frozen root fields. Never use
+    congress start_year or crawl timestamps as a creation/update proxy.
+semantic_policy:
+  implementation: src/bicam_collection/export_semantics.py
+  chamber_fields: [chamber, origin_chamber, current_chamber]
+  canonical_chambers: [house, senate, joint, nochamber]
+  unknown_categories: preserve_and_flag_for_review
+  joint_rule: never_duplicate_into_house_and_senate
+  identifiers: >-
+    No blanket lowercasing, O-to-0 replacement or relinking. Every identity change
+    needs evidence and matching changes in dependent references.
+  free_text: preserve_case_and_content
+  nulls: preserve_SQL_null_empty_string_and_literal_null_marker_distinctions
+  original_inconsistencies: >-
+    Use explicit reviewed canonical patterns; do not replicate corrupted rows or
+    inconsistent casing merely because both occurred in the published archive.
+format:
+  type: parquet
+  postgres_schema: bicam
+  core_schema: contracts/bicam_public_schema.yaml
+  extra_public_provenance_columns: false
+  extracted_full_text: >-
+    Exclude document raw_text content while preserving the original column as
+    nullable and retaining document URLs, actions, summaries and other metadata.
+  supplemental_bill_version_tables: separate_from_original_schema_package
+  unavailable_original_table: bills_lobbied
+acceptance:
+  - Resolve or explicitly document unknown source dates without silently dropping records.
+  - Verify all source file hashes, headers and counts against one frozen inventory.
+  - Verify original table/column/type/grain compatibility and reviewed semantic domains.
+  - Restore verified original non-text features or record any user-approved exclusions.
+  - Resolve missing required parents; do not hide failures by dropping document rows.
+  - Validate normalized primary keys and foreign keys after transformations and selection.
+  - Keep date-qualified, child-owned and dependency-only inclusion evidence separate.
+  - Roundtrip all Parquet values through a disposable PostgreSQL database.
+  - Never label a candidate complete while any required acceptance item is unresolved.
