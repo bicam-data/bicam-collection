@@ -5,5 +5,5 @@ Description=BICAM lane failure alert for %i
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/rdelano/bicam/bicam-collection
-ExecStart=/home/rdelano/bicam/bicam-collection/.venv/bin/python /home/rdelano/bicam/bicam-collection/scripts/alert_lane_failure.py --unit %i
+WorkingDirectory=%h/bicam/bicam-collection
+ExecStart=%h/bicam/bicam-collection/.venv/bin/python %h/bicam/bicam-collection/scripts/alert_lane_failure.py --unit %i

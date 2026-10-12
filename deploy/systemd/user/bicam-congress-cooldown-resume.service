@@ -1,0 +1,11 @@
+[Unit]
+Description=Resume Congress ingestion after the observed API cooldown
+After=docker.service
+
+[Service]
+Type=oneshot
+# Resume both the historical bill/amendment lanes and the 11-category
+# incremental/reconciliation lane once the shared API window has reset. The
+# ingestion flock serializes them, so this does not create overlapping key
+# pools; each lane remains independently checkpointed and restartable.
+ExecStart=/usr/bin/systemctl --user start bicam-congress-per-key-refresh-persistent.service bicam-congress-partition-queue-persistent.service bicam-congress-incremental-refresh.service

@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh supplemental Congress.gov endpoint families every six hours
+
+[Timer]
+# Anchor the six-hour lane to explicit UTC wall-clock windows.  This avoids
+# stale monotonic events being replayed after a user-manager restart.
+OnCalendar=*-*-* 00/6:00:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+Unit=bicam-congress-supplemental-refresh.service
+
+[Install]
+WantedBy=timers.target

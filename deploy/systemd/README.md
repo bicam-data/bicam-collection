@@ -21,7 +21,7 @@ What gets installed:
 lane records a stderr line instead of a row (the lane itself is unaffected).
 
 ```bash
-cd /home/rdelano/bicam/bicam-collection
+cd ~/bicam/bicam-collection
 uv run python scripts/run_migrations.py
 ```
 
@@ -30,7 +30,7 @@ Expected output includes `016_lane_runs.sql`.
 ## 2. Install the units
 
 ```bash
-cd /home/rdelano/bicam/bicam-collection
+cd ~/bicam/bicam-collection
 mkdir -p ~/.config/systemd/user/bicam-.service.d
 cp deploy/systemd/bicam-.service.d/10-lane-status.conf ~/.config/systemd/user/bicam-.service.d/10-lane-status.conf
 cp deploy/systemd/alert-bicam-lane@.service ~/.config/systemd/user/alert-bicam-lane@.service

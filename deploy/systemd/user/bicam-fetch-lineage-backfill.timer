@@ -1,0 +1,14 @@
+[Unit]
+Description=Continue bounded raw-response fetch-lineage repair
+
+[Timer]
+# Use a fixed cadence so a lock-busy attempt cannot leave the timer without a
+# next elapse.  The service still serializes through the shared lock; a timer
+# tick during another lane is therefore a bounded, database-only retry.
+OnCalendar=*:00/15
+AccuracySec=1min
+Persistent=true
+Unit=bicam-fetch-lineage-backfill.service
+
+[Install]
+WantedBy=timers.target

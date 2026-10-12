@@ -1,0 +1,11 @@
+[Unit]
+Description=Bicam gap-free GovInfo incremental windows
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam/bicam-collection
+ExecStart=%h/bicam/bicam-collection/ops/run_govinfo_incremental_windows.sh
+MemoryMax=1G
+TasksMax=256
+TimeoutStartSec=1h

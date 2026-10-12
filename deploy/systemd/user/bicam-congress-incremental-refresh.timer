@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh all Congress.gov source categories every six hours
+
+[Timer]
+# Anchor the six-hour lane to explicit UTC wall-clock windows.  This avoids
+# stale boot-relative events being replayed after a user-manager restart.
+OnCalendar=*-*-* 00/6:00:00 UTC
+RandomizedDelaySec=5min
+Persistent=true
+Unit=bicam-congress-incremental-refresh.service
+
+[Install]
+WantedBy=timers.target

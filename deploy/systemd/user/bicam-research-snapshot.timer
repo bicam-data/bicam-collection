@@ -1,0 +1,13 @@
+[Unit]
+Description=Create a daily portable Bicam research snapshot
+
+[Timer]
+# Run once daily; the six-hour report timer continues to publish operational
+# status and manifests without duplicating this comparatively large export.
+OnCalendar=*-*-* 05:00:00 UTC
+AccuracySec=5min
+Persistent=true
+Unit=bicam-research-snapshot.service
+
+[Install]
+WantedBy=timers.target

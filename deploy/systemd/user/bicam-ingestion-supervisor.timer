@@ -1,0 +1,14 @@
+[Unit]
+Description=Re-run the Bicam ingestion supervisor after each completed pass
+
+[Timer]
+# The supervisor is intentionally long-running for the historical backfill.
+# Start the next idempotent pass six hours after it becomes inactive; this
+# avoids overlapping API-key pools while ensuring residual failures and newly
+# exposed descendants continue to be harvested after the current pass exits.
+OnUnitInactiveSec=6h
+Persistent=true
+Unit=bicam-ingestion-supervisor.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run BICAM HTML text extraction in bounded batches
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=10min
+RandomizedDelaySec=30s
+AccuracySec=1min
+Persistent=true
+Unit=bicam-html-text.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Bicam GovInfo CDIR and targeted treaty-document refresh
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam/bicam-collection
+ExecStart=%h/bicam/bicam-collection/ops/run_govinfo_supplemental_refresh.sh
+MemoryMax=1G
+TasksMax=256
+TimeoutStartSec=1h

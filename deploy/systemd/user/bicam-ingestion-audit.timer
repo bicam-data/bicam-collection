@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Bicam ingestion audit every six hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+AccuracySec=1min
+Persistent=true
+Unit=bicam-ingestion-audit.service
+
+[Install]
+WantedBy=timers.target

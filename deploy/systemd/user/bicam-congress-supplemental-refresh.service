@@ -1,0 +1,12 @@
+[Unit]
+Description=Bicam bounded supplemental Congress.gov endpoint-family refresh
+After=docker.service bicam-congress-supplemental-history.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam
+ExecStart=%h/bicam/bicam-collection/ops/run_congress_supplemental_refresh.sh
+TimeoutStartSec=4h
+KillMode=control-group
+MemoryMax=1G
+TasksMax=512

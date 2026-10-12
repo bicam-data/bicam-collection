@@ -1,0 +1,13 @@
+[Unit]
+Description=Repair legacy raw-response fetch lineage in bounded batches
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam
+# Invoke through bash so a copied checkout cannot lose the wrapper's mode bit.
+ExecStart=/bin/bash %h/bicam/bicam-collection/ops/run_fetch_lineage_backfill.sh
+TimeoutStartSec=2h
+MemoryMax=1G
+TasksMax=256
+KillMode=control-group

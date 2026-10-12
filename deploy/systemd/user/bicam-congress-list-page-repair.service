@@ -1,0 +1,16 @@
+[Unit]
+Description=Bicam bounded Congress list-page source-error repair
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam/bicam-collection
+ExecStart=%h/bicam/bicam-collection/ops/run_congress_list_page_repair.sh
+RemainAfterExit=yes
+TimeoutStartSec=infinity
+KillMode=control-group
+TimeoutStopSec=60s
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

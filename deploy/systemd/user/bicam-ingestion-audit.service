@@ -1,0 +1,7 @@
+[Unit]
+Description=Bicam read-only ingestion and reconciliation audit
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam/bicam-collection
+ExecStart=%h/bicam/bicam-collection/ops/run_bicam_ingestion_audit.sh

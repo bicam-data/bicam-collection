@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh GovInfo congressional directories and treaty documents daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+AccuracySec=5min
+Persistent=true
+Unit=bicam-govinfo-supplemental-refresh.service
+
+[Install]
+WantedBy=timers.target

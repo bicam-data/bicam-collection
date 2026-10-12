@@ -1,0 +1,12 @@
+[Unit]
+Description=Run bounded amendment retries after cooldowns
+
+[Timer]
+OnActiveSec=30min
+OnUnitActiveSec=6h
+AccuracySec=1min
+Persistent=true
+Unit=bicam-amendment-retry-window.service
+
+[Install]
+WantedBy=timers.target

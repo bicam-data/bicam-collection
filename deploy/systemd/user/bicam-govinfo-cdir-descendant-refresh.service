@@ -1,0 +1,16 @@
+[Unit]
+Description=Bicam historical GovInfo Congressional Directory descendant refresh
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam/bicam-collection
+ExecStart=%h/bicam/bicam-collection/ops/run_govinfo_cdir_descendant_refresh.sh
+TimeoutStartSec=24h
+MemoryMax=1G
+TasksMax=256
+KillMode=control-group
+Environment=BICAM_GOVINFO_CDIR_LOCK_WAIT_SECONDS=21600
+
+[Install]
+WantedBy=default.target

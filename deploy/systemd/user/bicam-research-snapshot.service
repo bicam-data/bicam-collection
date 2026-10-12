@@ -1,0 +1,12 @@
+[Unit]
+Description=Bicam daily portable research snapshot and freshness check
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam/bicam-collection
+ExecStart=%h/bicam/bicam-collection/ops/run_research_snapshot.sh
+TimeoutStartSec=30m
+MemoryMax=1G
+TasksMax=256
+KillMode=control-group

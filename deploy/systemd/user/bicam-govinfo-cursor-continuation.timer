@@ -1,0 +1,12 @@
+[Unit]
+Description=Harvest all GovInfo collections in durable incremental windows
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+AccuracySec=1min
+Persistent=true
+Unit=bicam-govinfo-cursor-continuation.service
+
+[Install]
+WantedBy=timers.target

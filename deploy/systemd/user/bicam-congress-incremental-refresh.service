@@ -1,0 +1,12 @@
+[Unit]
+Description=Bicam gap-safe Congress incremental discovery and reconciliation
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bicam
+ExecStart=%h/bicam/bicam-collection/ops/run_congress_incremental_refresh.sh
+TimeoutStartSec=3h
+KillMode=control-group
+MemoryMax=1G
+TasksMax=512
